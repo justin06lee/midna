@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "clients/*/src",
+    "clients/*/test",
+    "scripts"
+  ],
+  "exclude": [
+    "clients/desktop"
+  ]
+}

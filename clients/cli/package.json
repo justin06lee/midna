@@ -1,0 +1,2 @@
+{ "name": "@midna/cli", "version": "0.1.0", "private": true, "type": "module", "bin": { "midna": "./src/main.ts" },
+  "dependencies": { "@midna/protocol": "workspace:*", "@midna/daemon": "workspace:*", "@midna/telegram": "workspace:*" } }

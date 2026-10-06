@@ -1,0 +1,28 @@
+{
+  "name": "midna",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "clients/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p clients/desktop --noEmit",
+    "test": "bun test",
+    "boundaries": "bun scripts/check-boundaries.ts",
+    "check": "bun run typecheck && bun run boundaries && bun test",
+    "dev": "bun clients/cli/src/main.ts serve",
+    "build": "bun scripts/build.ts",
+    "smoke": "bun scripts/smoke.ts",
+    "build:all": "bun scripts/build.ts --all"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0",
+    "@midna/protocol": "workspace:*",
+    "@midna/agent": "workspace:*",
+    "@midna/daemon": "workspace:*",
+    "@midna/telegram": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.31.0"
+  }
+}

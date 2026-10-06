@@ -1,0 +1,2 @@
+{ "name": "@midna/agent", "version": "0.1.0", "private": true, "type": "module", "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@midna/core": "workspace:*", "@midna/protocol": "workspace:*", "@justin06lee/yagami": "file:../../../yagami", "@modelcontextprotocol/sdk": "^1.31.0", "zod": "^4.1.0" } }
