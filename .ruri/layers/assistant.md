@@ -11,7 +11,7 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - **Agent provider and session behavior:** packages/agent/src/brain.ts, packages/agent/src/assistant.ts
 - **Midna tools:** packages/agent/src/tools.ts, packages/agent/src/mcp.ts
 - **System and wakeup prompts:** packages/agent/src/prompt.ts
-- **Brain availability and sign-in check:** packages/agent/src/check.ts, packages/agent/src/brain.ts
+- **Brain availability and sign-in check:** packages/agent/src/check.ts, packages/agent/src/brain.ts, packages/agent/test/check.test.ts
 - **Public exports:** packages/agent/src/index.ts
 
 ## How it works
@@ -26,7 +26,8 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - packages/agent/src/tools.ts — defines Midna's MCP tools and their episode context
 - packages/agent/src/prompt.ts — builds system and wakeup prompts
 - packages/agent/src/mcp.ts — handles an MCP request with a fresh episode-bound server
-- packages/agent/src/check.ts — checks that the selected brain can complete a real turn and reports sign-in failures
+- packages/agent/src/check.ts — runs a real brain turn and classifies sign-in and not-installed failures
+- packages/agent/test/check.test.ts — tests the brain check against yagami's real toApiError
 - packages/agent/src/index.ts — exports the layer's public API
 
 ## Rules and traps
@@ -37,6 +38,7 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - A chat brain session restarts after four idle hours or 40 turns.
 - Brain mode controls permissions: autonomous allows tools to run; ask restricts host actions.
 - Preserve authentication failure details from yagami so the user can be told how to sign in.
+- Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract.
 
 ## What it talks to
 

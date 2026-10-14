@@ -191,7 +191,8 @@
           "name": "Brain availability and sign-in check",
           "files": [
             "packages/agent/src/check.ts",
-            "packages/agent/src/brain.ts"
+            "packages/agent/src/brain.ts",
+            "packages/agent/test/check.test.ts"
           ]
         },
         {
@@ -228,7 +229,8 @@
         "packages/agent/src/tools.ts — defines Midna's MCP tools and their episode context",
         "packages/agent/src/prompt.ts — builds system and wakeup prompts",
         "packages/agent/src/mcp.ts — handles an MCP request with a fresh episode-bound server",
-        "packages/agent/src/check.ts — checks that the selected brain can complete a real turn and reports sign-in failures",
+        "packages/agent/src/check.ts — runs a real brain turn and classifies sign-in and not-installed failures",
+        "packages/agent/test/check.test.ts — tests the brain check against yagami's real toApiError",
         "packages/agent/src/index.ts — exports the layer's public API"
       ],
       "rules": [
@@ -237,7 +239,8 @@
         "A wakeup reaches the user only through message_user.",
         "A chat brain session restarts after four idle hours or 40 turns.",
         "Brain mode controls permissions: autonomous allows tools to run; ask restricts host actions.",
-        "Preserve authentication failure details from yagami so the user can be told how to sign in."
+        "Preserve authentication failure details from yagami so the user can be told how to sign in.",
+        "Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract."
       ],
       "edges": [
         "Core — supplies the store, settings, planning data, context, episodes, and time helpers",
@@ -323,7 +326,8 @@
           "name": "Machine discovery and installation",
           "files": [
             "clients/cli/src/discover.ts",
-            "clients/cli/src/install.ts"
+            "clients/cli/src/install.ts",
+            "clients/cli/src/main.ts"
           ]
         },
         {
@@ -362,6 +366,12 @@
           ]
         },
         {
+          "name": "Desktop today screen",
+          "files": [
+            "clients/desktop/src/screens/Today.tsx"
+          ]
+        },
+        {
           "name": "Desktop host integration",
           "files": [
             "clients/desktop/src/host.ts",
@@ -374,6 +384,14 @@
           "files": [
             "clients/desktop/src/style.css",
             "clients/desktop/src/ui.tsx"
+          ]
+        },
+        {
+          "name": "Desktop version and packaging",
+          "files": [
+            "clients/desktop/package.json",
+            "clients/desktop/src-tauri/Cargo.toml",
+            "clients/desktop/src-tauri/tauri.conf.json"
           ]
         }
       ],
@@ -409,6 +427,7 @@
       "files": [
         "clients/cli/src/main.ts — CLI entry point and commands",
         "clients/cli/src/install.ts — machine installation, pairing, and progress events",
+        "clients/cli/src/discover.ts — machine discovery with a timeout on health checks",
         "clients/telegram/src/bridge.ts — owner pairing, API exchange, and persistent delivery positions",
         "clients/desktop/src/useMidna.ts — desktop connection and conversation state",
         "clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition",
@@ -422,12 +441,97 @@
         "The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.",
         "Persist Telegram update offsets and Midna outbox sequence positions so restarts do not replay or miss deliveries.",
         "The desktop web view calls the Midna HTTP API with a device token; host-only operations go through host.ts.",
-        "The desktop can connect to an older host; normalizeStatus supplies fields that host does not report."
+        "The desktop can connect to an older host; normalizeStatus supplies fields that host does not report.",
+        "Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.",
+        "A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts."
       ],
       "edges": [
-        "Protocol — clients use MidnaClient and shared API types",
+        "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal",
         "Daemon — the CLI manages the host service; desktop and Telegram connect to its public API",
         "Host — CLI setup uses host configuration and service operations from the daemon package"
+      ]
+    },
+    "protocol": {
+      "summary": "This layer is the one client-facing contract for midna: Zod schemas in index.ts for wire messages and events, a MidnaClient for calling the daemon, and plain TypeScript types in hosting.ts for device discovery and install output. Every client, including the desktop app, CLI, and Telegram bridge, speaks only this API and has no side door into the daemon. A newcomer must grasp that these shapes are the public surface, so changing one changes what every client receives.",
+      "map": [
+        {
+          "name": "Wire message and event shapes",
+          "files": [
+            "packages/protocol/src/index.ts"
+          ]
+        },
+        {
+          "name": "Outbox items, delivery order, and quiet hours",
+          "files": [
+            "packages/protocol/src/index.ts"
+          ]
+        },
+        {
+          "name": "Client calls to the daemon (MidnaClient, errors)",
+          "files": [
+            "packages/protocol/src/index.ts"
+          ]
+        },
+        {
+          "name": "Device discovery shape",
+          "files": [
+            "packages/protocol/src/hosting.ts"
+          ]
+        },
+        {
+          "name": "Host install steps and install events",
+          "files": [
+            "packages/protocol/src/hosting.ts"
+          ]
+        },
+        {
+          "name": "Default port and service name",
+          "files": [
+            "packages/protocol/src/index.ts"
+          ]
+        }
+      ],
+      "flows": [
+        {
+          "name": "Host install as the desktop app drives it",
+          "steps": [
+            "Reach the machine (INSTALL_STEPS.reach)",
+            "Put midna on it (binary)",
+            "Check its brain (brain)",
+            "Start midna (start)",
+            "Pair this computer (pair)",
+            "Each step reports an InstallEvent, and the result comes back as the install JSON"
+          ]
+        },
+        {
+          "name": "Outbox item delivery",
+          "steps": [
+            "Midna creates an OutboxItem with kind, priority, and optional options",
+            "If deliverAfter is set, the item is held back (quiet hours)",
+            "When released for delivery, it is assigned its seq stream position",
+            "Clients receive it on the event stream",
+            "Any item can be replayed by its id"
+          ]
+        }
+      ],
+      "files": [
+        "packages/protocol/src/index.ts — the Zod wire schemas, MidnaClient, and the API's exports",
+        "packages/protocol/src/hosting.ts — types for devices and install output that the desktop app reads"
+      ],
+      "rules": [
+        "No client gets a side door into the daemon; all access goes through the types and MidnaClient defined here.",
+        "seq is assigned only when an OutboxItem is released for delivery, not when it is created.",
+        "deliverAfter holds an item back for quiet hours; clients may show it early.",
+        "An OutboxItem's options are suggested answers only; the user may still reply in free text.",
+        "The desktop app never speaks SSH itself; it drives hosting only through `midna devices --json` and `midna host install --json`.",
+        "DiscoveredDevice.id is a stable key of the form \"local\", \"makima:tenet\", or \"tailscale:tenet\"; keep it stable.",
+        "Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way."
+      ],
+      "edges": [
+        "Clients — the Bun CLI and Telegram bridge use only the public API these schemas and MidnaClient define",
+        "Daemon — the HTTP API and event stream carry the messages typed in index.ts",
+        "Host — the midna binary prints the JSON that hosting.ts describes for devices and installs",
+        "Desktop app — drives host discovery and installation through the hosting.ts shapes"
       ]
     }
   }

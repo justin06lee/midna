@@ -8,14 +8,16 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 ## Where to change what
 
 - **CLI commands:** clients/cli/src/main.ts
-- **Machine discovery and installation:** clients/cli/src/discover.ts, clients/cli/src/install.ts
+- **Machine discovery and installation:** clients/cli/src/discover.ts, clients/cli/src/install.ts, clients/cli/src/main.ts
 - **Telegram pairing and delivery:** clients/telegram/src/bridge.ts, clients/telegram/src/bot.ts
 - **Desktop connection and live conversation state:** clients/desktop/src/useMidna.ts, clients/desktop/src/screens/Main.tsx
 - **Desktop onboarding:** clients/desktop/src/screens/Welcome.tsx, clients/desktop/src/screens/Install.tsx, clients/desktop/src/host.ts
 - **Desktop chat:** clients/desktop/src/screens/Chat.tsx, clients/desktop/src/useMidna.ts
 - **Desktop settings:** clients/desktop/src/screens/Settings.tsx
+- **Desktop today screen:** clients/desktop/src/screens/Today.tsx
 - **Desktop host integration:** clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs, clients/desktop/vite.config.ts
 - **Desktop appearance and shared controls:** clients/desktop/src/style.css, clients/desktop/src/ui.tsx
+- **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
 
 ## How it works
 
@@ -27,6 +29,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 
 - clients/cli/src/main.ts — CLI entry point and commands
 - clients/cli/src/install.ts — machine installation, pairing, and progress events
+- clients/cli/src/discover.ts — machine discovery with a timeout on health checks
 - clients/telegram/src/bridge.ts — owner pairing, API exchange, and persistent delivery positions
 - clients/desktop/src/useMidna.ts — desktop connection and conversation state
 - clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition
@@ -42,9 +45,11 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - Persist Telegram update offsets and Midna outbox sequence positions so restarts do not replay or miss deliveries.
 - The desktop web view calls the Midna HTTP API with a device token; host-only operations go through host.ts.
 - The desktop can connect to an older host; normalizeStatus supplies fields that host does not report.
+- Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.
+- A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts.
 
 ## What it talks to
 
-- Protocol — clients use MidnaClient and shared API types
+- Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal
 - Daemon — the CLI manages the host service; desktop and Telegram connect to its public API
 - Host — CLI setup uses host configuration and service operations from the daemon package

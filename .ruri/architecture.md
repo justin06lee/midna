@@ -8,7 +8,7 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 ## The stack, top to bottom
 
 1. **Clients** — Bun CLI and Telegram Bot API bridge; both use the public Midna API (`clients/`) → `.ruri/layers/clients.md`
-2. **Protocol** — Zod wire schemas and MidnaClient define the client-facing API (`packages/protocol/`)
+2. **Protocol** — Zod wire schemas and MidnaClient define the client-facing API (`packages/protocol/`) → `.ruri/layers/protocol.md`
 3. **Daemon** — HTTP API, event stream, scheduler loop, and bridge supervision (`packages/daemon/src/ · 3 files`)
 4. **Assistant** — Chat and wakeup orchestration, prompts, yagami brain sessions, and MCP tools (`packages/agent/`) → `.ruri/layers/assistant.md`
 5. **Core** — SQLite-backed planning, memory, episode log, devices, context, schedule, outbox, and event bus (`packages/core/`)
