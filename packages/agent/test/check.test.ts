@@ -1,13 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { ApiError, AuthRequiredError, ProviderNotInstalledError } from "@justin06lee/yagami";
+import { ApiError, AuthRequiredError, ProviderNotInstalledError, toApiError } from "@justin06lee/yagami";
+import { BrainError } from "../src/brain.ts";
 import { brainProblem, howToSignIn } from "../src/check.ts";
 
 describe("telling a signed-out brain from a failing one", () => {
-  test("yagami's typed failure, carried as the cause of an ApiError", () => {
-    const err = new ApiError(503, "api_error", "claude: not logged in", { cause: new AuthRequiredError("claude", "claude (then /login)") } as never);
+  test("yagami's typed failure, thrown as is", () => {
+    expect(brainProblem(new AuthRequiredError("codex", "codex login"))).toEqual({ reason: "signed_out", loginCommand: "codex login" });
+    expect(brainProblem(new ProviderNotInstalledError("gemini", "npm i -g @google/gemini-cli"))).toEqual({ reason: "not_installed", installHint: "npm i -g @google/gemini-cli" });
+  });
+
+  test("yagami's API error, which keeps only the message", () => {
+    const err = toApiError(new AuthRequiredError("claude", "claude (then /login)"));
+    expect(err).toBeInstanceOf(ApiError);
     expect(brainProblem(err)).toEqual({ reason: "signed_out", loginCommand: "claude (then /login)" });
-    const missing = new ApiError(503, "api_error", "codex: CLI not found", { cause: new ProviderNotInstalledError("codex", "npm i -g @openai/codex") } as never);
+    const detailed = toApiError(new AuthRequiredError("codex", "codex login", "token expired (401). retry later"));
+    expect(brainProblem(detailed)).toEqual({ reason: "signed_out", loginCommand: "codex login" });
+    const missing = toApiError(new ProviderNotInstalledError("codex", "npm i -g @openai/codex"));
     expect(brainProblem(missing)).toEqual({ reason: "not_installed", installHint: "npm i -g @openai/codex" });
+    const missingWhy = toApiError(new ProviderNotInstalledError("gemini", "npm i -g @google/gemini-cli", "not on PATH"));
+    expect(brainProblem(missingWhy)).toEqual({ reason: "not_installed", installHint: "npm i -g @google/gemini-cli" });
+  });
+
+  test("a harness turn that failed, with yagami's failure as the BrainError's cause", () => {
+    const failure = new AuthRequiredError("gemini", "gemini (then /auth)");
+    const err = new BrainError(`gemini turn failed: ${failure.message}`, "s1", { cause: failure });
+    expect(brainProblem(err)).toEqual({ reason: "signed_out", loginCommand: "gemini (then /auth)" });
   });
 
   test("by code, when the error came from another copy of yagami", () => {
