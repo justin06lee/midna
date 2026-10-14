@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fromMakima, fromTailscale } from "../src/discover.ts";
-import { dq, explainSsh, findBuild, platformOf, signInHint } from "../src/install.ts";
+import { dq, explainSsh, findBuild, platformOf, signInHint, sshControlPath } from "../src/install.ts";
 
 describe("discovery", () => {
   test("makima peers, with midna spotted among their published services", () => {
@@ -49,6 +49,12 @@ describe("installing", () => {
     expect(explainSsh("justin@10.77.0.1: Permission denied (publickey).", tenet).message).toContain("SSH key");
     expect(explainSsh("Host key verification failed.", tenet).hint).toContain("ssh-keygen -R");
     expect(explainSsh("ssh: connect to host x port 22: Connection timed out", { name: "box", via: "tailscale" }).message).toBe("box didn't answer.");
+  });
+
+  test("the shared SSH socket path fits a Unix socket on macOS too", () => {
+    // %C expands to 40 hex characters; ssh adds a 17-character random suffix while it sets up.
+    const longest = sshControlPath().replace("%C", "f".repeat(40)) + ".M0BZ4NhCFJ07zCec";
+    expect(longest.length).toBeLessThan(104);
   });
 
   test("sign-in hints read like instructions", () => {

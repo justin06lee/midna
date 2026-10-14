@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { arch, hostname, platform, tmpdir } from "node:os";
+import { arch, hostname, platform, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_PORT, INSTALL_STEPS, MidnaClient, type InstallEvent, type InstallStepId } from "@midna/protocol";
 import { VERSION } from "@midna/daemon";
@@ -75,6 +75,16 @@ export function localTransport(): Transport {
 }
 
 /**
+ * Where the shared SSH connection's socket lives. Not os.tmpdir(): on macOS
+ * that is a long /var/folders/… path, and with ssh's 40-character %C hash
+ * and the random suffix it adds while setting up, the socket path passes
+ * the 104-byte limit for Unix sockets and ssh refuses to connect.
+ */
+export function sshControlPath(): string {
+  return `/tmp/midna-ssh-${userInfo().uid}-%C`;
+}
+
+/**
  * SSH with no prompts: keys only, and a host seen for the first time is
  * trusted — over makima or Tailscale the tunnel has already proven which
  * machine it is. A key that *changed* still fails. One connection is reused
@@ -88,7 +98,7 @@ export function sshTransport(target: string): Transport {
     "-o", "ConnectTimeout=10",
     "-o", "ServerAliveInterval=15",
     "-o", "ControlMaster=auto",
-    "-o", `ControlPath=${join(tmpdir(), "midna-ssh-%C")}`,
+    "-o", `ControlPath=${sshControlPath()}`,
     "-o", "ControlPersist=60",
   ];
   return {
