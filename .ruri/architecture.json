@@ -443,7 +443,8 @@
         "The desktop web view calls the Midna HTTP API with a device token; host-only operations go through host.ts.",
         "The desktop can connect to an older host; normalizeStatus supplies fields that host does not report.",
         "Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.",
-        "A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts."
+        "A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts.",
+        "The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit."
       ],
       "edges": [
         "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal",
