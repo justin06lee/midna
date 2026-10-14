@@ -107,7 +107,7 @@ function flags(name: string): string[] {
 async function waitForHealth(url: string, ms = 15_000): Promise<boolean> {
   const c = new MidnaClient(url);
   for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(300)) {
-    if (await c.health().then(() => true, () => false)) return true;
+    if (await c.health(AbortSignal.timeout(2_000)).then(() => true, () => false)) return true;
   }
   return false;
 }

@@ -82,11 +82,15 @@ async function readTailscale(): Promise<TailscaleStatus | null> {
   return null;
 }
 
-/** Is midna answering at `url`? */
+/**
+ * Is midna answering at `url`? The request is aborted at `ms`, not just
+ * outraced: an online machine with nothing on the port can hold a connect
+ * open for over a minute, and with it the whole `midna devices` process.
+ */
 export async function probe(url: string, ms = 1_500): Promise<Device["midna"]> {
   try {
-    const h = await Promise.race([new MidnaClient(url).health(), Bun.sleep(ms).then(() => null)]);
-    return h ? { running: true, version: h.version, name: h.name, url } : { running: false };
+    const h = await new MidnaClient(url).health(AbortSignal.timeout(ms));
+    return { running: true, version: h.version, name: h.name, url };
   } catch {
     return { running: false };
   }

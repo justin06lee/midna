@@ -43,8 +43,9 @@ export interface BrainResult {
 export type Brain = (run: BrainRun) => Promise<BrainResult>;
 
 export class BrainError extends Error {
-  constructor(message: string, readonly sessionId?: string) {
-    super(message);
+  /** `cause` keeps yagami's typed failure, so a signed-out or missing CLI can still be told apart. */
+  constructor(message: string, readonly sessionId?: string, options?: { cause?: unknown }) {
+    super(message, options);
   }
 }
 
@@ -167,7 +168,7 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
     }
     return { text: reply.trim(), sessionId: session.id, costUsd };
   } catch (err) {
-    throw new BrainError(`${providerId} turn failed: ${(err as Error).message}`, session.id);
+    throw new BrainError(`${providerId} turn failed: ${(err as Error).message}`, session.id, { cause: err });
   } finally {
     run.signal?.removeEventListener("abort", onAbort);
     await session.close().catch(() => {});

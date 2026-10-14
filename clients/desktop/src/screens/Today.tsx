@@ -63,7 +63,7 @@ export function Today({ overview }: { overview: Overview | null }) {
               <Row key={c.id} lead="you owe" text={`${c.counterparty ?? "someone"}: ${c.what}`} sub={c.due_at ? `by ${when(c.due_at, now)}` : null} strong={c.due_at !== null && c.due_at < now} />
             ))}
             {theirs.map((c) => (
-              <Row key={c.id} lead="owed to you" text={`${c.counterparty ?? "someone"}: ${c.what}`} sub={c.due_at ? `by ${when(c.due_at, now)}` : null} />
+              <Row key={c.id} lead="owed to you" text={`${c.counterparty ?? "someone"}: ${c.what}`} sub={c.due_at ? `by ${when(c.due_at, now)}` : null} strong={c.due_at !== null && c.due_at < now} />
             ))}
           </List>
         </Section>

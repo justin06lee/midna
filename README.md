@@ -1,7 +1,13 @@
+<div align="center">
+
+<img src="assets/midna.svg" alt="midna" width="600" />
+
 # midna
 
 **A proactive personal assistant that lives on your own machine.**<br>
 *Chief of staff, thinking partner and memory — built around your objectives, running on the agent CLIs you already signed into.*
+
+</div>
 
 ---
 

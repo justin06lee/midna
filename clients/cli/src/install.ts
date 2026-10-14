@@ -284,7 +284,7 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
     const client = new MidnaClient(url);
     let reachable = false;
     for (const end = Date.now() + 45_000; Date.now() < end; await Bun.sleep(750)) {
-      if (await client.health().then(() => true, () => false)) {
+      if (await client.health(AbortSignal.timeout(3_000)).then(() => true, () => false)) {
         reachable = true;
         break;
       }

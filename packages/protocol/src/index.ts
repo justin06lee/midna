@@ -152,7 +152,7 @@ export class MidnaClient {
     this.token = token;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: {
@@ -160,6 +160,7 @@ export class MidnaClient {
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(signal ? { signal } : {}),
     });
     const text = await res.text();
     const data = text ? JSON.parse(text) : undefined;
@@ -167,8 +168,9 @@ export class MidnaClient {
     return data as T;
   }
 
-  health(): Promise<Health> {
-    return this.call("GET", "/healthz");
+  /** Is midna there? Pass a signal (e.g. `AbortSignal.timeout(2_000)`) to stop waiting on a machine that never answers. */
+  health(signal?: AbortSignal): Promise<Health> {
+    return this.call("GET", "/healthz", undefined, signal);
   }
   pair(req: PairRequest): Promise<PairResponse> {
     return this.call("POST", "/v1/pair", req);
