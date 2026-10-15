@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { BrainInfo, BridgeInfo, BridgeSetupResult, Connection, DeviceInfo, MidnaClient, Status } from "@midna/protocol";
+import { loadAppearance, setAppearance, type Appearance } from "../appearance";
 import { copy, inApp, launchAtLogin, openUrl } from "../host";
 import { Button, Icon, Section, Segmented, StateMark } from "../ui";
 
@@ -32,6 +33,7 @@ export function Settings({
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [atLogin, setAtLogin] = useState<boolean | null>(null);
+  const [appearance, setAppearanceState] = useState<Appearance>(loadAppearance);
 
   useEffect(() => {
     void client.brains().then(setBrains, () => {});
@@ -150,9 +152,23 @@ export function Settings({
         </Card>
       </Section>
 
-      {inApp && (
-        <Section title="This computer">
-          <Card>
+      <Section title="This computer">
+        <Card>
+          <Row label="Appearance">
+            <Segmented
+              value={appearance}
+              onChange={(a) => {
+                setAppearance(a);
+                setAppearanceState(a);
+              }}
+              options={[
+                { value: "system", label: "System" },
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+              ]}
+            />
+          </Row>
+          {inApp && (
             <Row label="Open at login">
               <Segmented
                 value={atLogin ? "on" : "off"}
@@ -165,9 +181,9 @@ export function Settings({
               />
               <span className="text-[12px] text-dimmer">so midna can reach you from the tray</span>
             </Row>
-          </Card>
-        </Section>
-      )}
+          )}
+        </Card>
+      </Section>
 
       <Section title="Where midna lives">
         <Card>

@@ -3,7 +3,8 @@
 /* Ink on a pale window, content on an inset sheet, hairlines instead of
    boxes — the same family as makima's app. Monochrome: urgency and state
    are carried by weight, shape and words, not colour. It follows the
-   system's appearance; ?dark=1 forces dark in the browser preview. */
+   system's appearance unless Settings picks one (.light / .dark on <html>,
+   see appearance.ts); ?dark=1 or ?light=1 forces one in the browser preview. */
 :root {
   --bg: #f3f3f4;
   --panel: #ffffff;
