@@ -81,10 +81,10 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
     setView("chat");
   }, []);
 
-  // Only a link that stays down is news: a stream that reconnects in a second isn't.
+  // Only a link that stays down (or never comes up) is news: a stream that reconnects in a second isn't.
   const [unreachable, setUnreachable] = useState(false);
   useEffect(() => {
-    if (m.link !== "lost") return setUnreachable(false);
+    if (m.link === "live" || m.link === "unpaired") return setUnreachable(false);
     const t = setTimeout(() => setUnreachable(true), 3_000);
     return () => clearTimeout(t);
   }, [m.link]);
