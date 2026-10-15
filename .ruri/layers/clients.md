@@ -16,8 +16,9 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - **Desktop settings:** clients/desktop/src/screens/Settings.tsx
 - **Desktop today screen:** clients/desktop/src/screens/Today.tsx
 - **Desktop host integration:** clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs, clients/desktop/vite.config.ts
-- **Desktop appearance and shared controls:** clients/desktop/src/style.css, clients/desktop/src/ui.tsx
+- **Desktop appearance (light/dark/system switch) and shared controls:** clients/desktop/src/style.css, clients/desktop/src/appearance.ts, clients/desktop/src/ui.tsx
 - **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
+- **midna's mark: app icon, tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, assets/midna.svg
 
 ## How it works
 
@@ -38,6 +39,8 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - clients/desktop/src/screens/Welcome.tsx — machine selection
 - clients/desktop/src/screens/Install.tsx — installation progress
 - clients/desktop/src/screens/Chat.tsx — conversation display and input
+- clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from
+- clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window
 
 ## Rules and traps
 
@@ -48,6 +51,9 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.
 - A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts.
 - The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit.
+- Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.
+- Window dragging needs data-tauri-drag-region ("deep" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.
+- The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other.
 
 ## What it talks to
 
