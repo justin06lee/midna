@@ -43,7 +43,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       title={title}
-      className={`no-drag inline-flex shrink-0 items-center justify-center border font-medium whitespace-nowrap transition-[background-color,opacity,color,border-color] duration-150 disabled:opacity-40 ${variants} ${sizes} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center border font-medium whitespace-nowrap transition-[background-color,opacity,color,border-color] duration-150 disabled:opacity-40 ${variants} ${sizes} ${className}`}
     >
       {busy ? <Spinner /> : icon}
       {children}

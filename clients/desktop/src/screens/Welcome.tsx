@@ -39,7 +39,7 @@ export function Welcome({ choices, onChoices, onPick, notice }: { choices: Insta
 
   return (
     <div className="flex h-full flex-col">
-      <div className="drag h-10 shrink-0" />
+      <div data-tauri-drag-region className="h-10 shrink-0" />
       <div className="flex flex-1 justify-center overflow-y-auto px-8 pb-10">
         <div className="w-full max-w-[560px] pt-6">
           <div className="mb-7 flex flex-col items-center text-center">

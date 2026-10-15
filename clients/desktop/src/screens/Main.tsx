@@ -69,7 +69,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   return (
     <div className="flex h-full">
       <aside className="flex w-[208px] shrink-0 flex-col border-r border-line">
-        <div className="drag h-10 shrink-0" />
+        <div data-tauri-drag-region className="h-10 shrink-0" />
         <div className="flex items-center gap-2.5 px-4 pb-4">
           <div className="flex size-8 items-center justify-center rounded-[9px] bg-primary text-primary-ink">
             <Mark className="size-[18px]" />
@@ -107,7 +107,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="drag h-10 shrink-0" />
+        <div data-tauri-drag-region className="h-10 shrink-0" />
         {brain?.ok === false && (
           <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
             <span className="flex-1 text-[12.5px]">

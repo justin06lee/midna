@@ -121,14 +121,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* The draggable strip across the top of an overlay title bar (macOS). */
-.drag {
-  -webkit-app-region: drag;
-}
-.no-drag {
-  -webkit-app-region: no-drag;
-}
-
 @layer base {
   button {
     cursor: default;

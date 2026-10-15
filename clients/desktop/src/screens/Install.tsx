@@ -41,7 +41,7 @@ export function Install({ device, choices, onDone, onBack }: { device: Discovere
 
   return (
     <div className="flex h-full flex-col">
-      <div className="drag flex h-10 shrink-0 items-center px-3 pl-20">
+      <div data-tauri-drag-region className="flex h-10 shrink-0 items-center px-3 pl-20">
         <Button variant="ghost" size="sm" onClick={onBack} disabled={busy} icon={<Icon name="back" className="size-3.5" />}>
           Machines
         </Button>
