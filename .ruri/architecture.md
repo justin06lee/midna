@@ -12,7 +12,7 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 3. **Daemon** — HTTP API, event stream, scheduler loop, and bridge supervision (`packages/daemon/src/ · 3 files`)
 4. **Assistant** — Chat and wakeup orchestration, prompts, yagami brain sessions, and MCP tools (`packages/agent/`) → `.ruri/layers/assistant.md`
 5. **Core** — SQLite-backed planning, memory, episode log, devices, context, schedule, outbox, and event bus (`packages/core/`)
-6. **Host** — Host configuration, service installation, and version information (`packages/daemon/`)
+6. **Host** — Host configuration, service installation, and version information (`packages/daemon/`) → `.ruri/layers/host.md`
 7. **Build and checks** — Bun build, import-boundary check, live smoke check, and TypeScript configuration (`scripts/, test/, ./ · 4 files`) → `.ruri/layers/build-and-checks.md`
 8. **Runtime** — Bun and SQLite on the host; yagami runs the selected agent CLI
 
