@@ -1,5 +1,5 @@
 import type { Overview } from "@midna/protocol";
-import { Empty, Section, Spinner } from "../ui";
+import { Empty, Section } from "../ui";
 
 const DAY = 86_400_000;
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -12,8 +12,7 @@ const when = (ms: number, now: number) => {
 };
 
 /** The day at a glance: what's on, what's due, who's owed what, and what midna will do on its own. */
-export function Today({ overview }: { overview: Overview | null }) {
-  if (!overview) return <Loading />;
+export function Today({ overview }: { overview: Overview }) {
   const now = Date.now();
   const endOfTomorrow = new Date(new Date(now + DAY).toDateString()).getTime() + DAY;
   const events = overview.events.filter((e) => e.starts_at < endOfTomorrow);
@@ -93,14 +92,6 @@ function Row({ lead, text, sub, strong }: { lead: string; text: string; sub?: st
         <div className="selectable text-[13px] leading-[1.4]">{text}</div>
         {sub && <div className="mt-0.5 text-[11.5px] text-dimmer">{sub}</div>}
       </div>
-    </div>
-  );
-}
-
-export function Loading() {
-  return (
-    <div className="flex h-full items-center justify-center gap-2 text-dim">
-      <Spinner /> Loading…
     </div>
   );
 }

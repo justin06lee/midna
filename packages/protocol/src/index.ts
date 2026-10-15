@@ -213,8 +213,8 @@ export class MidnaClient {
   outbox(since = 0): Promise<OutboxItem[]> {
     return this.call("GET", `/v1/outbox?since=${since}`);
   }
-  overview(): Promise<Overview> {
-    return this.call("GET", "/v1/overview");
+  overview(signal?: AbortSignal): Promise<Overview> {
+    return this.call("GET", "/v1/overview", undefined, signal);
   }
   devices(): Promise<DeviceInfo[]> {
     return this.call("GET", "/v1/devices");
@@ -231,28 +231,64 @@ export class MidnaClient {
    * The live event stream. Outbox items after stream position `since` are
    * replayed first, so a client that remembers the last `seq` it showed never
    * misses one.
+   *
+   * However it ends — the caller's signal, an error, the caller breaking off,
+   * or `idleMs` without a byte (the daemon writes a keepalive every 25s, so
+   * silence means a dead connection) — the connection is closed. A browser
+   * keeps an abandoned response open, and WebKit allows six per host: leak
+   * six and every other request to midna waits forever.
    */
-  async *events(since = 0, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
-    const res = await fetch(`${this.baseUrl}/v1/events?since=${since}`, {
-      headers: { authorization: `Bearer ${this.token ?? ""}`, accept: "text/event-stream" },
-      ...(signal ? { signal } : {}),
-    });
-    if (!res.ok || !res.body) throw new MidnaError(res.status, `event stream: ${res.statusText}`);
-    const decoder = new TextDecoder();
-    let buf = "";
-    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-      buf += decoder.decode(chunk, { stream: true });
-      let cut: number;
-      while ((cut = buf.indexOf("\n\n")) >= 0) {
-        const frame = buf.slice(0, cut);
-        buf = buf.slice(cut + 2);
-        const data = frame
-          .split("\n")
-          .filter((l) => l.startsWith("data:"))
-          .map((l) => l.slice(5).trimStart())
-          .join("\n");
-        if (data) yield JSON.parse(data) as StreamEvent;
+  async *events(since = 0, signal?: AbortSignal, idleMs = 60_000): AsyncGenerator<StreamEvent> {
+    const ctl = new AbortController();
+    let silent = false;
+    const stop = () => ctl.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    // Only time spent waiting on the network counts, not the caller handling an event.
+    const watch = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => {
+        silent = true;
+        ctl.abort();
+      }, idleMs);
+    };
+    try {
+      if (signal?.aborted) return;
+      watch();
+      const res = await fetch(`${this.baseUrl}/v1/events?since=${since}`, {
+        headers: { authorization: `Bearer ${this.token ?? ""}`, accept: "text/event-stream" },
+        signal: ctl.signal,
+      });
+      if (!res.ok || !res.body) throw new MidnaError(res.status, `event stream: ${res.statusText}`);
+      // A reader, not `for await` over the body: WebKit's streams aren't async-iterable.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        clearTimeout(idle);
+        if (done) return;
+        buf += decoder.decode(value, { stream: true });
+        let cut: number;
+        while ((cut = buf.indexOf("\n\n")) >= 0) {
+          const frame = buf.slice(0, cut);
+          buf = buf.slice(cut + 2);
+          const data = frame
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).trimStart())
+            .join("\n");
+          if (data) yield JSON.parse(data) as StreamEvent;
+        }
+        watch();
       }
+    } catch (err) {
+      if (silent) throw new Error(`event stream: nothing from midna for ${Math.round(idleMs / 1000)}s`);
+      throw err;
+    } finally {
+      clearTimeout(idle);
+      signal?.removeEventListener("abort", stop);
+      ctl.abort();
     }
   }
 }

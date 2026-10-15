@@ -28,7 +28,8 @@
       "what": "Zod wire schemas and MidnaClient define the client-facing API",
       "slug": "protocol",
       "paths": [
-        "packages/protocol/"
+        "packages/protocol/",
+        "packages/protocol/test/"
       ]
     },
     {
@@ -380,9 +381,10 @@
           ]
         },
         {
-          "name": "Desktop appearance and shared controls",
+          "name": "Desktop appearance (light/dark/system switch) and shared controls",
           "files": [
             "clients/desktop/src/style.css",
+            "clients/desktop/src/appearance.ts",
             "clients/desktop/src/ui.tsx"
           ]
         },
@@ -392,6 +394,14 @@
             "clients/desktop/package.json",
             "clients/desktop/src-tauri/Cargo.toml",
             "clients/desktop/src-tauri/tauri.conf.json"
+          ]
+        },
+        {
+          "name": "midna's mark: app icon, tray icon, in-app mark, README banner",
+          "files": [
+            "clients/desktop/src/helmet.ts",
+            "clients/desktop/scripts/icons.ts",
+            "assets/midna.svg"
           ]
         }
       ],
@@ -435,7 +445,9 @@
         "clients/desktop/src-tauri/src/lib.rs — sidecar execution, connection storage, terminal, and tray integration",
         "clients/desktop/src/screens/Welcome.tsx — machine selection",
         "clients/desktop/src/screens/Install.tsx — installation progress",
-        "clients/desktop/src/screens/Chat.tsx — conversation display and input"
+        "clients/desktop/src/screens/Chat.tsx — conversation display and input",
+        "clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from",
+        "clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window"
       ],
       "rules": [
         "The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.",
@@ -444,7 +456,10 @@
         "The desktop can connect to an older host; normalizeStatus supplies fields that host does not report.",
         "Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.",
         "A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts.",
-        "The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit."
+        "The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit.",
+        "Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.",
+        "Window dragging needs data-tauri-drag-region (\"deep\" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.",
+        "The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other."
       ],
       "edges": [
         "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal",
@@ -526,7 +541,8 @@
         "An OutboxItem's options are suggested answers only; the user may still reply in free text.",
         "The desktop app never speaks SSH itself; it drives hosting only through `midna devices --json` and `midna host install --json`.",
         "DiscoveredDevice.id is a stable key of the form \"local\", \"makima:tenet\", or \"tailscale:tenet\"; keep it stable.",
-        "Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way."
+        "Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way.",
+        "MidnaClient.events() closes its connection however the stream ends (its own AbortController, aborted in finally) and treats 60s without a byte as a dead connection; the daemon's 25s keepalive keeps a live one under that."
       ],
       "edges": [
         "Clients — the Bun CLI and Telegram bridge use only the public API these schemas and MidnaClient define",

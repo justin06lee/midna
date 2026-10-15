@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { INSTALL_STEPS, type Connection, type DiscoveredDevice, type InstallEvent, type InstallStepId } from "@midna/protocol";
-import { installOn, openTerminal, type InstallChoices } from "../host";
+import { installOn, macTitleBar, openTerminal, type InstallChoices } from "../host";
 import { Button, Icon, Mark, Spinner } from "../ui";
 
 type StepState = { status: "waiting" | "running" | "done" | "skipped" | "failed"; detail?: string; progress?: { done: number; total: number } };
@@ -41,7 +41,7 @@ export function Install({ device, choices, onDone, onBack }: { device: Discovere
 
   return (
     <div className="flex h-full flex-col">
-      <div className="drag flex h-10 shrink-0 items-center px-3 pl-20">
+      <div data-tauri-drag-region className={`flex h-11 shrink-0 items-center px-3 ${macTitleBar ? "pl-[92px]" : ""}`}>
         <Button variant="ghost" size="sm" onClick={onBack} disabled={busy} icon={<Icon name="back" className="size-3.5" />}>
           Machines
         </Button>

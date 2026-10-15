@@ -4,11 +4,12 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./style.css";
 import { App } from "./App";
+import { applyAppearance, loadAppearance } from "./appearance";
 
-// The browser preview can force an appearance: ?dark=1 or ?light=1.
+// Before the first paint, so the window never flashes the wrong way. The
+// browser preview can force one: ?dark=1 or ?light=1.
 const q = new URLSearchParams(location.search);
-if (q.has("dark")) document.documentElement.classList.add("dark");
-if (q.has("light")) document.documentElement.classList.add("light");
+applyAppearance(q.has("dark") ? "dark" : q.has("light") ? "light" : loadAppearance());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

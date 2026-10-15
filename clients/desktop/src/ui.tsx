@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HELMET, HELMET_STROKE } from "./helmet";
 
 // The few pieces every screen is built from, kept together so the app has
 // one button rather than nine that are almost the same.
@@ -42,7 +43,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       title={title}
-      className={`no-drag inline-flex shrink-0 items-center justify-center border font-medium whitespace-nowrap transition-[background-color,opacity,color,border-color] duration-150 disabled:opacity-40 ${variants} ${sizes} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center border font-medium whitespace-nowrap transition-[background-color,opacity,color,border-color] duration-150 disabled:opacity-40 ${variants} ${sizes} ${className}`}
     >
       {busy ? <Spinner /> : icon}
       {children}
@@ -59,16 +60,11 @@ export function Spinner({ className = "" }: { className?: string }) {
   );
 }
 
-/** midna's crescent. */
+/** midna's mark: the helmet. */
 export function Mark({ className = "size-5" }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 44 44" aria-hidden="true">
-      <mask id="mark-bite">
-        <rect width="44" height="44" fill="white" />
-        <circle cx="27.3" cy="18.5" r="12.9" fill="black" />
-      </mask>
-      <circle cx="21" cy="23" r="15" fill="currentColor" mask="url(#mark-bite)" />
-      <circle cx="33" cy="11" r="2.4" fill="currentColor" />
+    <svg className={className} viewBox="0 0 100 100" aria-hidden="true">
+      <path d={HELMET} transform="translate(0 1.75)" fill="currentColor" stroke="currentColor" strokeWidth={HELMET_STROKE} strokeLinejoin="round" />
     </svg>
   );
 }
@@ -115,6 +111,26 @@ export function Section({ title, aside, children, className = "" }: { title: str
       </div>
       {children}
     </section>
+  );
+}
+
+/** Waiting on midna — or, if it didn't answer, saying so with a way to try again. */
+export function Loading({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
+  if (error)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <p className="selectable max-w-[380px] text-[13px] text-dim">{error}</p>
+        {onRetry && (
+          <Button size="sm" onClick={onRetry} icon={<Icon name="refresh" className="size-3.5" />}>
+            Try again
+          </Button>
+        )}
+      </div>
+    );
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-dim">
+      <Spinner /> Loading…
+    </div>
   );
 }
 

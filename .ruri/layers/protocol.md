@@ -1,6 +1,6 @@
 # midna — Protocol
 
-One layer of midna's stack, owning `packages/protocol/`. The whole stack, and how the layers connect, is in `.ruri/architecture.md`.
+One layer of midna's stack, owning `packages/protocol/, packages/protocol/test/`. The whole stack, and how the layers connect, is in `.ruri/architecture.md`.
 Don't edit this file: ruri writes it. `ruri layer protocol` prints it with every line numbered, what git says changed in this layer lately and what sessions learned working here; once you have read it that way, put right what your work changed — `ruri layer protocol add|set|drop <section> …`. Where it and the code disagree, the code is right.
 
 This layer is the one client-facing contract for midna: Zod schemas in index.ts for wire messages and events, a MidnaClient for calling the daemon, and plain TypeScript types in hosting.ts for device discovery and install output. Every client, including the desktop app, CLI, and Telegram bridge, speaks only this API and has no side door into the daemon. A newcomer must grasp that these shapes are the public surface, so changing one changes what every client receives.
@@ -33,6 +33,7 @@ This layer is the one client-facing contract for midna: Zod schemas in index.ts 
 - The desktop app never speaks SSH itself; it drives hosting only through `midna devices --json` and `midna host install --json`.
 - DiscoveredDevice.id is a stable key of the form "local", "makima:tenet", or "tailscale:tenet"; keep it stable.
 - Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way.
+- MidnaClient.events() closes its connection however the stream ends (its own AbortController, aborted in finally) and treats 60s without a byte as a dead connection; the daemon's 25s keepalive keeps a live one under that.
 
 ## What it talks to
 
