@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
-import { openTerminal } from "../host";
-import { Button, Icon, Loading, Mark, StateMark } from "../ui";
+import { macTitleBar, openTerminal } from "../host";
+import { Button, Icon, Loading, Spinner } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
 import { Objectives } from "./Objectives";
@@ -81,23 +81,26 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
     setView("chat");
   }, []);
 
+  // Only a link that stays down is news: a stream that reconnects in a second isn't.
+  const [unreachable, setUnreachable] = useState(false);
+  useEffect(() => {
+    if (m.link !== "lost") return setUnreachable(false);
+    const t = setTimeout(() => setUnreachable(true), 3_000);
+    return () => clearTimeout(t);
+  }, [m.link]);
+
   const brain = m.status?.brain;
   const host = m.status?.host.name ?? connection.host;
 
   return (
     <div className="flex h-full">
       <aside className="flex w-[208px] shrink-0 flex-col border-r border-line">
-        <div data-tauri-drag-region className="h-10 shrink-0" />
-        <div className="flex items-center gap-2.5 px-4 pb-4">
-          <div className="flex size-8 items-center justify-center rounded-[9px] bg-primary text-primary-ink">
-            <Mark className="size-[18px]" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[14px] leading-tight font-semibold tracking-[-0.01em]">{m.status?.name ?? connection.name}</div>
-            <div className="truncate text-[11.5px] text-dim">on {host}</div>
-          </div>
+        {/* The title bar: which midna, on which machine, beside the traffic lights. */}
+        <div data-tauri-drag-region="deep" className={`flex h-11 shrink-0 items-center gap-1.5 pr-3 text-[13px] ${macTitleBar ? "pl-[92px]" : "pl-4"}`}>
+          <span className="shrink-0 font-semibold tracking-[-0.01em]">{m.status?.name ?? connection.name}</span>
+          <span className="min-w-0 truncate text-dim">on {host}</span>
         </div>
-        <nav className="space-y-0.5 px-2">
+        <nav className="space-y-0.5 px-2 pt-1.5">
           {NAV.map((n) => (
             <button
               key={n.id}
@@ -110,22 +113,18 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
             </button>
           ))}
         </nav>
-        <div className="mt-auto space-y-1 px-4 pb-4 text-[11.5px] text-dim">
-          <div className="flex items-center gap-1.5">
-            <StateMark state={m.link === "live" ? "running" : m.link === "connecting" ? "working" : "offline"} />
-            {m.link === "live" ? "connected" : m.link === "connecting" ? "connecting…" : `can't reach ${host}`}
-          </div>
-          {m.status && (
-            <div className="flex items-center gap-1.5">
-              <StateMark state={brain?.ok === false ? "offline" : "running"} />
-              <span className="truncate">{m.status.model} · {m.status.mode === "autonomous" ? "on its own" : "asks first"}</span>
-            </div>
-          )}
-        </div>
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <div data-tauri-drag-region className="h-10 shrink-0" />
+        <div data-tauri-drag-region className="h-11 shrink-0" />
+        {unreachable && (
+          <div className="rise mx-6 mb-2 flex items-center gap-2.5 rounded-xl border border-line-2 bg-panel px-4 py-2.5 text-[12.5px]">
+            <Spinner className="text-dim" />
+            <span>
+              <span className="font-medium">Can't reach midna on {host}.</span> <span className="text-dim">Trying again…</span>
+            </span>
+          </div>
+        )}
         {brain?.ok === false && (
           <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
             <span className="flex-1 text-[12.5px]">

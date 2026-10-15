@@ -9,6 +9,9 @@ import type { Connection, DiscoveredDevice, InstallEvent } from "@midna/protocol
 
 export const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+/** The app on macOS draws into its title bar, around the traffic lights; elsewhere the system's title bar sits above the page. */
+export const macTitleBar = inApp && /Mac/.test(navigator.userAgent);
+
 interface RunResult { code: number; stderr: string }
 
 /** Run `midna <args>`, calling `onLine` for each line it prints. */

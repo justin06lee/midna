@@ -132,6 +132,9 @@ export function useMidna(connection: Connection) {
             const history = await client.history({ limit: 60 });
             merge(history.map(fromHistory));
             if (history.length < 60) setOlderExhausted(true);
+          } else {
+            // Reconnecting: "live" once midna answers, not merely because we're trying.
+            setStatus(await client.status());
           }
           setLink("live");
           backoff = 1_000;
