@@ -114,6 +114,26 @@ export function Section({ title, aside, children, className = "" }: { title: str
   );
 }
 
+/** Waiting on midna — or, if it didn't answer, saying so with a way to try again. */
+export function Loading({ error, onRetry }: { error?: string | null; onRetry?: () => void }) {
+  if (error)
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+        <p className="selectable max-w-[380px] text-[13px] text-dim">{error}</p>
+        {onRetry && (
+          <Button size="sm" onClick={onRetry} icon={<Icon name="refresh" className="size-3.5" />}>
+            Try again
+          </Button>
+        )}
+      </div>
+    );
+  return (
+    <div className="flex h-full items-center justify-center gap-2 text-dim">
+      <Spinner /> Loading…
+    </div>
+  );
+}
+
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
 import { openTerminal } from "../host";
-import { Button, Icon, Mark, StateMark } from "../ui";
+import { Button, Icon, Loading, Mark, StateMark } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
 import { Objectives } from "./Objectives";
@@ -22,6 +22,8 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   const m = useMidna(connection);
   const [view, setView] = useState<View>("chat");
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [overviewTry, setOverviewTry] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,10 +31,26 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   }, [m.link, onUnpaired]);
 
   // The dashboards refresh when shown, and whenever midna has just done something.
+  // A request that never answers gives up, so the screen can say so rather than spin.
   useEffect(() => {
     if (view !== "today" && view !== "goals") return;
-    void m.client.overview().then(setOverview, () => {});
-  }, [view, m.client, m.changed]);
+    let live = true;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15_000);
+    setOverviewError(null);
+    m.client
+      .overview(abort.signal)
+      .then(
+        (o) => live && setOverview(o),
+        (err: Error) => live && setOverviewError(abort.signal.aborted ? `midna on ${connection.host} didn't answer.` : `Couldn't load this: ${err.message}`),
+      )
+      .finally(() => clearTimeout(timer));
+    return () => {
+      live = false;
+      abort.abort();
+      clearTimeout(timer);
+    };
+  }, [view, m.client, m.changed, overviewTry, connection.host]);
 
   // ⌘/Ctrl + 1, 2, 3, comma.
   useEffect(() => {
@@ -130,8 +148,9 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           {view === "chat" && (
             <Chat lines={m.lines} thinking={m.thinking} canSend={m.link === "live"} send={m.send} loadOlder={m.loadOlder} olderExhausted={m.olderExhausted} draft={draft} onDraftUsed={() => setDraft(null)} />
           )}
-          {view === "today" && <Today overview={overview} />}
-          {view === "goals" && <Objectives overview={overview} onDiscuss={discuss} />}
+          {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
+          {view === "today" && overview && <Today overview={overview} />}
+          {view === "goals" && overview && <Objectives overview={overview} onDiscuss={discuss} />}
           {view === "settings" && (
             <Settings client={m.client} status={m.status} connection={connection} onStatus={(s) => m.setStatus(s)} onCheckBrain={checkBrain} onSignIn={signIn} onDisconnect={onDisconnect} />
           )}

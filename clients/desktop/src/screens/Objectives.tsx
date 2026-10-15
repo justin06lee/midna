@@ -1,6 +1,5 @@
 import type { Overview } from "@midna/protocol";
 import { Button, Icon, Section } from "../ui";
-import { Loading } from "./Today";
 
 type Goal = Overview["goals"][number];
 type Task = Overview["tasks"][number];
@@ -11,8 +10,7 @@ const HORIZON: Record<Goal["horizon"], string> = { life: "Life", years: "Years",
  * The objective tree everything else hangs from. Read-only on purpose: a
  * goal changes by talking it through with midna, which keeps the reason.
  */
-export function Objectives({ overview, onDiscuss }: { overview: Overview | null; onDiscuss: (text: string) => void }) {
-  if (!overview) return <Loading />;
+export function Objectives({ overview, onDiscuss }: { overview: Overview; onDiscuss: (text: string) => void }) {
   const goals = overview.goals;
   const ids = new Set(goals.map((g) => g.id));
   const roots = goals.filter((g) => g.parent_id === null || !ids.has(g.parent_id));
