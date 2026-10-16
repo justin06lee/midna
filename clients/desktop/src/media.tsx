@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ContextType, type MouseEvent } from "react";
+import { createContext, useContext, useEffect, useState, type ContextType, type MouseEvent, type ReactNode } from "react";
 import type { Attachment } from "@midna/protocol";
 import { openInApp, openUrl, saveToDownloads } from "./host";
 import { Icon, Spinner } from "./ui";
@@ -122,6 +122,18 @@ async function show(m: Actions, a: Attachment): Promise<void> {
   }
 }
 
+/** A line the sender put with one file, under it and no wider. A host older than 0.5 sends none. */
+function Captioned({ a, width, children }: { a: Attachment; width: number; children: ReactNode }) {
+  const caption = a.caption?.trim();
+  if (!caption) return children;
+  return (
+    <figure className="flex flex-col gap-1" style={{ maxWidth: width }}>
+      {children}
+      <figcaption className="selectable px-0.5 text-[12px] leading-[1.4] text-ink-2">{caption}</figcaption>
+    </figure>
+  );
+}
+
 /** What went with a line, in the order it was sent: a run of images shares a row, each file is a chip in its place. */
 export function Attachments({ items, align = "start" }: { items: Attachment[]; align?: "start" | "end" }) {
   if (!items.length) return null;
@@ -160,16 +172,18 @@ function FileChip({ a }: { a: Attachment }) {
     setBusy(null);
   };
   return (
-    <div title={`${a.name} · ${a.mime}`} className="flex max-w-[340px] items-center rounded-[10px] border border-line bg-panel text-[12.5px]">
-      <button type="button" onClick={act("open", show)} className="flex min-w-0 flex-1 items-center gap-2 rounded-l-[9px] py-1.5 pr-1.5 pl-2.5 text-left hover:bg-hover">
-        {busy === "open" ? <Spinner className="size-4 shrink-0 text-dim" /> : <Icon name="file" className="size-4 shrink-0 text-dim" />}
-        <span className="truncate font-medium">{a.name}</span>
-        <span className="shrink-0 text-dimmer">{size(a.size)}</span>
-      </button>
-      <button type="button" title="Save to Downloads" onClick={act("save", download)} className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-dim hover:bg-hover hover:text-ink">
-        {busy === "save" ? <Spinner /> : <Icon name="download" className="size-3.5" />}
-      </button>
-    </div>
+    <Captioned a={a} width={340}>
+      <div title={`${a.name} · ${a.mime}`} className="flex max-w-[340px] items-center rounded-[10px] border border-line bg-panel text-[12.5px]">
+        <button type="button" onClick={act("open", show)} className="flex min-w-0 flex-1 items-center gap-2 rounded-l-[9px] py-1.5 pr-1.5 pl-2.5 text-left hover:bg-hover">
+          {busy === "open" ? <Spinner className="size-4 shrink-0 text-dim" /> : <Icon name="file" className="size-4 shrink-0 text-dim" />}
+          <span className="truncate font-medium">{a.name}</span>
+          <span className="shrink-0 text-dimmer">{size(a.size)}</span>
+        </button>
+        <button type="button" title="Save to Downloads" onClick={act("save", download)} className="mr-1 flex size-6 shrink-0 items-center justify-center rounded-md text-dim hover:bg-hover hover:text-ink">
+          {busy === "save" ? <Spinner /> : <Icon name="download" className="size-3.5" />}
+        </button>
+      </div>
+    </Captioned>
   );
 }
 
@@ -195,26 +209,32 @@ function AttachedImage({ a, single }: { a: Attachment; single: boolean }) {
 
   if (failed) {
     return (
-      <div title={failed} className="flex h-[72px] w-[200px] flex-col items-center justify-center gap-1 rounded-[10px] border border-line bg-sunken px-3 text-center text-[11.5px] text-dim">
-        <span className="truncate font-medium text-ink-2">{a.name}</span>
-        couldn't load this image
-      </div>
+      <Captioned a={a} width={200}>
+        <div title={failed} className="flex h-[72px] w-[200px] flex-col items-center justify-center gap-1 rounded-[10px] border border-line bg-sunken px-3 text-center text-[11.5px] text-dim">
+          <span className="truncate font-medium text-ink-2">{a.name}</span>
+          couldn't load this image
+        </div>
+      </Captioned>
     );
   }
   if (!image) {
     return (
-      <div className={`flex items-center justify-center rounded-[10px] border border-line bg-sunken text-dimmer ${single ? "h-[180px] w-[260px]" : "h-[150px] w-[150px]"}`}>
-        <Spinner />
-      </div>
+      <Captioned a={a} width={single ? 260 : 150}>
+        <div className={`flex items-center justify-center rounded-[10px] border border-line bg-sunken text-dimmer ${single ? "h-[180px] w-[260px]" : "h-[150px] w-[150px]"}`}>
+          <Spinner />
+        </div>
+      </Captioned>
     );
   }
   const ratio = image.w / image.h;
   const width = single ? Math.min(440, image.w, 320 * ratio) : Math.max(80, Math.min(240, 150 * ratio));
   const height = single ? width / ratio : 150;
   return (
-    <button type="button" title={a.name} onClick={() => media?.view({ kind: "image", src: image.src, name: a.name, attachment: a })} className="block max-w-full cursor-zoom-in overflow-hidden rounded-[10px] border border-line bg-sunken outline-none focus-visible:shadow-[0_0_0_3px_var(--focus)]">
-      <img src={image.src} alt={a.name} draggable={false} style={{ width, height }} className="block max-w-full object-cover" />
-    </button>
+    <Captioned a={a} width={width}>
+      <button type="button" title={a.name} onClick={() => media?.view({ kind: "image", src: image.src, name: a.name, attachment: a })} className="block max-w-full cursor-zoom-in overflow-hidden rounded-[10px] border border-line bg-sunken outline-none focus-visible:shadow-[0_0_0_3px_var(--focus)]">
+        <img src={image.src} alt={a.name} draggable={false} style={{ width, height }} className="block max-w-full object-cover" />
+      </button>
+    </Captioned>
   );
 }
 

@@ -243,5 +243,7 @@ export function useMidna(connection: Connection) {
     [client, connection.token],
   );
 
-  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment, upload };
+  const discardUpload = useCallback((id: string) => client.deleteAttachment(id), [client]);
+
+  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment, upload, discardUpload };
 }

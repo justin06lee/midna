@@ -33,6 +33,7 @@ export function Chat({
   onDraftUsed,
   loadAttachment,
   upload,
+  discardUpload,
 }: {
   lines: Line[];
   thinking: { tool: string | null } | null;
@@ -46,6 +47,8 @@ export function Chat({
   loadAttachment: (id: string) => Promise<Blob>;
   /** Put a file on the host, reporting progress, to send with the next message. */
   upload: Upload;
+  /** Take back an upload removed before sending. */
+  discardUpload: (id: string) => Promise<unknown>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -60,7 +63,7 @@ export function Chat({
   const busy = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const files = usePendingFiles(upload);
+  const files = usePendingFiles(upload, discardUpload);
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MAX_ATTACHMENT_BYTES, type Attachment } from "@midna/protocol";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS_PER_MESSAGE, type Attachment } from "@midna/protocol";
 import { remember, size } from "./media";
 import { Icon, Spinner } from "./ui";
 
@@ -9,8 +9,8 @@ import { Icon, Spinner } from "./ui";
  * message is; they go with it in the order they were added.
  */
 
-/** As many as one message takes (SendMessage's limit). */
-export const MAX_FILES = 10;
+/** As many as one message takes. */
+export const MAX_FILES = MAX_ATTACHMENTS_PER_MESSAGE;
 // Two at a time: WebKit keeps six connections per host, and the event stream and status polls need theirs.
 const AT_ONCE = 2;
 
@@ -57,7 +57,8 @@ function job(file: File): Job {
   return { file, stop: new AbortController(), result, settle };
 }
 
-export function usePendingFiles(upload: Upload) {
+/** `discard` takes back an upload the user removed before sending (the host sweeps any left over after a day). */
+export function usePendingFiles(upload: Upload, discard: (id: string) => Promise<unknown>) {
   const [items, setItems] = useState<Pending[]>([]);
   const current = useRef(items);
   current.current = items;
@@ -120,16 +121,18 @@ export function usePendingFiles(upload: Upload) {
     [pump],
   );
 
-  const remove = useCallback((key: string) => {
-    jobs.current.get(key)?.stop.abort();
-    jobs.current.delete(key);
-    queue.current = queue.current.filter((k) => k !== key);
-    setItems((cur) => {
-      const gone = cur.find((i) => i.key === key);
+  const remove = useCallback(
+    (key: string) => {
+      jobs.current.get(key)?.stop.abort();
+      jobs.current.delete(key);
+      queue.current = queue.current.filter((k) => k !== key);
+      const gone = current.current.find((i) => i.key === key);
       if (gone?.preview) URL.revokeObjectURL(gone.preview);
-      return cur.filter((i) => i.key !== key);
-    });
-  }, []);
+      if (gone?.done) void discard(gone.done.id).catch(() => {});
+      setItems((cur) => cur.filter((i) => i.key !== key));
+    },
+    [discard],
+  );
 
   const retry = useCallback(
     (key: string) => {
