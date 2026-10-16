@@ -33,7 +33,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "deb", "rpm", "appimage"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/Assets.car", "icons/icon.ico"],
     "category": "Productivity",
     "shortDescription": "Your personal assistant, from your desk",
     "longDescription": "midna is a proactive personal assistant that lives on a computer you own. This app finds your machines over makima or Tailscale, sets midna up on the one you pick, and is where you talk to it.",

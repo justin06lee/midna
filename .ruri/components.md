@@ -11,11 +11,11 @@ ruri maintains this file. Don't edit it by hand; it is rewritten whenever
 the library changes.
 
 ## helmet-mark — the helmet mark
-midna's logo: Midna's Twilight Princess helmet as a flat black silhouette. One outline (helmet.ts) feeds the app icon, tray icon, in-app <Mark> and the README banner; rerun `bun run icons` after changing it.
-Its files: clients/desktop/src/helmet.ts, clients/desktop/src/ui.tsx, clients/desktop/scripts/icons.ts
+midna's logo: Midna's Twilight Princess helmet as a flat black silhouette on a flat white card. One outline (helmet.ts) feeds the app icon, the macOS 26 Icon Composer icon (icons/midna.icon → Assets.car; white helmet in the dark, clear and tinted styles, shown left to right), tray icon, in-app <Mark> and the README banner; rerun `bun run icons` after changing it.
+Its files: clients/desktop/src/helmet.ts, clients/desktop/src/ui.tsx, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon
 Reaches into: assets/midna.svg
 Tags: logo, icon, brand
-Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/3c2ba7a5-69be-410c-a014-bc4bc1a90ee7-midna-helmet-sheet.png
+Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/68ff780c-a51a-4df5-a8eb-855b8b99c4b7-sheet.png, /Users/huiyunlee/.config/ruri/uploads/3c2ba7a5-69be-410c-a014-bc4bc1a90ee7-midna-helmet-sheet.png
 
 ## title-bar — the title bar
 "midna on <host>" beside the macOS traffic lights, in a 44px drag strip. Its 92px left padding is tied to trafficLightPosition in tauri.conf.json; change one, re-measure the other.
