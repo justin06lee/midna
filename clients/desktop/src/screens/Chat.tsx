@@ -31,6 +31,8 @@ export function Chat({
   olderExhausted,
   draft,
   onDraftUsed,
+  shown,
+  draftKey,
   loadAttachment,
   upload,
   discardUpload,
@@ -49,6 +51,10 @@ export function Chat({
   upload: Upload;
   /** Take back an upload removed before sending. */
   discardUpload: (id: string) => Promise<unknown>;
+  /** False while another screen shows: the chat stays mounted, hidden, so nothing typed or uploading is lost. */
+  shown: boolean;
+  /** Where what's typed is kept until it is sent (localStorage), one per connection. */
+  draftKey: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -57,7 +63,7 @@ export function Chat({
   const closeViewer = useCallback(() => setViewing(null), []);
   const [notice, setNotice] = useState<Notice | null>(null);
   const media = useMemo(() => ({ load: loadAttachment, view: setViewing, notice: setNotice }), [loadAttachment]);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => localStorage.getItem(draftKey) ?? "");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const busy = useRef(false);
@@ -80,7 +86,15 @@ export function Chat({
     [add],
   );
 
+  // What's typed survives a restart or a crash; it goes once a send succeeds.
   useEffect(() => {
+    if (busy.current) return; // mid-send: the box is empty, but the message isn't gone yet
+    if (text) localStorage.setItem(draftKey, text);
+    else localStorage.removeItem(draftKey);
+  }, [text, draftKey]);
+
+  useEffect(() => {
+    if (!shown) return;
     const paste = async (e: ClipboardEvent) => {
       const list = [...(e.clipboardData?.files ?? [])];
       if (!list.length) return;
@@ -99,7 +113,7 @@ export function Chat({
     };
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);
-  }, [addFiles]);
+  }, [addFiles, shown]);
 
   // A notice stays long enough to act on.
   useEffect(() => {
@@ -136,13 +150,21 @@ export function Chat({
     },
   };
 
-  // Something to say, handed over from another screen.
+  // Something to say, handed over from another screen: below what the user has written, never over it.
   useEffect(() => {
     if (!draft) return;
-    setText(draft);
+    setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${draft}` : draft));
     onDraftUsed?.();
     input.current?.focus();
   }, [draft, onDraftUsed]);
+
+  // Back from another screen: where it was, and ready to type.
+  useLayoutEffect(() => {
+    if (!shown) return;
+    const el = scroller.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    input.current?.focus();
+  }, [shown]);
 
   // Keep to the bottom as lines arrive — unless the user has scrolled up to read.
   useLayoutEffect(() => {
@@ -162,6 +184,7 @@ export function Chat({
   }, []);
 
   const onScroll = () => {
+    if (!shown) return; // hidden, it has no height to measure
     const el = scroller.current!;
     stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (el.scrollTop < 40 && !olderExhausted) {
@@ -194,6 +217,7 @@ export function Chat({
       try {
         await send(t, replyTo, attachments);
         taken?.done();
+        if (!replyTo) localStorage.removeItem(draftKey);
       } catch (err) {
         if (!replyTo) setText(t);
         taken?.back();
@@ -374,13 +398,11 @@ function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (optio
     );
   }
 
-  const aside = l.kind && l.kind !== "message";
-  const label = l.kind === "question" ? "question" : l.priority === "urgent" ? "urgent" : l.priority === "fyi" ? "fyi" : "note";
+  // Every kind of line midna sends looks the same; its kind only decides how loudly it notifies.
   return (
-    <div className={`max-w-[86%] ${aside ? `border-l-2 pl-3 ${l.priority === "urgent" ? "border-ink" : "border-line-2"}` : ""}`}>
-      {aside && <div className={`mb-0.5 text-[10.5px] font-medium tracking-wide uppercase ${l.priority === "urgent" ? "text-ink" : "text-dimmer"}`}>{label} · {time(l.at)}</div>}
+    <div className="max-w-[86%]">
       {l.text && (
-        <div className={`text-[13.5px] leading-[1.55] ${l.priority === "fyi" ? "text-ink-2" : ""}`}>
+        <div className="text-[13.5px] leading-[1.55]">
           <Markdown text={l.text} />
         </div>
       )}
@@ -404,7 +426,7 @@ function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (optio
           ))}
         </div>
       )}
-      {!aside && <div className="mt-0.5 text-[10.5px] text-dimmer">{time(l.at)}</div>}
+      <div className="mt-0.5 text-[10.5px] text-dimmer">{time(l.at)}</div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
 import { macTitleBar, openTerminal } from "../host";
-import { Button, Icon, Loading, Spinner } from "../ui";
+import { Button, Icon, Loading, Mark, Spinner } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
 import { Objectives } from "./Objectives";
@@ -95,10 +95,9 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   return (
     <div className="flex h-full">
       <aside className="flex w-[208px] shrink-0 flex-col border-r border-line">
-        {/* The title bar: which midna, on which machine, beside the traffic lights. */}
-        <div data-tauri-drag-region="deep" className={`flex h-11 shrink-0 items-center gap-1.5 pr-3 text-[13px] ${macTitleBar ? "pl-[92px]" : "pl-4"}`}>
-          <span className="shrink-0 font-semibold tracking-[-0.01em]">{m.status?.name ?? connection.name}</span>
-          <span className="min-w-0 truncate text-dim">on {host}</span>
+        {/* The title bar: midna's mark beside the traffic lights; which machine it's on, in its tooltip. */}
+        <div data-tauri-drag-region="deep" title={`${m.status?.name ?? connection.name} on ${host}`} className={`flex h-11 shrink-0 items-center pr-3 ${macTitleBar ? "pl-[92px]" : "pl-4"}`}>
+          <Mark className="size-[18px] text-ink" />
         </div>
         <nav className="space-y-0.5 px-2 pt-1.5">
           {NAV.map((n) => (
@@ -144,9 +143,24 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {view === "chat" && (
-            <Chat lines={m.lines} thinking={m.thinking} canSend={m.link === "live"} send={m.send} loadOlder={m.loadOlder} olderExhausted={m.olderExhausted} draft={draft} onDraftUsed={() => setDraft(null)} loadAttachment={m.loadAttachment} upload={m.upload} discardUpload={m.discardUpload} />
-          )}
+          {/* Hidden, never unmounted: a half-written message and its uploads wait here. */}
+          <div className={view === "chat" ? "h-full" : "hidden"}>
+            <Chat
+              lines={m.lines}
+              thinking={m.thinking}
+              canSend={m.link === "live"}
+              send={m.send}
+              loadOlder={m.loadOlder}
+              olderExhausted={m.olderExhausted}
+              draft={draft}
+              onDraftUsed={() => setDraft(null)}
+              loadAttachment={m.loadAttachment}
+              upload={m.upload}
+              discardUpload={m.discardUpload}
+              shown={view === "chat"}
+              draftKey={`midna.draft:${connection.url}#${connection.device ?? ""}`}
+            />
+          </div>
           {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
           {view === "today" && overview && <Today overview={overview} />}
           {view === "goals" && overview && <Objectives overview={overview} onDiscuss={discuss} />}
