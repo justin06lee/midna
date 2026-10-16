@@ -20,11 +20,12 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
 - **midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon, assets/midna.svg
 - **Desktop attachments: paste/drag/picker uploads, download and open, PDFs in the viewer, rendered in the order given:** clients/desktop/src/attach.tsx, clients/desktop/src/media.tsx, clients/desktop/src/screens/Chat.tsx, clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs
+- **Desktop text field persistence (typed text kept across view switches, quit/relaunch and failed sends):** clients/desktop/src/screens/Chat.tsx, clients/desktop/src/screens/Settings.tsx, clients/desktop/src/screens/Welcome.tsx
 
 ## How it works
 
 - **Desktop installation:** Welcome discovers and ranks machines → Install displays installation events → host runs the CLI through Tauri or the development server → the CLI installs and pairs the machine → the desktop app receives a Connection
-- **Desktop conversation:** Main creates useMidna with a Connection → useMidna uses MidnaClient for history and live events → Chat renders lines and sends messages
+- **Desktop conversation:** Main creates useMidna with a Connection → useMidna uses MidnaClient for history and live events → Chat renders every midna line as a plain message, whatever its kind (questions add option buttons), and sends
 - **Telegram bridge:** A one-time /start code binds the owner chat → Telegram messages, photos and files pass through the bridge to MidnaClient (files uploaded first) → the bridge delivers outbox items to Telegram, attachments as photos or documents → saved offsets and sequence positions support restart
 
 ## Key files
@@ -57,13 +58,12 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit.
 - Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.
 - Window dragging needs data-tauri-drag-region ("deep" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.
-- trafficLightPosition y=24 puts the traffic lights' centre at 22 (mid 44px title bar), ending ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other.
+- trafficLightPosition y=24 puts the traffic lights' centre at 22 (mid 44px title bar), ending ~80px in, so the title bar's 18px helmet mark sits at 92px (macTitleBar in host.ts), measured centred with the lights. Change one, re-measure the other.
 - macOS 26 lightens and shades an app icon that has no Assets.car: bun run icons compiles src-tauri/icons/midna.icon into the committed icons/Assets.car with Xcode's actool run by path (xcrun refuses: Xcode isn't selected, its licence unaccepted). bundle.icon lists it; icon.icns stays for older macOS.
 - An <img> can't send the device token: attachments come through MidnaClient.attachment() and are drawn from cached blob: URLs (the CSP's img-src keeps blob:, and https:/http: for Markdown images). Size an image from its natural dimensions (loadImage): CSS max sizes inside a shrink-to-fit button leave the frame too wide.
 - Telegram bot limits: uploads up to 50 MB (bigger attachments get a note pointing to the app), photos up to 10 MB (bigger images go as documents), downloads via getFile up to 20 MB (bigger incoming files are refused with a reason). The bridge sends text first, then attachments in order; a question sends its files first so its buttons stay last.
-- Drops: tauri.conf.json sets dragDropEnabled false so WebKit delivers dropped files to the page as File objects (Tauri's handler would swallow them as paths); main.tsx refuses a drop anywhere the chat doesn't take it, or WebKit would open the file in the window.
 - Files in: dragDropEnabled is false so WebKit hands drops to the page as File objects (main.tsx refuses a drop outside the chat, or WebKit opens the file in the window). WebKit gives a paste of several Finder files only the first; Rust (copied_files, read_copied: NSPasteboard) reads them all. Uploads use XMLHttpRequest for progress.
-- Files out: Rust gets the fetched bytes raw (name percent-encoded in an x-name header), saves into Downloads or opens a cache copy, quarantined for Gatekeeper. PDFs preview in a blob: iframe (CSP frame-src blob:).
+- Chat stays mounted (hidden) while another view shows, so the draft and its uploads live on. The text is also kept in localStorage as midna.draft:<url>#<device>, rewritten on every change except mid-send and removed only when a send succeeds. A draft handed over from another screen (Objectives) goes below what's typed, never over it.
 
 ## What it talks to
 

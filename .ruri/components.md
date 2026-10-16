@@ -19,12 +19,11 @@ Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.c
 Its code has changed since that picture — if you change it, `ruri edit helmet-mark --shot <new picture>`
 
 ## title-bar — the title bar
-"midna on <host>" beside the macOS traffic lights, in a 44px drag strip. Its 92px left padding is tied to trafficLightPosition in tauri.conf.json; change one, re-measure the other.
+midna's helmet mark beside the macOS traffic lights (18px, centred with them at y≈22), with 'midna on <host>' as its tooltip, in a 44px drag strip. Its 92px left padding is tied to trafficLightPosition in tauri.conf.json; change one, re-measure the other.
 Its files: clients/desktop/src/screens/Main.tsx
 Reaches into: clients/desktop/src-tauri/tauri.conf.json, clients/desktop/src/host.ts
 Tags: window, nav, header
-Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/e032f092-4953-4611-b1b8-f3a7a38fc4c5-midna-titlebar.png
-Its code has changed since that picture — if you change it, `ruri edit title-bar --shot <new picture>`
+Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/fac55f25-2fbd-4b89-9ac5-bbd74b44a34c-titlebar.png, /Users/huiyunlee/.config/ruri/uploads/e032f092-4953-4611-b1b8-f3a7a38fc4c5-midna-titlebar.png
 
 ## chat-images — the chat images
 Images and files in the chat, in the order they were sent: attachments fetched with the device token and drawn at their own size (one up to 440×320, a run of several in a 150px row), file chips that open on click (a PDF in the viewer) with a save-to-Downloads button, captions under each, Markdown web images, and the full-size viewer for images and PDFs with Download and Open.
@@ -37,3 +36,4 @@ Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.c
 The composer's pending files: pasted, dropped or picked files as thumbnails and chips above the message box, each with upload progress, a cross to remove it and Try again when it failed; the paperclip opens the picker and a drop shows a 'Drop to attach' overlay.
 Its files: clients/desktop/src/attach.tsx, clients/desktop/src/screens/Chat.tsx
 Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/8bd192d4-81bb-4d2e-ba2b-e5a05383936a-composer-files.png
+Its code has changed since that picture — if you change it, `ruri edit composer-files --shot <new picture>`
