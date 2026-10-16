@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { Mode } from "@midna/protocol";
+import { Attachments } from "./attachments.ts";
 import { Bus } from "./bus.ts";
 import { openDatabase } from "./db.ts";
 import { Devices } from "./devices.ts";
@@ -40,13 +41,15 @@ export class Store {
   readonly schedule: Schedule;
   readonly outbox: Outbox;
   readonly devices: Devices;
+  readonly attachments: Attachments;
 
   constructor(readonly db: Database) {
     this.planning = new Planning(db);
     this.memory = new Memory(db);
-    this.log = new Log(db);
+    this.attachments = new Attachments(db);
+    this.log = new Log(db, this.attachments);
     this.schedule = new Schedule(db);
-    this.outbox = new Outbox(db, this.bus);
+    this.outbox = new Outbox(db, this.bus, this.attachments);
     this.devices = new Devices(db);
   }
 
@@ -91,7 +94,8 @@ export class Store {
    * Say something to the user and record it in the conversation, linked to
    * its delivery. `seenByBrain` is false when the chat brain hasn't heard it
    * (a wakeup said it), so the next chat turn is told. `logText` is what the
-   * brain reads back, when that should differ from what the user sees.
+   * brain reads back, when that should differ from what the user sees; the
+   * names of any attachments are added to it, so the brain knows what it sent.
    */
   say(
     item: Parameters<Outbox["add"]>[0],
@@ -99,10 +103,9 @@ export class Store {
     now = Date.now(),
   ) {
     const sent = this.tell(item, now);
-    this.log.addMessage(
-      { conversationId: item.conversationId ?? MAIN, role: "midna", text: record.logText ?? item.text, client: record.client, seen: record.seenByBrain, outboxId: sent.id },
-      now,
-    );
+    const files = sent.attachments.length ? `[sent with it: ${sent.attachments.map((a) => a.name).join(", ")}]` : "";
+    const text = [record.logText ?? item.text, files].filter(Boolean).join("\n");
+    this.log.addMessage({ conversationId: item.conversationId ?? MAIN, role: "midna", text, client: record.client, seen: record.seenByBrain, outboxId: sent.id }, now);
     return sent;
   }
 

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
+import { attach, liftLocalImages } from "./attachments.ts";
 
 /**
  * midna's own tools, served over MCP so every harness gets the same set.
@@ -19,6 +20,10 @@ export interface ToolContext {
 const when = z.string().describe('Local time "2026-10-02 09:30", a date "2026-10-02", ISO with offset, or relative "+2h" / "+3d"');
 const maybeWhen = when.nullable().optional();
 const id = z.number().int().positive();
+const files = z
+  .array(z.string())
+  .max(10)
+  .describe("Images or files to send: absolute paths on this machine (a screenshot you took, a chart you made) or http(s) URLs to download");
 
 type Result = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 
@@ -326,25 +331,49 @@ export function createToolServer(ctx: ToolContext): McpServer {
   });
 
   // ── reaching the user ────────────────────────────────────────────────
+  /** Text plus files: the listed ones, and any Markdown image of a file on this machine. */
+  async function withFiles(text: string, refs: string[] | undefined) {
+    const kept = [];
+    for (const ref of refs ?? []) kept.push((await attach(store, ref)).id);
+    const lifted = liftLocalImages(store, text);
+    const attachments = [...kept, ...lifted.attachments];
+    if (!lifted.text.trim() && !attachments.length) throw new Error("nothing to send: give text or attachments");
+    return { text: lifted.text, attachments };
+  }
+  const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}` : "");
+
   tool(
     "message_user",
-    "Send the user a message now. urgent = interrupt them (only for what can't wait); normal = ordinary; fyi = quiet background. Non-urgent messages wait out quiet hours. In a chat, your reply already reaches them — use this only for something separate.",
-    { text: z.string(), priority: z.enum(["urgent", "normal", "fyi"]).optional() },
-    (a) => {
-      const item = store.say({ kind: "notification", text: a.text, priority: a.priority ?? "normal", conversationId: MAIN }, { client: "notification", seenByBrain: ctx.episodeKind === "chat" });
-      return item.seq ? "sent" : `held until ${t(item.deliverAfter)} (quiet hours)`;
+    "Send the user a message now, with images or files if it helps (attachments). urgent = interrupt them (only for what can't wait); normal = ordinary; fyi = quiet background. Non-urgent messages wait out quiet hours. In a chat, your reply already reaches them — use this only for something separate, and use attach to put files on your reply.",
+    { text: z.string(), priority: z.enum(["urgent", "normal", "fyi"]).optional(), attachments: files.optional() },
+    async (a) => {
+      const body = await withFiles(a.text, a.attachments);
+      const item = store.say({ kind: "notification", ...body, priority: a.priority ?? "normal", conversationId: MAIN }, { client: "notification", seenByBrain: ctx.episodeKind === "chat" });
+      return (item.seq ? "sent" : `held until ${t(item.deliverAfter)} (quiet hours)`) + sentWith(item.attachments.length);
     },
   );
   tool(
     "ask_user",
-    "Ask the user a question, with optional answer choices they can tap. Their answer arrives as a normal message.",
-    { question: z.string(), options: z.array(z.string()).max(8).optional(), priority: z.enum(["urgent", "normal", "fyi"]).optional() },
-    (a) => {
+    "Ask the user a question, with optional answer choices they can tap, and images or files to look at (attachments). Their answer arrives as a normal message.",
+    { question: z.string(), options: z.array(z.string()).max(8).optional(), priority: z.enum(["urgent", "normal", "fyi"]).optional(), attachments: files.optional() },
+    async (a) => {
+      const body = await withFiles(a.question, a.attachments);
       const item = store.say(
-        { kind: "question", text: a.question, options: a.options, priority: a.priority ?? "normal", conversationId: MAIN },
-        { client: "question", seenByBrain: ctx.episodeKind === "chat", logText: a.question + (a.options?.length ? ` [${a.options.join(" / ")}]` : "") },
+        { kind: "question", ...body, options: a.options, priority: a.priority ?? "normal", conversationId: MAIN },
+        { client: "question", seenByBrain: ctx.episodeKind === "chat", logText: body.text + (a.options?.length ? ` [${a.options.join(" / ")}]` : "") },
       );
-      return item.seq ? `asked (question #${item.id})` : `question #${item.id} held until ${t(item.deliverAfter)} (quiet hours)`;
+      return (item.seq ? `asked (question #${item.id})` : `question #${item.id} held until ${t(item.deliverAfter)} (quiet hours)`) + sentWith(item.attachments.length);
+    },
+  );
+  tool(
+    "attach",
+    "Put images or files on your reply in this chat — a screenshot you took, a chart you made, a photo from the web. They arrive with the reply and show inline in the user's app and on Telegram. Call it before you finish; your reply can be short or even empty.",
+    { files: files.min(1) },
+    async (a) => {
+      if (ctx.episodeKind !== "chat" || ctx.episodeId === null) throw new Error("there is no reply to attach to here — send files with message_user's attachments instead");
+      const kept = [];
+      for (const ref of a.files) kept.push(await attach(store, ref, { episodeId: ctx.episodeId }));
+      return `attached ${kept.map((f) => `${f.name} (${f.kind}, ${Math.max(1, Math.round(f.size / 1024))} KB)`).join(", ")} — they go with your reply`;
     },
   );
 

@@ -260,6 +260,26 @@ const MIGRATIONS: string[] = [
   ALTER TABLE messages ADD COLUMN outbox_id INTEGER REFERENCES outbox(id);
   ALTER TABLE messages ADD COLUMN reply_to INTEGER REFERENCES outbox(id);
   `,
+  // Images and files sent with messages, kept with the conversation. An
+  // attachment belongs to an outbox item (midna said it) or a message (the
+  // user said it); a chat episode stages its reply's before the reply exists.
+  `
+  CREATE TABLE attachments (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    source TEXT,
+    episode_id INTEGER REFERENCES episodes(id),
+    outbox_id INTEGER REFERENCES outbox(id),
+    message_id INTEGER REFERENCES messages(id),
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX attachments_outbox ON attachments(outbox_id);
+  CREATE INDEX attachments_message ON attachments(message_id);
+  CREATE INDEX attachments_episode ON attachments(episode_id);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

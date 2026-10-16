@@ -16,6 +16,24 @@ export type Priority = z.infer<typeof Priority>;
 export const Mode = z.enum(["autonomous", "ask"]);
 export type Mode = z.infer<typeof Mode>;
 
+/**
+ * A file that goes with a message: a screenshot midna took, a photo the user
+ * sent. The bytes live on the host; GET /v1/attachments/:id serves them to a
+ * paired device (MidnaClient.attachment).
+ */
+export const Attachment = z.object({
+  id: z.string(),
+  /** "image" when a client can draw it inline; anything else is a file. */
+  kind: z.enum(["image", "file"]),
+  name: z.string(),
+  mime: z.string(),
+  size: z.number(),
+});
+export type Attachment = z.infer<typeof Attachment>;
+
+/** The largest file midna keeps as an attachment. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 /** Something midna is telling or asking the user. Replayable by id. */
 export const OutboxItem = z.object({
   id: z.number(),
@@ -30,24 +48,31 @@ export const OutboxItem = z.object({
   createdAt: z.number(),
   /** Held back until this time (quiet hours); clients may show it early. */
   deliverAfter: z.number(),
+  /** Images and files sent with it. A host older than 0.4 leaves this out. */
+  attachments: z.array(Attachment).default([]),
 });
 export type OutboxItem = z.infer<typeof OutboxItem>;
 
 /** Live events on GET /v1/events. Only `outbox` events carry a replay id. */
 export type StreamEvent =
   | { type: "outbox"; item: OutboxItem }
-  | { type: "user_message"; id: number; conversationId: string; text: string; client: string; createdAt: number; replyTo: number | null }
+  | { type: "user_message"; id: number; conversationId: string; text: string; client: string; createdAt: number; replyTo: number | null; attachments: Attachment[] }
   | { type: "status"; conversationId: string | null; state: "thinking" | "idle" }
   | { type: "activity"; conversationId: string | null; tool: string };
 
-export const SendMessage = z.object({
-  text: z.string().min(1),
-  conversationId: z.string().optional(),
-  /** Which client this came from ("telegram", "desktop", "cli", …). */
-  client: z.string().default("unknown"),
-  /** The outbox question this answers, when it answers one. */
-  replyTo: z.number().optional(),
-});
+export const SendMessage = z
+  .object({
+    /** May be empty when the message is only attachments. */
+    text: z.string(),
+    conversationId: z.string().optional(),
+    /** Which client this came from ("telegram", "desktop", "cli", …). */
+    client: z.string().default("unknown"),
+    /** The outbox question this answers, when it answers one. */
+    replyTo: z.number().optional(),
+    /** Ids of attachments uploaded first with MidnaClient.upload. */
+    attachments: z.array(z.string()).max(10).optional(),
+  })
+  .refine((m) => m.text.trim() || m.attachments?.length, { message: "a message needs text or an attachment" });
 export type SendMessage = z.input<typeof SendMessage>;
 
 export const PairRequest = z.object({
@@ -73,6 +98,8 @@ export interface HistoryItem {
   replyTo: number | null;
   /** How a midna line was delivered — kind, priority, and a question's options. */
   outbox: { id: number; seq: number | null; kind: OutboxItem["kind"]; priority: Priority; options: string[] | null; answered: boolean } | null;
+  /** Images and files that went with the line. */
+  attachments: Attachment[];
 }
 
 /** What the dashboards draw: objectives, what's open, what's coming. Times are epoch ms. */
@@ -136,6 +163,9 @@ export const SettingsPatch = z.object({
 });
 export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
+/** What a client can upload: a file's bytes. */
+export type Upload = Blob | ArrayBuffer | Uint8Array<ArrayBuffer>;
+
 export class MidnaError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -152,14 +182,14 @@ export class MidnaClient {
     this.token = token;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  private async call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, raw?: { body: Upload; type: string }): Promise<T> {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: {
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(body !== undefined ? { "content-type": "application/json" } : raw ? { "content-type": raw.type } : {}),
       },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(body !== undefined ? { body: JSON.stringify(body) } : raw ? { body: raw.body } : {}),
       ...(signal ? { signal } : {}),
     });
     const text = await res.text();
@@ -208,6 +238,23 @@ export class MidnaClient {
   }
   setupBridge(name: string, input: Record<string, string>): Promise<BridgeSetupResult> {
     return this.call("POST", `/v1/bridges/${encodeURIComponent(name)}/setup`, input);
+  }
+  /** An attachment's bytes. The desktop draws an image from them with URL.createObjectURL. */
+  async attachment(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await fetch(`${this.baseUrl}/v1/attachments/${encodeURIComponent(id)}`, {
+      headers: this.token ? { authorization: `Bearer ${this.token}` } : {},
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => undefined)) as { error?: string } | undefined;
+      throw new MidnaError(res.status, data?.error ?? res.statusText);
+    }
+    // Bun types Response.blob() as node:buffer's Blob; it is the global one.
+    return (await res.blob()) as unknown as Blob;
+  }
+  /** Put a file on the host, to send with a message: `send({ text, attachments: [id] })`. */
+  upload(data: Upload, file: { name: string; mime: string }): Promise<Attachment> {
+    return this.call("POST", `/v1/attachments?name=${encodeURIComponent(file.name)}`, undefined, undefined, { body: data, type: file.mime });
   }
   /** Released outbox items after stream position `since`. */
   outbox(since = 0): Promise<OutboxItem[]> {

@@ -152,3 +152,54 @@ describe("schedule and outbox", () => {
     expect(s.devices.authenticate(paired!.token)).toBeNull();
   });
 });
+
+describe("attachments", () => {
+  const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+
+  test("a file is kept with what it is, judged by its bytes over its name", () => {
+    const s = fresh();
+    const a = s.attachments.add({ data: PNG, name: "../../etc/shot.jpg", mime: "application/octet-stream" });
+    expect(a).toMatchObject({ kind: "image", name: "shot.jpg", mime: "image/png", size: PNG.byteLength });
+    expect(a.id).toMatch(/^att_/);
+    expect(s.attachments.read(a.id)!.data).toEqual(PNG);
+    const doc = s.attachments.add({ data: new TextEncoder().encode("hello"), name: "notes.txt" });
+    expect(doc).toMatchObject({ kind: "file", mime: "text/plain" });
+    expect(() => s.attachments.add({ data: new Uint8Array(0), name: "empty.png" })).toThrow(/empty/);
+    expect(() => s.attachments.add({ data: new Uint8Array(26 * 1024 * 1024), name: "huge.bin" })).toThrow(/MB/);
+  });
+
+  test("what midna says carries its attachments, on the stream and in history", () => {
+    const s = fresh();
+    const emitted: unknown[] = [];
+    s.bus.on((e) => emitted.push(e));
+    const shot = s.attachments.add({ data: PNG, name: "shot.png" });
+    const item = s.say({ kind: "message", text: "Here it is", attachments: [shot.id] }, { client: "chat", seenByBrain: true });
+    expect(item.attachments).toEqual([shot]);
+    expect(emitted).toContainEqual({ type: "outbox", item: expect.objectContaining({ attachments: [shot] }) });
+    expect(s.outbox.since(0)[0]!.attachments).toEqual([shot]);
+    const [line] = s.log.history("main");
+    expect(line).toMatchObject({ text: "Here it is", attachments: [shot] });
+    // The brain reads back what it sent.
+    expect(s.log.recent("main", 1)[0]!.text).toBe("Here it is\n[sent with it: shot.png]");
+  });
+
+  test("an attachment goes with one message only", () => {
+    const s = fresh();
+    const photo = s.attachments.add({ data: PNG, name: "photo.png" });
+    const msg = s.log.addMessage({ conversationId: "main", role: "user", text: "", client: "telegram", seen: false });
+    expect(s.attachments.link([photo.id, "att_nope"], { messageId: msg.id })).toEqual([photo]);
+    expect(s.attachments.link([photo.id], { outboxId: 1 })).toEqual([]);
+    expect(s.attachments.forMessages([msg.id]).get(msg.id)).toEqual([photo]);
+    expect(s.log.history("main")[0]!.attachments).toEqual([photo]);
+  });
+
+  test("a chat episode stages files for the reply it is still writing", () => {
+    const s = fresh();
+    const episode = s.log.startEpisode({ kind: "chat", conversationId: "main", model: "test" });
+    const a = s.attachments.add({ data: PNG, name: "a.png", episodeId: episode });
+    const b = s.attachments.add({ data: PNG, name: "b.png", episodeId: episode });
+    expect(s.attachments.staged(episode)).toEqual([a.id, b.id]);
+    s.say({ kind: "message", text: "", attachments: s.attachments.staged(episode) }, { client: "chat", seenByBrain: true });
+    expect(s.attachments.staged(episode)).toEqual([]);
+  });
+});

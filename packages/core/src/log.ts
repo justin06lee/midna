@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { HistoryItem } from "@midna/protocol";
+import type { Attachments } from "./attachments.ts";
 import { ftsQuery } from "./planning.ts";
 
 /** The episodic record: conversations, every message, every episode, every action. */
@@ -46,7 +47,7 @@ interface HistoryRow {
 }
 
 export class Log {
-  constructor(private db: Database) {}
+  constructor(private db: Database, private files: Attachments) {}
 
   conversation(id: string, now = Date.now()): Conversation {
     this.db
@@ -114,6 +115,8 @@ export class Log {
          ORDER BY m.id DESC LIMIT $n`,
       )
       .all({ c: conversationId, n: opts.limit ?? 50, ...(opts.before ? { b: opts.before } : {}) } as never) as HistoryRow[];
+    const sent = this.files.forOutbox(rows.flatMap((r) => (r.o_id ? [r.o_id] : [])));
+    const received = this.files.forMessages(rows.map((r) => r.id));
     return rows.reverse().map((r) => ({
       id: r.id,
       role: r.role,
@@ -124,6 +127,7 @@ export class Log {
       outbox: r.o_id
         ? { id: r.o_id, seq: r.o_seq, kind: r.o_kind, priority: r.o_priority, options: r.o_options ? JSON.parse(r.o_options) : null, answered: r.o_answered != null }
         : null,
+      attachments: (r.o_id ? sent.get(r.o_id) : received.get(r.id)) ?? [],
     }));
   }
 

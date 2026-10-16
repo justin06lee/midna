@@ -138,7 +138,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
 }
 
-export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross"; className?: string }) {
+export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image"; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     chat: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" />,
     today: (
@@ -179,6 +179,14 @@ export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | 
     ),
     check: <path d="m5 10.5 3 3 7-7" />,
     cross: <path d="m6 6 8 8M14 6l-8 8" />,
+    file: <path d="M6 3.5h5L15 7.5v8a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1zM10.5 3.5v4.5H15" />,
+    image: (
+      <>
+        <rect x="3.5" y="4.5" width="13" height="11" rx="2" />
+        <circle cx="7.5" cy="8.5" r="1.25" />
+        <path d="m4 14 4-3.5 3 2.5 2-1.5 3.5 2.5" />
+      </>
+    ),
   };
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

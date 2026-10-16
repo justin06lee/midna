@@ -2,12 +2,17 @@
 
 export interface TgUser { id: number; username?: string; first_name?: string }
 export interface TgChat { id: number; type: string }
+export interface TgPhotoSize { file_id: string; width: number; height: number; file_size?: number }
+export interface TgDocument { file_id: string; file_name?: string; mime_type?: string; file_size?: number }
 export interface TgMessage {
   message_id: number;
   chat: TgChat;
   from?: TgUser;
   text?: string;
   caption?: string;
+  /** The same photo at several sizes, smallest first. */
+  photo?: TgPhotoSize[];
+  document?: TgDocument;
   reply_to_message?: { message_id: number };
 }
 export interface TgCallbackQuery { id: string; from: TgUser; message?: TgMessage; data?: string }
@@ -20,18 +25,29 @@ export class TelegramError extends Error {
   }
 }
 
+/** The biggest photo the Bot API takes by upload; bigger images go as files. */
+const PHOTO_MAX = 10 * 1024 * 1024;
+/** Image types Telegram shows as a photo. */
+const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+export type Media = { data: Blob; name: string; mime: string } | { url: string };
+
 export class Bot {
   private readonly base: string;
+  private readonly files: string;
 
   constructor(token: string, apiBase = process.env.TELEGRAM_API ?? "https://api.telegram.org") {
     this.base = `${apiBase.replace(/\/+$/, "")}/bot${token}`;
+    this.files = `${apiBase.replace(/\/+$/, "")}/file/bot${token}`;
   }
 
-  async call<T>(method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+  /** A Bot API call, as JSON — or as a form, when it carries a file. */
+  async call<T>(method: string, params: Record<string, unknown> | FormData = {}, signal?: AbortSignal): Promise<T> {
+    const form = params instanceof FormData;
     const res = await fetch(`${this.base}/${method}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(params),
+      ...(form ? {} : { headers: { "content-type": "application/json" } }),
+      body: form ? params : JSON.stringify(params),
       ...(signal ? { signal } : {}),
     });
     const body = (await res.json().catch(() => ({ ok: false, description: res.statusText }))) as { ok: boolean; result?: T; description?: string; error_code?: number };
@@ -66,6 +82,58 @@ export class Bot {
       }
     }
     return sent;
+  }
+
+  /**
+   * Send an image or a file, with an optional caption (Telegram allows 1024
+   * characters). Images Telegram can show go as photos; anything else, or a
+   * photo Telegram turns down (too big, odd proportions), goes as a file.
+   */
+  async sendMedia(chatId: number, media: Media, opts: { caption?: string; silent?: boolean; keyboard?: InlineKeyboard } = {}): Promise<TgMessage> {
+    const photo = "url" in media || (PHOTO_TYPES.has(media.mime) && media.data.size <= PHOTO_MAX);
+    const send = async (method: "sendPhoto" | "sendDocument", html: boolean) => {
+      const form = new FormData();
+      form.set("chat_id", String(chatId));
+      if (opts.silent) form.set("disable_notification", "true");
+      if (opts.keyboard) form.set("reply_markup", JSON.stringify({ inline_keyboard: opts.keyboard }));
+      if (opts.caption) {
+        form.set("caption", html ? toHtml(opts.caption) : opts.caption);
+        if (html) form.set("parse_mode", "HTML");
+      }
+      const field = method === "sendPhoto" ? "photo" : "document";
+      if ("url" in media) form.set(field, media.url);
+      else form.set(field, media.data, media.name);
+      return this.call<TgMessage>(method, form);
+    };
+    const attempt = async (method: "sendPhoto" | "sendDocument") => {
+      try {
+        return await send(method, true);
+      } catch (err) {
+        // Markup Telegram won't parse: the same caption, plain.
+        if (!opts.caption || !(err instanceof TelegramError) || err.code !== 400 || !/pars|entit/i.test(err.message)) throw err;
+        return send(method, false);
+      }
+    };
+    if (!photo) return attempt("sendDocument");
+    try {
+      return await attempt("sendPhoto");
+    } catch (err) {
+      if (!(err instanceof TelegramError) || err.code !== 400) throw err;
+      return attempt("sendDocument");
+    }
+  }
+
+  getFile(fileId: string) {
+    return this.call<{ file_id: string; file_path?: string; file_size?: number }>("getFile", { file_id: fileId });
+  }
+
+  /** A file someone sent the bot (the Bot API hands over files up to 20 MB). */
+  async download(fileId: string): Promise<{ data: Uint8Array<ArrayBuffer>; path: string }> {
+    const file = await this.getFile(fileId);
+    if (!file.file_path) throw new Error("Telegram didn't give a path for that file");
+    const res = await fetch(`${this.files}/${file.file_path}`);
+    if (!res.ok) throw new Error(`downloading from Telegram failed: ${res.status} ${res.statusText}`);
+    return { data: new Uint8Array(await res.arrayBuffer()), path: file.file_path };
   }
 
   typing(chatId: number) {
@@ -112,6 +180,7 @@ export function toHtml(md: string): string {
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
         .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
         .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,!?:;]|$)/g, "$1<i>$2</i>")
+        .replace(/!\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, alt: string, href: string) => `<a href="${href}">${alt || "image"}</a>`)
         .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
         .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>");
     })

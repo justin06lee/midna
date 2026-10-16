@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MidnaClient, MidnaError, type Connection, type HistoryItem, type OutboxItem, type Priority, type Status, type StreamEvent } from "@midna/protocol";
+import { MidnaClient, MidnaError, type Attachment, type Connection, type HistoryItem, type OutboxItem, type Priority, type Status, type StreamEvent } from "@midna/protocol";
 import { notify } from "./host";
 
 /** One line of the conversation, however it arrived. */
@@ -15,6 +15,8 @@ export interface Line {
   options?: string[] | null;
   answered?: boolean;
   outboxId?: number;
+  /** Images and files that went with it. */
+  attachments?: Attachment[];
   /** The message id, for lines that came from history — where older pages continue from. */
   messageId?: number;
   pending?: boolean;
@@ -40,8 +42,10 @@ export function normalizeStatus(s: Partial<Status> & Pick<Status, "version" | "n
   } as Status;
 }
 
+// A host older than 0.4 sends no attachments at all.
 function fromHistory(h: HistoryItem): Line {
-  if (h.role === "user") return { key: `m:${h.id}`, role: "user", text: h.text, client: h.client, at: h.createdAt, messageId: h.id };
+  const attachments = h.attachments ?? [];
+  if (h.role === "user") return { key: `m:${h.id}`, role: "user", text: h.text, client: h.client, at: h.createdAt, messageId: h.id, attachments };
   const o = h.outbox;
   return {
     key: o ? `o:${o.id}` : `m:${h.id}`,
@@ -50,12 +54,20 @@ function fromHistory(h: HistoryItem): Line {
     text: h.text,
     client: h.client,
     at: h.createdAt,
+    attachments,
     ...(o ? { kind: o.kind, priority: o.priority, options: o.options, answered: o.answered, outboxId: o.id } : { kind: "message" as const }),
   };
 }
 
 function fromOutbox(item: OutboxItem): Line {
-  return { key: `o:${item.id}`, role: "midna", text: item.text, client: null, at: item.createdAt, kind: item.kind, priority: item.priority, options: item.options, answered: false, outboxId: item.id };
+  return { key: `o:${item.id}`, role: "midna", text: item.text, client: null, at: item.createdAt, kind: item.kind, priority: item.priority, options: item.options, answered: false, outboxId: item.id, attachments: item.attachments ?? [] };
+}
+
+/** What a notification says about a line that may be only an image. */
+function gist(text: string, attachments: Attachment[] = []): string {
+  if (text.trim()) return text.slice(0, 240);
+  const images = attachments.filter((a) => a.kind === "image").length;
+  return images ? (images === 1 ? "sent an image" : `sent ${images} images`) : attachments.length === 1 ? `sent ${attachments[0]!.name}` : `sent ${attachments.length} files`;
 }
 
 /**
@@ -157,9 +169,9 @@ export function useMidna(connection: Connection) {
       if (e.type === "outbox") {
         merge([fromOutbox(e.item)]);
         setChanged((n) => n + 1);
-        if (e.item.kind !== "message" || !document.hasFocus()) void notify(e.item.kind === "question" ? "midna asks" : "midna", e.item.text.slice(0, 240));
+        if (e.item.kind !== "message" || !document.hasFocus()) void notify(e.item.kind === "question" ? "midna asks" : "midna", gist(e.item.text, e.item.attachments));
       } else if (e.type === "user_message") {
-        merge([{ key: `m:${e.id}`, role: "user", text: e.text, client: e.client, at: e.createdAt }]);
+        merge([{ key: `m:${e.id}`, role: "user", text: e.text, client: e.client, at: e.createdAt, attachments: e.attachments ?? [] }]);
         if (e.replyTo) setLines((cur) => cur.map((l) => (l.outboxId === e.replyTo ? { ...l, answered: true } : l)));
       } else if (e.type === "status") {
         setThinking(e.state === "thinking" ? { tool: null } : null);
@@ -195,6 +207,7 @@ export function useMidna(connection: Connection) {
   );
 
   const refreshStatus = useCallback(async () => setStatus(await client.status()), [client, setStatus]);
+  const loadAttachment = useCallback((id: string) => client.attachment(id), [client]);
 
-  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed };
+  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment };
 }
