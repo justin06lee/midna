@@ -5,17 +5,20 @@
 //! home is the `midna` binary this app carries — the same program that runs
 //! on the host — driven with `--json` and streamed back line by line. What is
 //! left for Rust is what a web view can't do: run that binary, remember the
-//! connection, open a terminal for a sign-in, and keep a tray icon so midna
-//! can still reach you with the window closed.
+//! connection, open a terminal for a sign-in, put the files midna sends where
+//! the user can use them, and keep a tray icon so midna can still reach you
+//! with the window closed.
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use tauri::image::Image;
-use tauri::ipc::Channel;
+use tauri::ipc::{Channel, InvokeBody, Request, Response};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 #[derive(serde::Serialize)]
@@ -183,6 +186,174 @@ fn open_terminal(argv: Vec<String>) -> Result<(), String> {
     }
 }
 
+// ── files midna sent ─────────────────────────────────────────────────────
+// The web view fetches an attachment with its token and hands the bytes over
+// raw, with the name in a header; Rust writes them where they belong.
+
+fn header(request: &Request<'_>, key: &str) -> Result<String, String> {
+    let raw = request.headers().get(key).and_then(|v| v.to_str().ok()).ok_or(format!("no {key}"))?;
+    // The name comes percent-encoded: a header carries only ASCII.
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&raw[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Ok(String::from_utf8_lossy(&out).into_owned())
+}
+
+fn body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], String> {
+    match request.body() {
+        InvokeBody::Raw(bytes) => Ok(bytes),
+        _ => Err("expected the file's bytes".into()),
+    }
+}
+
+/// A name midna gave a file, made safe to write: no folders, nothing hidden.
+fn safe_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let clean: String = base.chars().filter(|c| !c.is_control() && *c != ':').collect();
+    let clean = clean.trim().trim_start_matches('.').trim();
+    if clean.is_empty() {
+        "attachment".into()
+    } else {
+        clean.chars().take(200).collect()
+    }
+}
+
+/// Write `bytes` as a new file in `dir`: `name`, or `name (1)`, `name (2)`… if taken.
+fn write_new(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let p = Path::new(name);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let ext = p.extension().and_then(|s| s.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+    for n in 0..1000 {
+        let path = dir.join(if n == 0 { name.to_string() } else { format!("{stem} ({n}){ext}") });
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(bytes).map_err(|e| e.to_string())?;
+                quarantine(&path);
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(format!("couldn't find a free name for {name}"))
+}
+
+/// Mark a file as downloaded, the way a browser does, so Gatekeeper checks
+/// anything runnable before it runs: a file midna sent is still from the internet.
+fn quarantine(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = std::process::Command::new("/usr/bin/xattr")
+            .args(["-w", "com.apple.quarantine", &format!("0083;{secs:x};midna;")])
+            .arg(path)
+            .status();
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
+}
+
+/// Save a file midna sent into Downloads; answers where it went.
+#[tauri::command]
+fn save_download(app: AppHandle, request: Request<'_>) -> Result<String, String> {
+    let name = safe_name(&header(&request, "x-name")?);
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    let path = write_new(&dir, &name, body(&request)?)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Show a file in Finder — only one this app put in Downloads.
+#[tauri::command]
+fn show_in_folder(app: AppHandle, path: String) -> Result<(), String> {
+    let dir = app.path().download_dir().map_err(|e| e.to_string())?;
+    let path = PathBuf::from(path);
+    if path.parent() != Some(dir.as_path()) || !path.is_file() {
+        return Err("that isn't a file midna saved".into());
+    }
+    app.opener().reveal_item_in_dir(&path).map_err(|e| e.to_string())
+}
+
+/// Open a file midna sent in its default app, from a copy in the app's cache.
+#[tauri::command]
+fn open_attachment(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+    let id: String = header(&request, "x-id")?.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    if id.is_empty() {
+        return Err("no attachment id".into());
+    }
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("attachments").join(id);
+    let name = safe_name(&header(&request, "x-name")?);
+    // An attachment never changes: open the copy made last time, if there is one.
+    let path = if dir.join(&name).is_file() { dir.join(&name) } else { write_new(&dir, &name, body(&request)?)? };
+    app.opener().open_path(path.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())
+}
+
+// ── files copied in Finder ───────────────────────────────────────────────
+// A paste of several files gives the web view only the first; the app reads
+// the list itself, and only ever reads a file that is on the clipboard.
+
+#[cfg(target_os = "macos")]
+fn copied_paths() -> Vec<PathBuf> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    use objc2_foundation::NSURL;
+    let Some(items) = NSPasteboard::generalPasteboard().pasteboardItems() else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|item| item.stringForType(unsafe { NSPasteboardTypeFileURL }))
+        .filter_map(|s| NSURL::URLWithString(&s)?.path())
+        .map(|p| PathBuf::from(p.to_string()))
+        .filter(|p| p.is_file())
+        .collect()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copied_paths() -> Vec<PathBuf> {
+    vec![]
+}
+
+#[derive(serde::Serialize)]
+struct Copied {
+    path: String,
+    name: String,
+    size: u64,
+}
+
+/// The files on the clipboard, in the order they were copied.
+#[tauri::command]
+fn copied_files() -> Vec<Copied> {
+    copied_paths()
+        .into_iter()
+        .map(|p| Copied {
+            name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            size: std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0),
+            path: p.to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
+/// One of those files' bytes — only while it is still on the clipboard.
+#[tauri::command]
+async fn read_copied(path: String) -> Result<Response, String> {
+    let path = PathBuf::from(path);
+    if !copied_paths().contains(&path) {
+        return Err("that file isn't on the clipboard any more".into());
+    }
+    tokio::fs::read(&path).await.map(Response::new).map_err(|e| e.to_string())
+}
+
 fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -199,7 +370,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![midna, connection_load, connection_save, connection_clear, open_terminal])
+        .invoke_handler(tauri::generate_handler![midna, connection_load, connection_save, connection_clear, open_terminal, save_download, show_in_folder, open_attachment, copied_files, read_copied])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open midna", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit midna", true, None::<&str>)?;

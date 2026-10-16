@@ -1,11 +1,25 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import type { Attachment } from "@midna/protocol";
+import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
+import { MAX_FILES, PendingFiles, typeFor, usePendingFiles, type Upload } from "../attach";
+import { copiedFiles, showInFolder } from "../host";
 import { Markdown } from "../markdown";
-import { Attachments, Media, Viewer, type Viewing } from "../media";
+import { Attachments, Media, Viewer, type Notice, type Viewing } from "../media";
 import { Icon, Mark, Spinner } from "../ui";
 import type { Line } from "../useMidna";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const why = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const finder = /Mac/.test(navigator.userAgent) ? "Show in Finder" : "Show in folder";
+const carriesFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
+const stamp = () => new Date().toLocaleString("sv").replace(" ", " at ").replaceAll(":", ".");
+
+/** A pasted image comes as "image.png": name it the way a screenshot is named. */
+function named(f: File): File {
+  const ext = /^image\.(\w+)$/i.exec(f.name)?.[1];
+  return ext ? new File([f], `Pasted image ${stamp()}.${ext}`, { type: f.type }) : f;
+}
 
 /** The conversation: everything said, on any device, and the place to say more. */
 export function Chat({
@@ -18,27 +32,106 @@ export function Chat({
   draft,
   onDraftUsed,
   loadAttachment,
+  upload,
 }: {
   lines: Line[];
   thinking: { tool: string | null } | null;
   canSend: boolean;
-  send: (text: string, replyTo?: number) => Promise<void>;
+  send: (text: string, replyTo?: number, attachments?: Attachment[]) => Promise<void>;
   loadOlder: () => Promise<void>;
   olderExhausted: boolean;
   draft?: string | null;
   onDraftUsed?: () => void;
   /** An attachment's bytes, fetched with this device's token. */
   loadAttachment: (id: string) => Promise<Blob>;
+  /** Put a file on the host, reporting progress, to send with the next message. */
+  upload: Upload;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const [viewing, setViewing] = useState<Viewing | null>(null);
   const closeViewer = useCallback(() => setViewing(null), []);
-  const media = useMemo(() => ({ load: loadAttachment, open: setViewing }), [loadAttachment]);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const media = useMemo(() => ({ load: loadAttachment, view: setViewing, notice: setNotice }), [loadAttachment]);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const busy = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const files = usePendingFiles(upload);
+  const [dragging, setDragging] = useState(false);
+  const depth = useRef(0);
+
+  // Pasted, dropped or picked: into the composer, uploading at once.
+  const { add } = files;
+  const addFiles = useCallback(
+    (list: File[]) => {
+      if (!list.length || busy.current) return;
+      setError(null);
+      const left = add(list);
+      if (left) setNotice({ text: `A message takes up to ${MAX_FILES} files; ${left === 1 ? "one was" : `${left} were`} left out.`, error: true });
+      input.current?.focus();
+    },
+    [add],
+  );
+
+  useEffect(() => {
+    const paste = async (e: ClipboardEvent) => {
+      const list = [...(e.clipboardData?.files ?? [])];
+      if (!list.length) return;
+      e.preventDefault();
+      // Several files copied in Finder reach WebKit as only the first: read them all through the app.
+      const copied = await copiedFiles().catch(() => []);
+      if (copied.length < 2) return addFiles(list.map(named));
+      const big = copied.filter((c) => c.size > MAX_ATTACHMENT_BYTES);
+      if (big.length) setNotice({ text: `Left out ${big.map((c) => c.name).join(", ")}: over the ${MAX_ATTACHMENT_BYTES / 1048576} MB limit.`, error: true });
+      try {
+        const read = await Promise.all(copied.filter((c) => !big.includes(c)).map(async (c) => new File([await c.read()], c.name, { type: typeFor(c.name) })));
+        addFiles(read);
+      } catch (err) {
+        setNotice({ text: `Couldn't read what was copied: ${why(err)}`, error: true });
+      }
+    };
+    document.addEventListener("paste", paste);
+    return () => document.removeEventListener("paste", paste);
+  }, [addFiles]);
+
+  // A notice stays long enough to act on.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), notice.path ? 9000 : 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const drag = {
+    onDragEnter: (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      depth.current++;
+      setDragging(true);
+    },
+    onDragOver: (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      if (--depth.current <= 0) {
+        depth.current = 0;
+        setDragging(false);
+      }
+    },
+    onDrop: (e: DragEvent) => {
+      if (!carriesFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setDragging(false);
+      addFiles([...e.dataTransfer.files]);
+    },
+  };
 
   // Something to say, handed over from another screen.
   useEffect(() => {
@@ -76,15 +169,36 @@ export function Chat({
 
   const submit = async (value = text, replyTo?: number) => {
     const t = value.trim();
-    if (!t) return;
+    const withFiles = !replyTo && files.items.length > 0;
+    if ((!t && !withFiles) || busy.current) return;
     setError(null);
     stick.current = true;
-    if (!replyTo) setText("");
+    busy.current = true;
+    setSending(true);
     try {
-      await send(t, replyTo);
-    } catch (err) {
-      if (!replyTo) setText(t);
-      setError((err as Error).message);
+      // Every file up first, then the message with them, in the order they were added.
+      let attachments: Attachment[] = [];
+      if (withFiles) {
+        try {
+          attachments = await files.ready();
+        } catch {
+          setError("a file didn't upload — try it again, or take it out");
+          return;
+        }
+      }
+      const taken = withFiles ? files.take() : null;
+      if (!replyTo) setText("");
+      try {
+        await send(t, replyTo, attachments);
+        taken?.done();
+      } catch (err) {
+        if (!replyTo) setText(t);
+        taken?.back();
+        setError(why(err));
+      }
+    } finally {
+      busy.current = false;
+      setSending(false);
     }
   };
 
@@ -98,7 +212,7 @@ export function Chat({
 
   return (
     <Media.Provider value={media}>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex h-full min-h-0 flex-col" {...drag}>
         <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
           <div ref={content} className="mx-auto w-full max-w-[720px] px-6 pt-4 pb-6">
             {lines.length === 0 && !thinking && (
@@ -142,36 +256,92 @@ export function Chat({
 
         <div className="shrink-0 px-6 pt-1 pb-5">
           <div className="mx-auto w-full max-w-[720px]">
+            {notice && (
+              <div role="status" className="rise mb-2 flex items-center gap-2 rounded-[10px] border border-line bg-panel py-1 pr-1 pl-3 text-[12.5px] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                <Icon name={notice.error ? "cross" : "check"} className="size-3.5 shrink-0 text-dim" />
+                <span className="selectable min-w-0 flex-1 truncate">{notice.text}</span>
+                {notice.path && (
+                  <button type="button" onClick={() => void showInFolder(notice.path!).catch((err) => setNotice({ text: why(err), error: true }))} className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium hover:bg-hover">
+                    <Icon name="folder" className="size-3.5" />
+                    {finder}
+                  </button>
+                )}
+                <button type="button" title="Dismiss" onClick={() => setNotice(null)} className="flex size-6 shrink-0 items-center justify-center rounded-md text-dim hover:bg-hover hover:text-ink">
+                  <Icon name="cross" className="size-3.5" />
+                </button>
+              </div>
+            )}
             {error && <p className="mb-2 text-[12px] text-ink-2">Couldn't send: {error}</p>}
-            <div className="field flex items-end gap-2 rounded-[14px] py-1.5 pr-1.5 pl-3.5">
-              <textarea
-                ref={input}
-                rows={1}
-                value={text}
-                autoFocus
-                placeholder={canSend ? "Message midna" : "Reconnecting…"}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-                className="selectable min-h-[22px] flex-1 resize-none bg-transparent py-[5px] text-[13.5px] leading-[1.45] outline-none placeholder:text-dimmer"
-              />
-              <button
-                type="button"
-                title="Send (Enter)"
-                disabled={!text.trim() || !canSend}
-                onClick={() => void submit()}
-                className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-ink transition-opacity disabled:opacity-25"
-              >
-                <Icon name="send" className="size-4" />
-              </button>
+            <div className="field rounded-[14px] p-1.5">
+              <div className="px-0.5">
+                <PendingFiles
+                  items={files.items}
+                  onRemove={(key) => {
+                    setError(null);
+                    files.remove(key);
+                  }}
+                  onRetry={files.retry}
+                />
+              </div>
+              <div className="flex items-end gap-1">
+                <button
+                  type="button"
+                  title="Attach files — or paste or drop them here"
+                  disabled={sending}
+                  onClick={() => picker.current?.click()}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-[10px] text-dim transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+                >
+                  <Icon name="paperclip" className="size-[18px]" />
+                </button>
+                <input
+                  ref={picker}
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    addFiles([...(e.target.files ?? [])]);
+                    e.target.value = "";
+                  }}
+                />
+                <textarea
+                  ref={input}
+                  rows={1}
+                  value={text}
+                  autoFocus
+                  readOnly={sending}
+                  placeholder={canSend ? "Message midna" : "Reconnecting…"}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  className="selectable min-h-[22px] flex-1 resize-none bg-transparent px-1 py-[5px] text-[13.5px] leading-[1.45] outline-none placeholder:text-dimmer"
+                />
+                <button
+                  type="button"
+                  title={files.items.some((f) => !f.done && !f.error) ? "Send once the files are up (Enter)" : "Send (Enter)"}
+                  disabled={(!text.trim() && !files.items.length) || !canSend || sending}
+                  onClick={() => void submit()}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-ink transition-opacity disabled:opacity-25"
+                >
+                  {sending ? <Spinner className="size-4" /> : <Icon name="send" className="size-4" />}
+                </button>
+              </div>
             </div>
-            <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line</p>
+            <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line · paste or drop files to attach</p>
           </div>
         </div>
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-[16px] border-2 border-dashed border-line-2 bg-bg/85 backdrop-blur-[2px]">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <Icon name="paperclip" className="size-6 text-dim" />
+              <p className="text-[14px] font-medium">Drop to attach</p>
+              <p className="text-[12px] text-dim">Images and files go with your next message, up to {MAX_FILES}.</p>
+            </div>
+          </div>
+        )}
       </div>
       <Viewer viewing={viewing} onClose={closeViewer} />
     </Media.Provider>

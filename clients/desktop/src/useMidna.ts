@@ -63,6 +63,8 @@ function fromOutbox(item: OutboxItem): Line {
   return { key: `o:${item.id}`, role: "midna", text: item.text, client: null, at: item.createdAt, kind: item.kind, priority: item.priority, options: item.options, answered: false, outboxId: item.id, attachments: item.attachments ?? [] };
 }
 
+const files = (l: Line) => (l.attachments ?? []).map((a) => a.id).join();
+
 /** What a notification says about a line that may be only an image. */
 function gist(text: string, attachments: Attachment[] = []): string {
   if (text.trim()) return text.slice(0, 240);
@@ -101,7 +103,7 @@ export function useMidna(connection: Connection) {
         if (at !== undefined) next[at] = { ...next[at]!, ...l };
         else {
           // The echo of something this window sent replaces its placeholder.
-          const p = l.role === "user" ? next.findIndex((x) => x.pending && x.text === l.text) : -1;
+          const p = l.role === "user" ? next.findIndex((x) => x.pending && x.text === l.text && files(x) === files(l)) : -1;
           if (p >= 0) next[p] = l;
           else fresh.push(l);
         }
@@ -191,13 +193,14 @@ export function useMidna(connection: Connection) {
     merge(page.map(fromHistory), "prepend");
   }, [client, lines, merge, olderExhausted]);
 
+  /** Say something — with files uploaded first, in the order they should arrive. */
   const send = useCallback(
-    async (text: string, replyTo?: number) => {
+    async (text: string, replyTo?: number, attachments: Attachment[] = []) => {
       const key = `p:${++pending.current}`;
-      merge([{ key, role: "user", text, client: "desktop", at: Date.now(), pending: true }]);
+      merge([{ key, role: "user", text, client: "desktop", at: Date.now(), pending: true, attachments }]);
       if (replyTo) setLines((cur) => cur.map((l) => (l.outboxId === replyTo ? { ...l, answered: true } : l)));
       try {
-        await client.send({ text, client: "desktop", ...(replyTo ? { replyTo } : {}) });
+        await client.send({ text, client: "desktop", ...(replyTo ? { replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((a) => a.id) } : {}) });
       } catch (err) {
         setLines((cur) => cur.filter((l) => l.key !== key));
         throw err;
@@ -209,5 +212,36 @@ export function useMidna(connection: Connection) {
   const refreshStatus = useCallback(async () => setStatus(await client.status()), [client, setStatus]);
   const loadAttachment = useCallback((id: string) => client.attachment(id), [client]);
 
-  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment };
+  /**
+   * Put a file on the host to send with a message, reporting bytes as they
+   * go. The same request as MidnaClient.upload, made with XMLHttpRequest:
+   * WebKit's fetch can't say how much of an upload has gone.
+   */
+  const upload = useCallback(
+    (file: File, onProgress: (sent: number) => void, signal?: AbortSignal) =>
+      new Promise<Attachment>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${client.baseUrl}/v1/attachments?name=${encodeURIComponent(file.name)}`);
+        xhr.setRequestHeader("authorization", `Bearer ${connection.token}`);
+        xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+        xhr.upload.onprogress = (e) => onProgress(e.loaded);
+        xhr.onload = () => {
+          let data: { error?: string } | undefined;
+          try {
+            data = JSON.parse(xhr.responseText);
+          } catch {
+            /* not JSON */
+          }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data as Attachment);
+          else reject(new MidnaError(xhr.status, data?.error ?? (xhr.statusText || `upload failed (${xhr.status})`)));
+        };
+        xhr.onerror = () => reject(new Error("couldn't reach midna"));
+        xhr.onabort = () => reject(new DOMException("upload stopped", "AbortError"));
+        signal?.addEventListener("abort", () => xhr.abort());
+        xhr.send(file);
+      }),
+    [client, connection.token],
+  );
+
+  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment, upload };
 }

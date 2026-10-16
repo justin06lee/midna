@@ -11,6 +11,15 @@ import { applyAppearance, loadAppearance } from "./appearance";
 const q = new URLSearchParams(location.search);
 applyAppearance(q.has("dark") ? "dark" : q.has("light") ? "light" : loadAppearance());
 
+// A file dropped anywhere the chat doesn't take it would replace the page
+// with itself: refuse it there (the chat's own handlers run first).
+window.addEventListener("dragover", (e) => {
+  if (e.defaultPrevented) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+});
+window.addEventListener("drop", (e) => e.preventDefault());
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

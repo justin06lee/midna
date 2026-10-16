@@ -22,7 +22,12 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "io-util", "rt", "macros"] }
+tokio = { version = "1", features = ["process", "io-util", "rt", "macros", "fs"] }
+
+# Reading the files copied in Finder, which WebKit hands a paste only one of.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
 
 [features]
 default = ["custom-protocol"]

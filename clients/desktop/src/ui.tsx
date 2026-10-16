@@ -138,7 +138,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
 }
 
-export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image"; className?: string }) {
+export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder"; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     chat: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" />,
     today: (
@@ -187,6 +187,9 @@ export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | 
         <path d="m4 14 4-3.5 3 2.5 2-1.5 3.5 2.5" />
       </>
     ),
+    paperclip: <path d="m15.5 9.5-5.6 5.6a3.4 3.4 0 0 1-4.8-4.8l6-6a2.25 2.25 0 0 1 3.2 3.2l-5.9 5.9a1.1 1.1 0 0 1-1.6-1.6l5.3-5.3" />,
+    download: <path d="M10 3.5v9M6 8.5l4 4 4-4M4.5 16h11" />,
+    folder: <path d="M3.5 6A1.5 1.5 0 0 1 5 4.5h3.2l1.6 1.8H15A1.5 1.5 0 0 1 16.5 7.8v6.7A1.5 1.5 0 0 1 15 16H5a1.5 1.5 0 0 1-1.5-1.5z" />,
   };
   return (
     <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

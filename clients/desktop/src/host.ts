@@ -95,6 +95,44 @@ export async function openUrl(url: string): Promise<void> {
   window.open(url, "_blank", "noopener");
 }
 
+// ── files midna sent: the bytes go to Rust raw, the name in a header ─────
+async function hand(command: string, blob: Blob, headers: Record<string, string>): Promise<string> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string>(command, new Uint8Array(await blob.arrayBuffer()), { headers });
+}
+
+/** Save a file into Downloads, under a name of its own if that one is taken. Answers where it went (the preview hands it to the browser, and can't say). */
+export async function saveToDownloads(name: string, blob: Blob): Promise<string | null> {
+  if (inApp) return hand("save_download", blob, { "x-name": encodeURIComponent(name) });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+  return null;
+}
+
+/** Show a file this app saved in Finder (or the file manager). */
+export async function showInFolder(path: string): Promise<void> {
+  if (inApp) return (await import("@tauri-apps/api/core")).invoke("show_in_folder", { path });
+}
+
+/** Open a file in the app the system picks for it: Preview for a PDF, Archive Utility for a zip. */
+export async function openInApp(id: string, name: string, blob: Blob): Promise<void> {
+  if (inApp) return void (await hand("open_attachment", blob, { "x-id": id, "x-name": encodeURIComponent(name) }));
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Files copied in Finder, in the order they were copied: WebKit gives a paste only the first of several. Empty outside the app. */
+export async function copiedFiles(): Promise<Array<{ name: string; size: number; read: () => Promise<ArrayBuffer> }>> {
+  if (!inApp) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  const copied = await invoke<Array<{ path: string; name: string; size: number }>>("copied_files");
+  return copied.map((c) => ({ name: c.name, size: c.size, read: () => invoke<ArrayBuffer>("read_copied", { path: c.path }) }));
+}
+
 export async function copy(text: string): Promise<void> {
   if (inApp) return (await import("@tauri-apps/plugin-clipboard-manager")).writeText(text);
   await navigator.clipboard.writeText(text);

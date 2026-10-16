@@ -145,7 +145,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {view === "chat" && (
-            <Chat lines={m.lines} thinking={m.thinking} canSend={m.link === "live"} send={m.send} loadOlder={m.loadOlder} olderExhausted={m.olderExhausted} draft={draft} onDraftUsed={() => setDraft(null)} loadAttachment={m.loadAttachment} />
+            <Chat lines={m.lines} thinking={m.thinking} canSend={m.link === "live"} send={m.send} loadOlder={m.loadOlder} olderExhausted={m.olderExhausted} draft={draft} onDraftUsed={() => setDraft(null)} loadAttachment={m.loadAttachment} upload={m.upload} />
           )}
           {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
           {view === "today" && overview && <Today overview={overview} />}
