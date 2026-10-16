@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { Cron } from "croner";
-import type { OutboxItem, Priority } from "@midna/protocol";
+import type { Attachment, OutboxItem, Priority } from "@midna/protocol";
+import type { Attachments } from "./attachments.ts";
 import type { Bus } from "./bus.ts";
 import { afterQuietHours } from "./time.ts";
 
@@ -131,7 +132,7 @@ interface OutboxRow {
   answered_at: number | null;
 }
 
-function toItem(r: OutboxRow): OutboxItem {
+function toItem(r: OutboxRow, attachments: Attachment[]): OutboxItem {
   return {
     id: r.id,
     seq: r.seq ?? 0,
@@ -142,14 +143,16 @@ function toItem(r: OutboxRow): OutboxItem {
     options: r.options ? (JSON.parse(r.options) as string[]) : null,
     createdAt: r.created_at,
     deliverAfter: r.deliver_after,
+    attachments,
   };
 }
 
 export class Outbox {
-  constructor(private db: Database, private bus: Bus) {}
+  constructor(private db: Database, private bus: Bus, private files: Attachments) {}
 
+  /** `attachments` are ids of loose attachments, sent with the item. */
   add(
-    item: { kind: OutboxItem["kind"]; text: string; priority?: Priority; options?: string[]; conversationId?: string | null },
+    item: { kind: OutboxItem["kind"]; text: string; priority?: Priority; options?: string[]; conversationId?: string | null; attachments?: string[] },
     when: { tz: string; quietHours: { start: string; end: string } | null },
     now = Date.now(),
   ): OutboxItem {
@@ -171,8 +174,14 @@ export class Outbox {
         d: deliverAfter,
         now,
       }) as OutboxRow;
+    if (item.attachments?.length) this.files.link(item.attachments, { outboxId: row.id });
     this.release(now);
     return this.get(row.id)!;
+  }
+
+  private items(rows: OutboxRow[]): OutboxItem[] {
+    const files = this.files.forOutbox(rows.map((r) => r.id));
+    return rows.map((r) => toItem(r, files.get(r.id) ?? []));
   }
 
   /** Give every item whose time has come a stream position, and announce it. */
@@ -181,19 +190,19 @@ export class Outbox {
     for (const r of due) {
       const seq = (this.db.query("SELECT COALESCE(MAX(seq), 0) + 1 AS s FROM outbox").get() as { s: number }).s;
       this.db.query("UPDATE outbox SET seq = $s WHERE id = $id").run({ s: seq, id: r.id });
-      this.bus.emit({ type: "outbox", item: toItem({ ...r, seq }) });
+      this.bus.emit({ type: "outbox", item: this.items([{ ...r, seq }])[0]! });
     }
     return due.length;
   }
 
   /** Released items after stream position `since`. */
   since(since: number, limit = 200): OutboxItem[] {
-    return (this.db.query("SELECT * FROM outbox WHERE seq > $s ORDER BY seq LIMIT $n").all({ s: since, n: limit }) as OutboxRow[]).map(toItem);
+    return this.items(this.db.query("SELECT * FROM outbox WHERE seq > $s ORDER BY seq LIMIT $n").all({ s: since, n: limit }) as OutboxRow[]);
   }
 
   get(id: number): OutboxItem | null {
     const r = this.db.query("SELECT * FROM outbox WHERE id = $id").get({ id }) as OutboxRow | null;
-    return r ? toItem(r) : null;
+    return r ? this.items([r])[0]! : null;
   }
 
   answered(id: number, now = Date.now()): void {

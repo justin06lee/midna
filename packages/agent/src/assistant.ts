@@ -1,7 +1,8 @@
 import { MAIN, HOUR, fmt, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
+import type { Attachment, BrainHealth } from "@midna/protocol";
+import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
-import type { BrainHealth } from "@midna/protocol";
 import { INTRODUCTION, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
@@ -50,13 +51,17 @@ export class Assistant {
     return this.running.size > 0;
   }
 
-  /** A message from the user, from any client. Answered as soon as the conversation is free. */
-  receive(m: { text: string; client: string; conversationId?: string; replyTo?: number }): string {
+  /**
+   * A message from the user, from any client, with the ids of anything they
+   * uploaded to go with it. Answered as soon as the conversation is free.
+   */
+  receive(m: { text: string; client: string; conversationId?: string; replyTo?: number; attachments?: string[] }): string {
     const conv = m.conversationId ?? MAIN;
     const question = m.replyTo ? this.store.outbox.get(m.replyTo) : null;
     if (question) this.store.outbox.answered(question.id);
     const msg = this.store.log.addMessage({ conversationId: conv, role: "user", text: m.text, client: m.client, seen: false, ...(question ? { replyTo: question.id } : {}) });
-    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text: m.text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null });
+    const attachments = m.attachments?.length ? this.store.attachments.link(m.attachments, { messageId: msg.id }) : [];
+    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text: m.text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments });
     this.kick(conv);
     return conv;
   }
@@ -114,7 +119,9 @@ export class Assistant {
     try {
       const run = async (fresh: boolean) => {
         const history = fresh ? store.log.recent(conv, HISTORY_ON_FRESH, unseen[0]!.id) : [];
-        return this.episode({ kind: "chat", conversationId: conv, prompt: turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text), resume: fresh ? undefined : convo.brain_session! });
+        const sent = store.attachments.forMessages([...history, ...unseen].filter((m) => m.role === "user").map((m) => m.id));
+        const files = (m: Message) => (sent.get(m.id) ?? []).map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) }));
+        return this.episode({ kind: "chat", conversationId: conv, prompt: turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files), resume: fresh ? undefined : convo.brain_session! });
       };
       let fresh = stale;
       let result: Awaited<ReturnType<typeof run>>;
@@ -133,8 +140,10 @@ export class Assistant {
         startedAt: fresh ? now : convo.brain_started_at,
         turns: fresh ? 1 : convo.brain_turns + 1,
       });
-      const reply = result.text.trim();
-      if (reply) store.say({ kind: "message", conversationId: conv, text: reply }, { client: "chat", seenByBrain: true });
+      // What the brain attached during the turn, and any Markdown image of a file on this machine, go with the reply.
+      const reply = liftLocalImages(store, result.text.trim(), { episodeId: result.episodeId });
+      const attachments = store.attachments.staged(result.episodeId);
+      if (reply.text || attachments.length) store.say({ kind: "message", conversationId: conv, text: reply.text, attachments }, { client: "chat", seenByBrain: true });
     } catch (err) {
       const p = brainProblem(err);
       const why =
@@ -173,7 +182,7 @@ export class Assistant {
         });
         store.log.endEpisode(episodeId, { session: result.sessionId, costUsd: result.costUsd });
         this.healthy();
-        return result;
+        return { ...result, episodeId };
       } catch (err) {
         store.log.endEpisode(episodeId, { session: (err as BrainError).sessionId, error: String((err as Error).message ?? err) });
         throw err;
@@ -330,10 +339,19 @@ export class Assistant {
  * own since the last turn (so a reply to a notification makes sense), and
  * the user's new message(s). A fresh session also gets recent history.
  */
-function turnPrompt(unseen: Message[], history: Message[], tz: string, now: number, questionText: (id: number) => string | undefined): string {
+function turnPrompt(
+  unseen: Message[],
+  history: Message[],
+  tz: string,
+  now: number,
+  questionText: (id: number) => string | undefined,
+  files: (m: Message) => Array<Attachment & { path: string | null }>,
+): string {
   const line = (m: Message) => {
     const q = m.reply_to ? questionText(m.reply_to) : undefined;
-    return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${q ? `(answering your question: "${q}") ` : ""}${m.text}`;
+    // What the user sent with it, as files in the workspace the brain can open.
+    const sent = m.role === "user" ? files(m).map((f) => `\n  Attached ${f.kind} "${f.name}" (${f.mime})${f.path ? `, saved at ${f.path}` : ""}`).join("") : "";
+    return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
   };
   const parts: string[] = [];
   if (history.length) parts.push(`Earlier in this conversation (for continuity; already handled):\n${history.map(line).join("\n")}`);

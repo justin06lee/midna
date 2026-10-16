@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -54,6 +54,7 @@ async function until<T>(what: string, fn: () => T | undefined, ms = 5_000): Prom
   }
   throw new Error(`timed out waiting for ${what}`);
 }
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 const outbox = () => events.filter((e): e is { type: "outbox"; item: OutboxItem } => e.type === "outbox").map((e) => e.item);
 
 beforeAll(async () => {
@@ -253,5 +254,75 @@ describe("midnad", () => {
     await until("wakeup rerun", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
     expect(wakeupRuns).toBe(2);
     expect((await client.status()).brain.ok).toBe(true);
+  });
+  test("midna sends images from its machine and the web; only a paired device gets the bytes", async () => {
+    const chart = join(home, "workspace", "chart.png");
+    writeFileSync(chart, PNG);
+    const web = Bun.serve({ port: 0, fetch: () => new Response(PNG, { headers: { "content-type": "image/png" } }) });
+    try {
+      script = async (run, tools) => {
+        if (!run.prompt.includes("show me")) return "";
+        await call(tools, "message_user", { text: "Two pictures", attachments: [chart, `http://127.0.0.1:${web.port}/cat.png`] });
+        expect(await call(tools, "attach", { files: [chart] })).toContain("chart.png (image");
+        await expect(call(tools, "attach", { files: ["relative/x.png"] })).rejects.toThrow(/absolute path/);
+        return `Here's the chart:\n\n![chart](${chart})\n\nand one from the web ![cat](https://example.com/cat.png)`;
+      };
+      await client.send({ text: "show me the chart", client: "test" });
+      const note = await until("notification", () => outbox().find((i) => i.text === "Two pictures"));
+      expect(note.attachments.map((a) => [a.name, a.kind, a.mime])).toEqual([
+        ["chart.png", "image", "image/png"],
+        ["cat.png", "image", "image/png"],
+      ]);
+      // The attached file and the Markdown image of a local file both go with the reply; the web image stays in the text.
+      const reply = await until("reply", () => outbox().find((i) => i.text.startsWith("Here's the chart")));
+      expect(reply.text).toBe("Here's the chart:\n\nand one from the web ![cat](https://example.com/cat.png)");
+      expect(reply.attachments.map((a) => a.name)).toEqual(["chart.png", "chart.png"]);
+
+      const id = reply.attachments[0]!.id;
+      expect(new Uint8Array(await (await client.attachment(id)).arrayBuffer())).toEqual(PNG);
+      const res = await fetch(`${daemon.url}/v1/attachments/${id}`, { headers: { authorization: `Bearer ${readFileSync(join(home, "host.token"), "utf8").trim()}` } });
+      expect(res.headers.get("content-type")).toBe("image/png");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect((await fetch(`${daemon.url}/v1/attachments/${id}`)).status).toBe(401);
+      await expect(client.attachment("att_nope")).rejects.toThrow(/no such attachment/);
+      const line = (await client.history({ limit: 5 })).find((h) => h.outbox?.id === reply.id)!;
+      expect(line.attachments.map((a) => a.id)).toEqual(reply.attachments.map((a) => a.id));
+    } finally {
+      web.stop(true);
+    }
+  });
+
+  test("images the user sends reach the brain as files it can open", async () => {
+    const photo = await client.upload(PNG, { name: "receipt.png", mime: "image/png" });
+    expect(photo).toMatchObject({ kind: "image", name: "receipt.png", size: PNG.byteLength });
+    let seen: Uint8Array | null = null;
+    script = async (run) => {
+      const path = /saved at (\S+)/.exec(run.prompt)?.[1];
+      if (path) seen = new Uint8Array(readFileSync(path));
+      return "Got the receipt.";
+    };
+    await client.send({ text: "", attachments: [photo.id], client: "test" });
+    await until("reply", () => outbox().find((i) => i.text === "Got the receipt."));
+    expect(seen!).toEqual(PNG);
+    const echo = events.find((e) => e.type === "user_message" && e.attachments.length) as Extract<StreamEvent, { type: "user_message" }>;
+    expect(echo.attachments).toEqual([photo]);
+    const line = (await client.history({ limit: 5 })).find((h) => h.role === "user" && h.attachments.length)!;
+    expect(line.attachments).toEqual([photo]);
+    await expect(client.send({ text: "look", attachments: ["att_nope"], client: "test" })).rejects.toThrow(/upload it first/);
+    await expect(client.send({ text: " ", client: "test" })).rejects.toThrow(/text or an attachment/);
+  });
+
+  test("on a wakeup, files go with message_user: there is no reply to attach them to", async () => {
+    let refused = "";
+    script = async (run, tools) => {
+      if (!run.prompt.includes("send the plot")) return "";
+      await call(tools, "attach", { files: [join(home, "workspace", "chart.png")] }).catch((err) => (refused = (err as Error).message));
+      await call(tools, "message_user", { text: "Tonight's plot", attachments: [join(home, "workspace", "chart.png")] });
+      return "sent";
+    };
+    daemon.store.schedule.add({ dueAt: Date.now(), reason: "send the plot", tz: "UTC" });
+    const sent = await until("plot", () => outbox().find((i) => i.text === "Tonight's plot"));
+    expect(sent.attachments).toHaveLength(1);
+    expect(refused).toMatch(/message_user/);
   });
 });

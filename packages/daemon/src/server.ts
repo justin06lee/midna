@@ -6,6 +6,7 @@ import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
 import { checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
 import {
+  MAX_ATTACHMENT_BYTES,
   PairRequest,
   SendMessage,
   SettingsPatch,
@@ -162,13 +163,42 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.post("/v1/messages", async (c) => {
     const msg = SendMessage.safeParse(await c.req.json().catch(() => null));
     if (!msg.success) return c.json({ error: msg.error.message }, 400);
+    const unknown = msg.data.attachments?.find((id) => !store.attachments.get(id));
+    if (unknown) return c.json({ error: `no attachment ${unknown} — upload it first` }, 400);
     const conversationId = assistant.receive({
       text: msg.data.text,
       client: msg.data.client,
       ...(msg.data.conversationId ? { conversationId: msg.data.conversationId } : {}),
       ...(msg.data.replyTo ? { replyTo: msg.data.replyTo } : {}),
+      ...(msg.data.attachments?.length ? { attachments: msg.data.attachments } : {}),
     });
     return c.json({ conversationId }, 202);
+  });
+
+  // ── attachments: the bytes behind images and files in the conversation ──
+  app.post("/v1/attachments", async (c) => {
+    if (Number(c.req.header("content-length") ?? 0) > MAX_ATTACHMENT_BYTES) return c.json({ error: `the most midna keeps is ${MAX_ATTACHMENT_BYTES / 1048576} MB` }, 413);
+    const data = new Uint8Array(await c.req.arrayBuffer());
+    try {
+      return c.json(store.attachments.add({ data, name: c.req.query("name") ?? "", mime: c.req.header("content-type") ?? null, source: `upload from ${c.get("device").name}` }), 201);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.get("/v1/attachments/:id", (c) => {
+    const file = store.attachments.read(c.req.param("id"));
+    if (!file) return c.json({ error: "no such attachment" }, 404);
+    const { attachment: a, data } = file;
+    return c.body(data as Uint8Array<ArrayBuffer>, 200, {
+      "content-type": a.mime,
+      "content-length": String(data.byteLength),
+      // An attachment never changes; the name is for a save dialog, and nothing in it runs.
+      "cache-control": "private, max-age=31536000, immutable",
+      "content-disposition": `${a.kind === "image" ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(a.name)}`,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    });
   });
 
   app.get("/v1/outbox", (c) => c.json(store.outbox.since(Number(c.req.query("since") ?? 0))));
