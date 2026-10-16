@@ -366,6 +366,15 @@ describe("midnad", () => {
     expect(readFileSync(listed[3]![6]!, "utf8")).toStartWith("PK");
   });
 
+  test("an upload the user removes before sending can be taken back; a sent one stays", async () => {
+    const draft = await client.upload(PNG, { name: "draft.png", mime: "" });
+    expect(draft.mime).toBe("image/png"); // an unknown type from the browser is fine: the bytes decide
+    expect(await client.deleteAttachment(draft.id)).toEqual({ ok: true });
+    await expect(client.deleteAttachment(draft.id)).rejects.toThrow(/no such attachment/);
+    const sent = (await client.history({ limit: 50 })).flatMap((h) => h.attachments)[0]!;
+    await expect(client.deleteAttachment(sent.id)).rejects.toThrow(/stays with it/);
+  });
+
   test("an upload past the limit is turned away, even one that doesn't say its length", async () => {
     const chunk = new Uint8Array(1024 * 1024);
     let sent = 0;

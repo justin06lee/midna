@@ -217,6 +217,13 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     }
   });
 
+  app.delete("/v1/attachments/:id", (c) => {
+    const r = store.attachments.remove(c.req.param("id"));
+    if (r === "missing") return c.json({ error: "no such attachment" }, 404);
+    if (r === "sent") return c.json({ error: "that attachment was sent with a message; it stays with it" }, 409);
+    return c.json({ ok: true });
+  });
+
   app.get("/v1/attachments/:id", (c) => {
     const file = store.attachments.read(c.req.param("id"));
     if (!file) return c.json({ error: "no such attachment" }, 404);

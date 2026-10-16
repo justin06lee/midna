@@ -41,6 +41,12 @@ export type Attachment = z.infer<typeof Attachment>;
 /** The largest file midna keeps as an attachment: 100 MB. POST /v1/attachments answers 413 above it. */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
 
+/** The most attachments one message carries, from the user or from midna. */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
+
+/** An upload never sent with a message is deleted after this long. */
+export const UNSENT_ATTACHMENT_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** How a client uploads a file: its name, what it is, and optionally a caption and whether an image goes as a file. */
 export interface UploadInfo {
   name: string;
@@ -85,7 +91,7 @@ export const SendMessage = z
     /** The outbox question this answers, when it answers one. */
     replyTo: z.number().optional(),
     /** Ids of attachments uploaded first with MidnaClient.upload, in the order to show them. */
-    attachments: z.array(z.string()).max(20).optional(),
+    attachments: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   })
   .refine((m) => m.text.trim() || m.attachments?.length, { message: "a message needs text or an attachment" });
 export type SendMessage = z.input<typeof SendMessage>;
@@ -273,6 +279,14 @@ export class MidnaClient {
     if (file.caption) q.set("caption", file.caption);
     if (file.as) q.set("as", file.as);
     return this.call("POST", `/v1/attachments?${q}`, undefined, undefined, { body: data, type: file.mime || "application/octet-stream" });
+  }
+  /**
+   * Take back an upload that was never sent (the user removed it before
+   * sending). One already sent with a message stays: 409. Unsent uploads
+   * are also deleted on their own after UNSENT_ATTACHMENT_TTL_MS.
+   */
+  deleteAttachment(id: string): Promise<{ ok: true }> {
+    return this.call("DELETE", `/v1/attachments/${encodeURIComponent(id)}`);
   }
   /** Released outbox items after stream position `since`. */
   outbox(since = 0): Promise<OutboxItem[]> {

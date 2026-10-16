@@ -3,7 +3,7 @@ import { hostname, homedir, platform, release } from "node:os";
 import { randomBytes } from "node:crypto";
 import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
-import { MAX_ATTACHMENT_BYTES, type BridgeSetupResult } from "@midna/protocol";
+import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { ensureHome, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
 import { createApp } from "./server.ts";
@@ -133,8 +133,15 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   });
 
   const tz = () => store.settings().timezone;
+  let swept = 0;
   const tick = () => {
     store.outbox.release();
+    // Hourly: uploads nobody sent, and files staged by turns that never replied.
+    if (Date.now() - swept > 60 * 60_000) {
+      swept = Date.now();
+      const n = store.attachments.sweep(swept - UNSENT_ATTACHMENT_TTL_MS);
+      if (n) console.log(`[midna] deleted ${n} attachment(s) never sent`);
+    }
     for (const w of store.schedule.claimDue()) {
       void assistant.wakeup(w).then((r) => (typeof r === "object" ? store.schedule.postpone(w.id, r.retryAt) : store.schedule.finish(w.id, r === "done", tz())));
     }

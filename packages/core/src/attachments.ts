@@ -272,6 +272,17 @@ export class Attachments {
     return r ? { attachment: toAttachment(r), data: r.data } : null;
   }
 
+  /** Take back a loose attachment; one already sent with a message stays with it. */
+  remove(id: string): "removed" | "sent" | "missing" {
+    if (this.db.query("DELETE FROM attachments WHERE id = $id AND outbox_id IS NULL AND message_id IS NULL").run({ id }).changes) return "removed";
+    return this.db.query("SELECT 1 FROM attachments WHERE id = $id").get({ id }) ? "sent" : "missing";
+  }
+
+  /** Delete loose attachments made before `before`: uploads never sent, files staged by a turn that failed. */
+  sweep(before: number): number {
+    return this.db.query("DELETE FROM attachments WHERE outbox_id IS NULL AND message_id IS NULL AND created_at < $b").run({ b: before }).changes;
+  }
+
   /** What a chat episode attached to the reply it is still writing, in the order it attached them. */
   staged(episodeId: number): string[] {
     return (this.db.query("SELECT id FROM attachments WHERE episode_id = $e AND outbox_id IS NULL AND message_id IS NULL ORDER BY rowid").all({ e: episodeId }) as Array<{ id: string }>).map((r) => r.id);

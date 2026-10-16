@@ -240,6 +240,24 @@ describe("attachments", () => {
     expect(s.log.history("main")[0]!.attachments).toEqual([photo]);
   });
 
+  test("unsent uploads can be taken back, and are swept away after a while", () => {
+    const s = fresh();
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const removed = s.attachments.add({ data: PNG, name: "oops.png" }, now);
+    const old = s.attachments.add({ data: PNG, name: "forgotten.png" }, now - 2 * day);
+    const recent = s.attachments.add({ data: PNG, name: "draft.png" }, now - 60_000);
+    const sent = s.attachments.add({ data: PNG, name: "sent.png" }, now - 2 * day);
+    s.say({ kind: "message", text: "", attachments: [sent.id] }, { client: "chat", seenByBrain: true });
+    expect(s.attachments.remove(removed.id)).toBe("removed");
+    expect(s.attachments.remove(removed.id)).toBe("missing");
+    expect(s.attachments.remove(sent.id)).toBe("sent");
+    expect(s.attachments.sweep(now - day)).toBe(1);
+    expect(s.attachments.get(old.id)).toBeNull();
+    expect(s.attachments.get(recent.id)).not.toBeNull();
+    expect(s.attachments.get(sent.id)).not.toBeNull();
+  });
+
   test("a chat episode stages files for the reply it is still writing", () => {
     const s = fresh();
     const episode = s.log.startEpisode({ kind: "chat", conversationId: "main", model: "test" });

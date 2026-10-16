@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
+import { MAX_ATTACHMENTS_PER_MESSAGE } from "@midna/protocol";
 import { attach, liftLocalImages, type FileRef } from "./attachments.ts";
 
 /**
@@ -31,7 +32,7 @@ const fileRef = z.union([
 ]);
 const files = z
   .array(fileRef)
-  .max(20)
+  .max(MAX_ATTACHMENTS_PER_MESSAGE)
   .describe(
     "Files to send, of any type — images, PDFs, zips, spreadsheets, logs, audio, video, anything up to 100 MB — in the order the user should see them. Each is a path or URL, or {file, name, caption, as} to choose how it arrives.",
   );
