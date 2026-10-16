@@ -280,6 +280,13 @@ const MIGRATIONS: string[] = [
   CREATE INDEX attachments_message ON attachments(message_id);
   CREATE INDEX attachments_episode ON attachments(episode_id);
   `,
+  // The sender decides: where each attachment comes in its message, a caption
+  // of its own, and whether an image goes as a file.
+  `
+  ALTER TABLE attachments ADD COLUMN position INTEGER;
+  ALTER TABLE attachments ADD COLUMN caption TEXT;
+  ALTER TABLE attachments ADD COLUMN kind TEXT CHECK (kind IN ('image','file'));
+  `,
 ];
 
 export function openDatabase(path: string): Database {

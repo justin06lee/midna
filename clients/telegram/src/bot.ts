@@ -3,6 +3,7 @@
 export interface TgUser { id: number; username?: string; first_name?: string }
 export interface TgChat { id: number; type: string }
 export interface TgPhotoSize { file_id: string; width: number; height: number; file_size?: number }
+/** A document, video, audio, voice note or animation: all a file with an id. */
 export interface TgDocument { file_id: string; file_name?: string; mime_type?: string; file_size?: number }
 export interface TgMessage {
   message_id: number;
@@ -13,6 +14,11 @@ export interface TgMessage {
   /** The same photo at several sizes, smallest first. */
   photo?: TgPhotoSize[];
   document?: TgDocument;
+  video?: TgDocument;
+  audio?: TgDocument;
+  voice?: TgDocument;
+  animation?: TgDocument;
+  video_note?: TgDocument;
   reply_to_message?: { message_id: number };
 }
 export interface TgCallbackQuery { id: string; from: TgUser; message?: TgMessage; data?: string }
@@ -27,10 +33,15 @@ export class TelegramError extends Error {
 
 /** The biggest photo the Bot API takes by upload; bigger images go as files. */
 const PHOTO_MAX = 10 * 1024 * 1024;
+/** The biggest file a bot can upload. */
+export const UPLOAD_MAX = 50 * 1024 * 1024;
+/** The biggest file a bot can download (getFile). */
+export const DOWNLOAD_MAX = 20 * 1024 * 1024;
 /** Image types Telegram shows as a photo. */
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-export type Media = { data: Blob; name: string; mime: string } | { url: string };
+/** Something to send: a file's bytes (as a photo when it can be, unless `asFile`), or an image on the web. */
+export type Media = { data: Blob; name: string; mime: string; asFile?: boolean } | { url: string };
 
 export class Bot {
   private readonly base: string;
@@ -90,7 +101,7 @@ export class Bot {
    * photo Telegram turns down (too big, odd proportions), goes as a file.
    */
   async sendMedia(chatId: number, media: Media, opts: { caption?: string; silent?: boolean; keyboard?: InlineKeyboard } = {}): Promise<TgMessage> {
-    const photo = "url" in media || (PHOTO_TYPES.has(media.mime) && media.data.size <= PHOTO_MAX);
+    const photo = "url" in media || (!media.asFile && PHOTO_TYPES.has(media.mime) && media.data.size <= PHOTO_MAX);
     const send = async (method: "sendPhoto" | "sendDocument", html: boolean) => {
       const form = new FormData();
       form.set("chat_id", String(chatId));
@@ -127,7 +138,7 @@ export class Bot {
     return this.call<{ file_id: string; file_path?: string; file_size?: number }>("getFile", { file_id: fileId });
   }
 
-  /** A file someone sent the bot (the Bot API hands over files up to 20 MB). */
+  /** A file someone sent the bot (the Bot API hands over files up to DOWNLOAD_MAX). */
   async download(fileId: string): Promise<{ data: Uint8Array<ArrayBuffer>; path: string }> {
     const file = await this.getFile(fileId);
     if (!file.file_path) throw new Error("Telegram didn't give a path for that file");

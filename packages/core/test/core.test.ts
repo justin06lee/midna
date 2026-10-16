@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
 import { ARCHIVE_BELOW, DAY, Store, afterQuietHours, fmt, parseWhen, renderContext, strength } from "../src/index.ts";
 
 const TZ = "America/Los_Angeles";
@@ -159,13 +160,59 @@ describe("attachments", () => {
   test("a file is kept with what it is, judged by its bytes over its name", () => {
     const s = fresh();
     const a = s.attachments.add({ data: PNG, name: "../../etc/shot.jpg", mime: "application/octet-stream" });
-    expect(a).toMatchObject({ kind: "image", name: "shot.jpg", mime: "image/png", size: PNG.byteLength });
+    // A PNG called .jpg is renamed to match what it is.
+    expect(a).toMatchObject({ kind: "image", name: "shot.png", mime: "image/png", size: PNG.byteLength, caption: null });
     expect(a.id).toMatch(/^att_/);
     expect(s.attachments.read(a.id)!.data).toEqual(PNG);
     const doc = s.attachments.add({ data: new TextEncoder().encode("hello"), name: "notes.txt" });
     expect(doc).toMatchObject({ kind: "file", mime: "text/plain" });
     expect(() => s.attachments.add({ data: new Uint8Array(0), name: "empty.png" })).toThrow(/empty/);
-    expect(() => s.attachments.add({ data: new Uint8Array(26 * 1024 * 1024), name: "huge.bin" })).toThrow(/MB/);
+    expect(() => s.attachments.add({ data: new Uint8Array(MAX_ATTACHMENT_BYTES + 1), name: "huge.bin" })).toThrow(/100 MB/);
+  });
+
+  test("any type is kept, named and typed by what it is", () => {
+    const s = fresh();
+    const bytes = (head: string, n = 64) => Uint8Array.from({ length: n }, (_, i) => head.charCodeAt(i) || 0);
+    const kept = (data: Uint8Array, name: string, mime?: string) => {
+      const a = s.attachments.add({ data, name, mime });
+      return [a.name, a.mime, a.kind];
+    };
+    // A .docx is a zip inside: its name says more than its bytes.
+    expect(kept(bytes("PK\u0003\u0004"), "Q4 plan.docx")).toEqual(["Q4 plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "file"]);
+    expect(kept(bytes("PK\u0003\u0004"), "results")).toEqual(["results.zip", "application/zip", "file"]);
+    expect(kept(bytes("%PDF-1.7"), "")).toEqual(["file.pdf", "application/pdf", "file"]);
+    expect(kept(bytes("\u001f\u008b"), "logs.tar.gz")).toEqual(["logs.tar.gz", "application/gzip", "file"]);
+    expect(kept(bytes("OggS"), "voice", "audio/ogg")).toEqual(["voice.ogg", "audio/ogg", "file"]);
+    expect(kept(new TextEncoder().encode("all: build"), "Makefile")).toEqual(["Makefile", "application/octet-stream", "file"]);
+    expect(kept(new TextEncoder().encode("# hi"), "README", "text/plain")).toEqual(["README", "text/plain", "file"]);
+    expect(kept(bytes("MZ"), "setup.exe")).toEqual(["setup.exe", "application/vnd.microsoft.portable-executable", "file"]);
+  });
+
+  test("the sender chooses a caption, and to send an image as a file", () => {
+    const s = fresh();
+    expect(s.attachments.add({ data: PNG, name: "chart.png", caption: "  week 42 ", as: "file" })).toMatchObject({ kind: "file", mime: "image/png", caption: "week 42" });
+    expect(s.attachments.add({ data: PNG, name: "chart.png", as: "image" }).kind).toBe("image");
+    expect(s.attachments.add({ data: new TextEncoder().encode("x"), name: "a.txt", as: "image" }).kind).toBe("file");
+  });
+
+  test("attachments keep the order they were listed in, not the order they were made", () => {
+    const s = fresh();
+    const emitted: Array<{ type: string; item?: { attachments: Array<{ id: string }> } }> = [];
+    s.bus.on((e) => emitted.push(e as never));
+    const [a, b, c] = ["a.png", "b.pdf", "c.zip"].map((name) => s.attachments.add({ data: PNG, name }));
+    const ids = (list: Array<{ id: string }> | undefined) => (list ?? []).map((x) => x.id);
+    const item = s.say({ kind: "message", text: "three", attachments: [c!.id, a!.id, b!.id] }, { client: "chat", seenByBrain: true });
+    const want = [c!.id, a!.id, b!.id];
+    expect(ids(item.attachments)).toEqual(want);
+    expect(ids(emitted.find((e) => e.type === "outbox")!.item!.attachments)).toEqual(want);
+    expect(ids(s.outbox.since(0)[0]!.attachments)).toEqual(want);
+    expect(ids(s.log.history("main")[0]!.attachments)).toEqual(want);
+
+    const [d, e] = ["d.txt", "e.txt"].map((name) => s.attachments.add({ data: PNG, name }));
+    const msg = s.log.addMessage({ conversationId: "main", role: "user", text: "", client: "desktop", seen: false });
+    s.attachments.link([e!.id, d!.id], { messageId: msg.id });
+    expect(ids(s.attachments.forMessages([msg.id]).get(msg.id))).toEqual([e!.id, d!.id]);
+    expect(ids(s.log.history("main")[1]!.attachments)).toEqual([e!.id, d!.id]);
   });
 
   test("what midna says carries its attachments, on the stream and in history", () => {
@@ -191,6 +238,24 @@ describe("attachments", () => {
     expect(s.attachments.link([photo.id], { outboxId: 1 })).toEqual([]);
     expect(s.attachments.forMessages([msg.id]).get(msg.id)).toEqual([photo]);
     expect(s.log.history("main")[0]!.attachments).toEqual([photo]);
+  });
+
+  test("unsent uploads can be taken back, and are swept away after a while", () => {
+    const s = fresh();
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const removed = s.attachments.add({ data: PNG, name: "oops.png" }, now);
+    const old = s.attachments.add({ data: PNG, name: "forgotten.png" }, now - 2 * day);
+    const recent = s.attachments.add({ data: PNG, name: "draft.png" }, now - 60_000);
+    const sent = s.attachments.add({ data: PNG, name: "sent.png" }, now - 2 * day);
+    s.say({ kind: "message", text: "", attachments: [sent.id] }, { client: "chat", seenByBrain: true });
+    expect(s.attachments.remove(removed.id)).toBe("removed");
+    expect(s.attachments.remove(removed.id)).toBe("missing");
+    expect(s.attachments.remove(sent.id)).toBe("sent");
+    expect(s.attachments.sweep(now - day)).toBe(1);
+    expect(s.attachments.get(old.id)).toBeNull();
+    expect(s.attachments.get(recent.id)).not.toBeNull();
+    expect(s.attachments.get(sent.id)).not.toBeNull();
   });
 
   test("a chat episode stages files for the reply it is still writing", () => {

@@ -2,14 +2,18 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Store } from "@midna/core";
+import type { AttachOptions, Store } from "@midna/core";
 import { MAX_ATTACHMENT_BYTES, type Attachment } from "@midna/protocol";
 
 /**
  * How what the brain points at becomes something the user can see: a file
- * on this machine or a URL, kept as an attachment. The brain sees the user's
- * attachments the other way round, as files in its workspace.
+ * of any type on this machine, or a URL, kept as an attachment. The brain
+ * sees the user's attachments the other way round, as files in its
+ * workspace.
  */
+
+/** A file to send: a path or URL, or one with the name, caption and form the brain wants it to have. */
+export type FileRef = string | { file: string; name?: string; caption?: string; as?: "image" | "file" };
 
 const isUrl = (ref: string) => /^https?:\/\//i.test(ref);
 
@@ -22,14 +26,16 @@ function localPath(ref: string): string | null {
 }
 
 /** Keep a file on this machine, or download a URL, as an attachment. */
-export async function attach(store: Store, ref: string, opts: { episodeId?: number } = {}): Promise<Attachment> {
-  if (isUrl(ref)) {
-    const { data, name, mime } = await download(ref);
-    return store.attachments.add({ data, name, mime, source: ref, ...opts });
+export async function attach(store: Store, ref: FileRef, opts: { episodeId?: number } = {}): Promise<Attachment> {
+  const { file, ...how } = typeof ref === "string" ? { file: ref } : ref;
+  const options: AttachOptions = { ...opts, ...how };
+  if (isUrl(file)) {
+    const { data, name, mime } = await download(file);
+    return store.attachments.add({ data, mime, source: file, ...options, name: how.name || name });
   }
-  const path = localPath(ref);
-  if (!path) throw new Error(`"${ref}" isn't an absolute path or an http(s) URL`);
-  return store.attachments.fromFile(path, opts);
+  const path = localPath(file);
+  if (!path) throw new Error(`"${file}" isn't an absolute path or an http(s) URL`);
+  return store.attachments.fromFile(path, options);
 }
 
 async function download(url: string): Promise<{ data: Uint8Array; name: string; mime: string | null }> {
@@ -94,12 +100,13 @@ export function liftLocalImages(store: Store, text: string, opts: { episodeId?: 
 }
 
 /**
- * Where the brain can look at something the user sent: a copy in its
- * workspace, written the first time it is asked for.
+ * Where the brain can open something the user sent: a copy in its
+ * workspace under the file's own name (attachments/<id>/<name>), written the
+ * first time it is asked for.
  */
 export function workspaceCopy(store: Store, workspace: string, a: Attachment): string | null {
-  const dir = join(workspace, "attachments");
-  const path = join(dir, `${a.id}-${a.name}`);
+  const dir = join(workspace, "attachments", a.id);
+  const path = join(dir, a.name);
   if (existsSync(path)) return path;
   const file = store.attachments.read(a.id);
   if (!file) return null;

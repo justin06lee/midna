@@ -339,6 +339,8 @@ export class Assistant {
  * own since the last turn (so a reply to a notification makes sense), and
  * the user's new message(s). A fresh session also gets recent history.
  */
+const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
 function turnPrompt(
   unseen: Message[],
   history: Message[],
@@ -350,7 +352,12 @@ function turnPrompt(
   const line = (m: Message) => {
     const q = m.reply_to ? questionText(m.reply_to) : undefined;
     // What the user sent with it, as files in the workspace the brain can open.
-    const sent = m.role === "user" ? files(m).map((f) => `\n  Attached ${f.kind} "${f.name}" (${f.mime})${f.path ? `, saved at ${f.path}` : ""}`).join("") : "";
+    const sent =
+      m.role === "user"
+        ? files(m)
+            .map((f, i, all) => `\n  Attached ${all.length > 1 ? `${i + 1}/${all.length} ` : ""}${f.kind} "${f.name}" (${f.mime}, ${size(f.size)})${f.caption ? `, captioned "${f.caption}"` : ""}${f.path ? `, saved at \`${f.path}\`` : ""}`)
+            .join("")
+        : "";
     return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
   };
   const parts: string[] = [];

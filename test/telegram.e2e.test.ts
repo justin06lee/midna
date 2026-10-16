@@ -17,6 +17,8 @@ class FakeTelegram {
   /** Photos and files the bot sent: a URL, or an uploaded file with its bytes. */
   media: Array<{ method: string; chat_id: number; caption?: string; parse_mode?: string; url?: string; name?: string; bytes?: Uint8Array; reply_markup?: string; message_id: number }> = [];
   calls: string[] = [];
+  /** What getFile hands over, by file id; a PNG for any other. */
+  files = new Map<string, Uint8Array>();
   private updates: unknown[] = [];
   private nextUpdate = 1;
   private nextMessage = 100;
@@ -25,7 +27,7 @@ class FakeTelegram {
     port: 0,
     fetch: async (req) => {
       const path = new URL(req.url).pathname;
-      if (path.startsWith("/file/")) return new Response(PNG);
+      if (path.startsWith("/file/")) return new Response(this.files.get(path.split("/").pop()!) ?? PNG);
       const method = path.split("/").pop()!;
       const multipart = req.headers.get("content-type")?.startsWith("multipart/form-data");
       const form = multipart ? await req.formData() : null;
@@ -61,7 +63,7 @@ class FakeTelegram {
           return ok({ message_id: media.message_id, chat: { id: media.chat_id, type: "private" } });
         }
         case "getFile":
-          return ok({ file_id: body.file_id, file_path: `photos/${body.file_id}.jpg` });
+          return ok({ file_id: body.file_id, file_path: `files/${body.file_id}` });
         default:
           return ok(true);
       }
@@ -212,7 +214,7 @@ describe("telegram bridge", () => {
     expect(tg.sent.some((m) => m.text.includes("chart"))).toBe(false);
   });
 
-  test("several images go first and the text after; web images go by URL", async () => {
+  test("the text comes first, then the attachments in order, then web images by URL", async () => {
     const chart = join(home, "workspace", "chart.png");
     script = async (run, tools) => {
       if (run.prompt.includes("both")) await tools.callTool({ name: "attach", arguments: { files: [chart, chart] } });
@@ -225,8 +227,8 @@ describe("telegram bridge", () => {
     const sent = tg.media.slice(before);
     expect(sent.map((m) => m.url ?? m.name)).toEqual(["chart.png", "chart.png", "https://example.com/map.png"]);
     const order = tg.calls.slice(callsBefore).filter((c) => c === "sendPhoto" || c === "sendMessage");
-    expect(order).toEqual(["sendPhoto", "sendPhoto", "sendPhoto", "sendMessage"]);
-    expect(text.message_id).toBeGreaterThan(sent[2]!.message_id);
+    expect(order).toEqual(["sendMessage", "sendPhoto", "sendPhoto", "sendPhoto"]);
+    expect(text.message_id).toBeLessThan(sent[0]!.message_id);
   });
 
   test("photos the owner sends reach midna, the largest size, with the caption", async () => {
@@ -249,10 +251,85 @@ describe("telegram bridge", () => {
     });
     await until("reply", () => tg.sent.find((m) => m.text === "Nice receipt."));
     expect(prompt).toContain("my receipt");
-    expect(prompt).toMatch(/Attached image "photo-777\.jpg" \(image\/png\), saved at \S+photo-777\.jpg/);
+    expect(prompt).toMatch(/Attached image "photo-777\.png" \(image\/png, 1 KB\), saved at `[^`]+\/photo-777\.png`/);
     const history = await new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim()).history({ limit: 5 });
     const line = history.find((h) => h.role === "user" && h.text === "my receipt")!;
     expect(line.client).toBe("telegram");
-    expect(line.attachments).toMatchObject([{ kind: "image", name: "photo-777.jpg", size: PNG.byteLength }]);
+    expect(line.attachments).toMatchObject([{ kind: "image", name: "photo-777.png", size: PNG.byteLength }]);
+  });
+  test("files of any type go as documents, in midna's order, each with its own caption", async () => {
+    const dir = join(home, "workspace");
+    writeFileSync(join(dir, "report.pdf"), "%PDF-1.7 the plan");
+    writeFileSync(join(dir, "results.zip"), "PK\u0003\u0004 results");
+    script = async (run, tools) => {
+      if (run.prompt.includes("the pack"))
+        await tools.callTool({
+          name: "message_user",
+          arguments: { text: "The pack", attachments: [{ file: join(dir, "report.pdf"), caption: "the plan" }, { file: join(dir, "chart.png"), as: "file" }, join(dir, "results.zip")] },
+        });
+      return "";
+    };
+    const before = tg.media.length;
+    const callsBefore = tg.calls.length;
+    tg.text(OWNER, "send me the pack");
+    await until("three files", () => tg.media.length >= before + 3 || undefined);
+    const sent = tg.media.slice(before);
+    expect(sent.map((m) => [m.method, m.name, m.caption ?? null])).toEqual([
+      ["sendDocument", "report.pdf", "the plan"],
+      ["sendDocument", "chart.png", null],
+      ["sendDocument", "results.zip", null],
+    ]);
+    expect(new TextDecoder().decode(sent[2]!.bytes)).toBe("PK\u0003\u0004 results");
+    const order = tg.calls.slice(callsBefore).filter((c) => c.startsWith("send") && c !== "sendChatAction");
+    expect(order).toEqual(["sendMessage", "sendDocument", "sendDocument", "sendDocument"]);
+    expect(tg.sent.findLast((m) => m.text === "The pack")!.message_id).toBeLessThan(sent[0]!.message_id);
+  });
+
+  test("a question's files come first, so its buttons stay last", async () => {
+    const dir = join(home, "workspace");
+    script = async (run, tools) => {
+      if (run.prompt.includes("which version"))
+        await tools.callTool({ name: "ask_user", arguments: { question: "Which version ships?", options: ["Chart", "Report"], attachments: [join(dir, "chart.png"), join(dir, "report.pdf")] } });
+      return "";
+    };
+    const before = tg.media.length;
+    tg.text(OWNER, "which version?");
+    const q = await until("question", () => tg.sent.find((m) => m.text === "Which version ships?"));
+    expect(tg.media.slice(before).map((m) => [m.method, m.name])).toEqual([
+      ["sendPhoto", "chart.png"],
+      ["sendDocument", "report.pdf"],
+    ]);
+    expect(q.message_id).toBeGreaterThan(tg.media[before + 1]!.message_id);
+    expect(q.reply_markup!.inline_keyboard.flat().map((b) => b.text)).toEqual(["Chart", "Report"]);
+  });
+
+  test("documents, voice notes and other files the owner sends arrive as attachments", async () => {
+    let prompt = "";
+    script = async (run) => {
+      prompt = run.prompt;
+      return "Got them.";
+    };
+    tg.files.set("doc1", new TextEncoder().encode("PK\u0003\u0004 notes"));
+    tg.files.set("voice1", new TextEncoder().encode("OggS voice"));
+    const msg = (id: number, extra: Record<string, unknown>) => ({ message: { message_id: id, chat: { id: OWNER, type: "private" }, from: { id: OWNER }, ...extra } });
+    tg.push(msg(901, { caption: "my notes", document: { file_id: "doc1", file_name: "notes.zip", mime_type: "application/zip", file_size: 14 } }));
+    await until("reply", () => tg.sent.find((m) => m.text === "Got them."));
+    expect(prompt).toContain('Attached file "notes.zip" (application/zip, 1 KB)');
+    const sentBefore = tg.sent.length;
+    tg.push(msg(902, { voice: { file_id: "voice1", mime_type: "audio/ogg", file_size: 10 } }));
+    await until("second reply", () => tg.sent.slice(sentBefore).find((m) => m.text === "Got them."));
+    expect(prompt).toContain('Attached file "voice-902.ogg" (audio/ogg, 1 KB)');
+    const history = await new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim()).history({ limit: 6 });
+    expect(history.filter((h) => h.role === "user" && h.attachments.length).slice(-2).map((h) => [h.text, h.attachments[0]!.name, h.attachments[0]!.mime])).toEqual([
+      ["my notes", "notes.zip", "application/zip"],
+      ["", "voice-902.ogg", "audio/ogg"],
+    ]);
+
+    // Past what a bot may fetch: the owner is told, and nothing reaches midna.
+    const runsBefore = runs.length;
+    tg.push(msg(903, { document: { file_id: "big1", file_name: "video.mov", file_size: 30 * 1024 * 1024 } }));
+    await until("too big", () => tg.sent.find((m) => m.text.includes("30 MB")));
+    await Bun.sleep(200);
+    expect(runs.length).toBe(runsBefore);
   });
 });

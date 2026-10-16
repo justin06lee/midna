@@ -114,7 +114,7 @@ async function waitForHealth(url: string, ms = 15_000): Promise<boolean> {
 
 function show(item: OutboxItem): void {
   const tag = item.kind === "message" ? "" : item.kind === "question" ? "[question] " : `[${item.priority}] `;
-  const files = (item.attachments ?? []).map((a) => `\n  [${a.kind}: ${a.name}]`).join("");
+  const files = (item.attachments ?? []).map((a) => `\n  [${a.kind}: ${a.name}]${a.caption ? ` ${a.caption}` : ""}`).join("");
   console.log(`\n${tag}${item.text}${files}${item.options?.length ? `\n  options: ${item.options.join(" / ")}` : ""}\n`);
 }
 

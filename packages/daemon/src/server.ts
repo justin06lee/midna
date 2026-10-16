@@ -37,6 +37,31 @@ type Env = { Variables: { device: Device } };
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const bearer = (c: Context) => c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
 
+/** A request body, read no further than `max` bytes: null when it is longer (a chunked upload has no length to check first). */
+async function readCapped(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!req.body) return new Uint8Array(0);
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  const reader = req.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.byteLength;
+  }
+  return out;
+}
+
 export function createApp(deps: ServerDeps): Hono<Env> {
   const { store, assistant } = deps;
   const app = new Hono<Env>();
@@ -176,14 +201,27 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   });
 
   // ── attachments: the bytes behind images and files in the conversation ──
+  // Any type, up to MAX_ATTACHMENT_BYTES; ?name= is required, ?caption= and ?as=file optional.
   app.post("/v1/attachments", async (c) => {
-    if (Number(c.req.header("content-length") ?? 0) > MAX_ATTACHMENT_BYTES) return c.json({ error: `the most midna keeps is ${MAX_ATTACHMENT_BYTES / 1048576} MB` }, 413);
-    const data = new Uint8Array(await c.req.arrayBuffer());
+    const tooBig = () => c.json({ error: `the most midna keeps is ${MAX_ATTACHMENT_BYTES / 1048576} MB` }, 413);
+    if (Number(c.req.header("content-length") ?? 0) > MAX_ATTACHMENT_BYTES) return tooBig();
+    const data = await readCapped(c.req.raw, MAX_ATTACHMENT_BYTES);
+    if (!data) return tooBig();
+    const as = c.req.query("as") as "image" | "file" | undefined;
+    if (as !== undefined && as !== "image" && as !== "file") return c.json({ error: 'as is "image" or "file"' }, 400);
     try {
-      return c.json(store.attachments.add({ data, name: c.req.query("name") ?? "", mime: c.req.header("content-type") ?? null, source: `upload from ${c.get("device").name}` }), 201);
+      const file = { data, name: c.req.query("name") ?? "", mime: c.req.header("content-type") ?? null, source: `upload from ${c.get("device").name}` };
+      return c.json(store.attachments.add({ ...file, caption: c.req.query("caption") ?? null, ...(as ? { as } : {}) }), 201);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }
+  });
+
+  app.delete("/v1/attachments/:id", (c) => {
+    const r = store.attachments.remove(c.req.param("id"));
+    if (r === "missing") return c.json({ error: "no such attachment" }, 404);
+    if (r === "sent") return c.json({ error: "that attachment was sent with a message; it stays with it" }, 409);
+    return c.json({ ok: true });
   });
 
   app.get("/v1/attachments/:id", (c) => {

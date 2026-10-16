@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
-import { Bot, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
+import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 
 /**
  * The Telegram bridge: the user's phone, until midna has its own app.
@@ -128,27 +128,39 @@ export class TelegramBridge {
     if (text.startsWith("/start")) return;
     const file = await this.receiveFile(m);
     if (!text && !file) {
-      await this.bot.send(m.chat.id, "I can only read text, photos and files here for now.");
+      // false: there was a file, and the user has been told why it didn't come through.
+      if (file === null) await this.bot.send(m.chat.id, "I can only read text, photos and files here for now.");
       return;
     }
     const q = m.reply_to_message ? this.state.questions?.[String(m.reply_to_message.message_id)] : undefined;
     await this.midna.send({ text, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(file ? { attachments: [file] } : {}) });
   }
 
-  /** A photo or file the user sent, put on midna's host; its attachment id. */
-  private async receiveFile(m: TgMessage): Promise<string | null> {
+  /**
+   * A photo or file the user sent — a document of any type, a video, audio,
+   * a voice note — put on midna's host: its attachment id, null when there
+   * was none, false when there was one that couldn't come through (and the
+   * user has been told why).
+   */
+  private async receiveFile(m: TgMessage): Promise<string | null | false> {
     const photo = m.photo?.length ? m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a)) : null;
-    const doc = m.document;
-    if (!photo && !doc) return null;
+    const file = m.document ?? m.video ?? m.audio ?? m.voice ?? m.animation ?? m.video_note;
+    if (!photo && !file) return null;
+    const fail = async (why: string) => {
+      console.error("receiving a file failed:", why);
+      await this.bot.send(m.chat.id, `I couldn't take that file: ${why}`).catch(() => {});
+      return false as const;
+    };
+    const size = (photo ?? file)!.file_size ?? 0;
+    if (size > DOWNLOAD_MAX) return fail(`it's ${Math.ceil(size / 1048576)} MB, and Telegram lets a bot fetch files up to ${DOWNLOAD_MAX / 1048576} MB. Send it from the midna app instead.`);
     try {
-      const { data, path } = await this.bot.download((photo ?? doc)!.file_id);
-      const name = doc?.file_name ?? (photo ? `photo-${m.message_id}.jpg` : path.split("/").pop()!);
-      const mime = doc?.mime_type ?? (photo ? "image/jpeg" : "application/octet-stream");
+      const { data, path } = await this.bot.download((photo ?? file)!.file_id);
+      const unnamed = m.voice ? `voice-${m.message_id}.ogg` : m.video_note || m.video ? `video-${m.message_id}.mp4` : path.split("/").pop()!;
+      const name = file?.file_name ?? (photo ? `photo-${m.message_id}.jpg` : unnamed);
+      const mime = file?.mime_type ?? (photo ? "image/jpeg" : "application/octet-stream");
       return (await this.midna.upload(data, { name, mime })).id;
     } catch (err) {
-      console.error("receiving a file failed:", (err as Error).message);
-      await this.bot.send(m.chat.id, `I couldn't take that file: ${(err as Error).message}`).catch(() => {});
-      return null;
+      return fail((err as Error).message);
     }
   }
 
@@ -207,47 +219,58 @@ export class TelegramBridge {
   }
 
   /**
-   * One outbox item, as Telegram shows it best: a lone image with a short
-   * text is a photo with a caption; otherwise the images and files go first
-   * and the text after, so a question's buttons stay at the bottom. Web
-   * images in the Markdown (`![…](https://…)`) are sent as photos too.
+   * One outbox item, in the order midna gave it: the text, then each
+   * attachment in turn — a photo when Telegram can show it, a file when it
+   * can't or midna sent it as one, each with its own caption — then web
+   * images from the Markdown (`![…](https://…)`). A lone attachment with a
+   * short text and no caption of its own is one captioned message. A
+   * question puts its files first, so its buttons stay at the bottom.
    */
   private async deliver(chat: number, item: OutboxItem): Promise<void> {
     const prefix = item.priority === "urgent" && item.kind !== "message" ? "❗ " : "";
     const options = item.kind === "question" ? item.options ?? [] : [];
     const silent = item.priority === "fyi";
-    const keyboard = options.length ? options.map((o, i) => [{ text: o, callback_data: `q:${i}` }]) : undefined;
+    const keyboard: InlineKeyboard | undefined = options.length ? options.map((o, i) => [{ text: o, callback_data: `q:${i}` }]) : undefined;
     const { text, urls } = webImages(item.text);
     const body = text ? prefix + text : "";
-    const media: Array<() => Promise<Media>> = [
-      ...(item.attachments ?? []).map((a) => async () => ({ data: await this.midna.attachment(a.id), name: a.name, mime: a.mime })),
-      ...urls.map((url) => async () => ({ url })),
+    type Part = { name: string; caption?: string; load: () => Promise<Media> };
+    const parts: Part[] = [
+      ...(item.attachments ?? []).map((a) => ({
+        name: a.name,
+        caption: a.caption ?? undefined,
+        load: async (): Promise<Media> => {
+          if (a.size > UPLOAD_MAX) throw new Error(`it's ${Math.ceil(a.size / 1048576)} MB, more than a Telegram bot can send (${UPLOAD_MAX / 1048576} MB) — it's in the midna app`);
+          return { data: await this.midna.attachment(a.id), name: a.name, mime: a.mime, asFile: a.kind === "file" };
+        },
+      })),
+      ...urls.map((url) => ({ name: url, load: async (): Promise<Media> => ({ url }) })),
     ];
+    const send = (p: Part, opts: { caption?: string; keyboard?: InlineKeyboard } = {}) => p.load().then((m) => this.bot.sendMedia(chat, m, { silent, caption: p.caption, ...opts }));
 
     // The message that carries the text, and a question's buttons.
-    let asked: TgMessage | undefined;
-    if (media.length === 1 && body.length <= 1000) {
-      asked = await media[0]!()
-        .then((m) => this.bot.sendMedia(chat, m, { caption: body, silent, keyboard }))
-        .catch((err) => void console.error(`sending an image with its caption failed: ${(err as Error).message}`));
-      if (asked) media.length = 0;
+    let carrier: TgMessage | undefined;
+    let rest = parts;
+    if (parts.length === 1 && !parts[0]!.caption && body.length <= 1000) {
+      carrier = await send(parts[0]!, { caption: body, ...(keyboard ? { keyboard } : {}) }).catch((err) => void console.error(`sending ${parts[0]!.name} with its caption failed: ${(err as Error).message}`));
+      if (carrier) rest = [];
     }
-    for (const next of media) {
-      await next()
-        .then((m) => this.bot.sendMedia(chat, m, { silent }))
-        .catch(async (err) => {
-          // One that can't be sent shouldn't hold up the rest, nor the next item.
-          console.error(`sending an attachment failed: ${(err as Error).message}`);
-          await this.bot.send(chat, `(I couldn't send an attachment here: ${(err as Error).message})`, { silent: true }).catch(() => {});
-        });
-    }
-    if (!asked && body) {
+    const sendText = async () => {
+      if (!body || carrier) return;
       const sent = await this.bot.send(chat, body, { silent, ...(keyboard ? { keyboard } : {}) });
-      asked = sent[sent.length - 1];
+      carrier = sent[sent.length - 1];
+    };
+    if (item.kind !== "question") await sendText();
+    for (const p of rest) {
+      await send(p).catch(async (err) => {
+        // One that can't be sent shouldn't hold up the rest, nor the next item.
+        console.error(`sending ${p.name} failed: ${(err as Error).message}`);
+        await this.bot.send(chat, `(I couldn't send ${p.name} here: ${(err as Error).message})`, { silent: true }).catch(() => {});
+      });
     }
-    if (item.kind === "question" && asked) {
+    if (item.kind === "question") await sendText();
+    if (item.kind === "question" && carrier) {
       const questions = (this.state.questions ??= {});
-      questions[String(asked.message_id)] = { id: item.id, options };
+      questions[String(carrier.message_id)] = { id: item.id, options };
       // Keep the map small: only recent questions can still be answered by tap.
       const keys = Object.keys(questions);
       for (const k of keys.slice(0, Math.max(0, keys.length - 100))) delete questions[k];
