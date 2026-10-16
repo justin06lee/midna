@@ -1,4 +1,4 @@
-export { Attachments, mimeOf } from "./attachments.ts";
+export { Attachments, mimeOf, type AttachOptions } from "./attachments.ts";
 export { Bus } from "./bus.ts";
 export { openDatabase } from "./db.ts";
 export { Devices, type Device } from "./devices.ts";

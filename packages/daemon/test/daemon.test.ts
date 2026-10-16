@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { MAX_ATTACHMENT_BYTES, MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import type { Brain, BrainRun } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
 
@@ -297,7 +297,7 @@ describe("midnad", () => {
     expect(photo).toMatchObject({ kind: "image", name: "receipt.png", size: PNG.byteLength });
     let seen: Uint8Array | null = null;
     script = async (run) => {
-      const path = /saved at (\S+)/.exec(run.prompt)?.[1];
+      const path = /saved at `([^`]+)`/.exec(run.prompt)?.[1];
       if (path) seen = new Uint8Array(readFileSync(path));
       return "Got the receipt.";
     };
@@ -324,5 +324,92 @@ describe("midnad", () => {
     const sent = await until("plot", () => outbox().find((i) => i.text === "Tonight's plot"));
     expect(sent.attachments).toHaveLength(1);
     expect(refused).toMatch(/message_user/);
+  });
+  test("the user sends files of any type, up to 100 MB, and the brain opens them in the order sent", async () => {
+    const enc = (t: string) => new TextEncoder().encode(t);
+    const zip = await client.upload(enc("PK\u0003\u0004 fake archive"), { name: "results.zip", mime: "application/zip" });
+    const pdf = await client.upload(enc("%PDF-1.7 fake"), { name: "Q4 plan.pdf", mime: "application/pdf", caption: "the plan" });
+    const big = new Uint8Array(30 * 1024 * 1024);
+    big.set(enc("not much"), 0);
+    const dataset = await client.upload(big, { name: "dataset.bin", mime: "application/octet-stream" });
+    const shot = await client.upload(PNG, { name: "screen.png", mime: "image/png", as: "file" });
+    expect([zip, pdf, dataset, shot].map((a) => [a.name, a.kind, a.mime, a.size, a.caption])).toEqual([
+      ["results.zip", "file", "application/zip", 17, null],
+      ["Q4 plan.pdf", "file", "application/pdf", 13, "the plan"],
+      ["dataset.bin", "file", "application/octet-stream", 30 * 1024 * 1024, null],
+      ["screen.png", "file", "image/png", PNG.byteLength, null],
+    ]);
+
+    let prompt = "";
+    script = async (run) => {
+      prompt = run.prompt;
+      return "Read them all.";
+    };
+    const order = [pdf.id, dataset.id, shot.id, zip.id];
+    await client.send({ text: "everything for the review", attachments: order, client: "test" });
+    await until("reply", () => outbox().find((i) => i.text === "Read them all."));
+
+    const echo = events.findLast((e) => e.type === "user_message") as Extract<StreamEvent, { type: "user_message" }>;
+    expect(echo.attachments.map((a) => a.id)).toEqual(order);
+    const line = (await client.history({ limit: 5 })).find((h) => h.text === "everything for the review")!;
+    expect(line.attachments.map((a) => a.id)).toEqual(order);
+    // Each file waits in the workspace under its own name, listed in the order sent.
+    const listed = [...prompt.matchAll(/Attached (\d)\/4 (\w+) "([^"]+)" \(([^,]+), [^)]+\)(?:, captioned "([^"]+)")?, saved at `([^`]+)`/g)];
+    expect(listed.map((m) => [m[1], m[3], m[4], m[5] ?? null])).toEqual([
+      ["1", "Q4 plan.pdf", "application/pdf", "the plan"],
+      ["2", "dataset.bin", "application/octet-stream", null],
+      ["3", "screen.png", "image/png", null],
+      ["4", "results.zip", "application/zip", null],
+    ]);
+    for (const m of listed) expect(m[6]!).toEndWith(`/workspace/attachments/${order[Number(m[1]) - 1]}/${m[3]}`);
+    expect(readFileSync(listed[1]![6]!).byteLength).toBe(30 * 1024 * 1024);
+    expect(readFileSync(listed[3]![6]!, "utf8")).toStartWith("PK");
+  });
+
+  test("an upload past the limit is turned away, even one that doesn't say its length", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        if (sent > MAX_ATTACHMENT_BYTES) return ctl.close();
+        sent += chunk.byteLength;
+        ctl.enqueue(chunk);
+      },
+    });
+    const res = await fetch(`${daemon.url}/v1/attachments?name=huge.bin`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${readFileSync(join(home, "host.token"), "utf8").trim()}`, "content-type": "application/octet-stream" },
+      body,
+    });
+    expect(res.status).toBe(413);
+    expect(((await res.json()) as { error: string }).error).toContain("100 MB");
+  });
+
+  test("midna sends any file, in the order it lists them, with the names, captions and form it chooses", async () => {
+    const dir = join(home, "workspace");
+    writeFileSync(join(dir, "notes.txt"), "raw notes");
+    writeFileSync(join(dir, "report.pdf"), "%PDF-1.7 report");
+    writeFileSync(join(dir, "chart.png"), PNG);
+    script = async (run, tools) => {
+      if (!run.prompt.includes("send the files")) return "";
+      await call(tools, "message_user", {
+        text: "The review pack",
+        attachments: [{ file: join(dir, "notes.txt"), caption: "raw notes" }, { file: join(dir, "chart.png"), as: "file", name: "chart-full.png" }, join(dir, "report.pdf")],
+      });
+      // Attached across two calls, in call order.
+      await call(tools, "attach", { files: [join(dir, "report.pdf")] });
+      expect(await call(tools, "attach", { files: [{ file: join(dir, "notes.txt"), name: "notes-v2.txt" }] })).toContain("notes-v2.txt (text/plain");
+      return "And for this chat:";
+    };
+    await client.send({ text: "send the files", client: "test" });
+    const pack = await until("pack", () => outbox().find((i) => i.text === "The review pack"));
+    expect(pack.attachments.map((a) => [a.name, a.kind, a.mime, a.caption])).toEqual([
+      ["notes.txt", "file", "text/plain", "raw notes"],
+      ["chart-full.png", "file", "image/png", null],
+      ["report.pdf", "file", "application/pdf", null],
+    ]);
+    const reply = await until("reply", () => outbox().find((i) => i.text === "And for this chat:"));
+    expect(reply.attachments.map((a) => a.name)).toEqual(["report.pdf", "notes-v2.txt"]);
+    expect(new TextDecoder().decode(await (await client.attachment(reply.attachments[1]!.id)).arrayBuffer())).toBe("raw notes");
   });
 });

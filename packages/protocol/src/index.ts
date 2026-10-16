@@ -17,22 +17,37 @@ export const Mode = z.enum(["autonomous", "ask"]);
 export type Mode = z.infer<typeof Mode>;
 
 /**
- * A file that goes with a message: a screenshot midna took, a photo the user
- * sent. The bytes live on the host; GET /v1/attachments/:id serves them to a
- * paired device (MidnaClient.attachment).
+ * A file that goes with a message, of any type: a screenshot midna took, a
+ * PDF it wrote, a zip, a photo the user sent. The bytes live on the host;
+ * GET /v1/attachments/:id serves them to a paired device
+ * (MidnaClient.attachment). A message's attachments are listed in the order
+ * the sender chose, and every client shows them in that order.
  */
 export const Attachment = z.object({
   id: z.string(),
-  /** "image" when a client can draw it inline; anything else is a file. */
+  /**
+   * "image" when a client should draw it inline; anything else — and an
+   * image the sender chose to send as a file, at full quality — is a file.
+   */
   kind: z.enum(["image", "file"]),
   name: z.string(),
   mime: z.string(),
   size: z.number(),
+  /** A line the sender put with this one file. A host older than 0.5 leaves it out. */
+  caption: z.string().nullable().default(null),
 });
 export type Attachment = z.infer<typeof Attachment>;
 
-/** The largest file midna keeps as an attachment. */
-export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/** The largest file midna keeps as an attachment: 100 MB. POST /v1/attachments answers 413 above it. */
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
+
+/** How a client uploads a file: its name, what it is, and optionally a caption and whether an image goes as a file. */
+export interface UploadInfo {
+  name: string;
+  mime: string;
+  caption?: string;
+  as?: "image" | "file";
+}
 
 /** Something midna is telling or asking the user. Replayable by id. */
 export const OutboxItem = z.object({
@@ -69,8 +84,8 @@ export const SendMessage = z
     client: z.string().default("unknown"),
     /** The outbox question this answers, when it answers one. */
     replyTo: z.number().optional(),
-    /** Ids of attachments uploaded first with MidnaClient.upload. */
-    attachments: z.array(z.string()).max(10).optional(),
+    /** Ids of attachments uploaded first with MidnaClient.upload, in the order to show them. */
+    attachments: z.array(z.string()).max(20).optional(),
   })
   .refine((m) => m.text.trim() || m.attachments?.length, { message: "a message needs text or an attachment" });
 export type SendMessage = z.input<typeof SendMessage>;
@@ -252,9 +267,12 @@ export class MidnaClient {
     // Bun types Response.blob() as node:buffer's Blob; it is the global one.
     return (await res.blob()) as unknown as Blob;
   }
-  /** Put a file on the host, to send with a message: `send({ text, attachments: [id] })`. */
-  upload(data: Upload, file: { name: string; mime: string }): Promise<Attachment> {
-    return this.call("POST", `/v1/attachments?name=${encodeURIComponent(file.name)}`, undefined, undefined, { body: data, type: file.mime });
+  /** Put a file of any type (up to MAX_ATTACHMENT_BYTES) on the host, to send with a message: `send({ text, attachments: [id, …] })`. */
+  upload(data: Upload, file: UploadInfo): Promise<Attachment> {
+    const q = new URLSearchParams({ name: file.name });
+    if (file.caption) q.set("caption", file.caption);
+    if (file.as) q.set("as", file.as);
+    return this.call("POST", `/v1/attachments?${q}`, undefined, undefined, { body: data, type: file.mime || "application/octet-stream" });
   }
   /** Released outbox items after stream position `since`. */
   outbox(since = 0): Promise<OutboxItem[]> {

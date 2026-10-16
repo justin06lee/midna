@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
-import { attach, liftLocalImages } from "./attachments.ts";
+import { attach, liftLocalImages, type FileRef } from "./attachments.ts";
 
 /**
  * midna's own tools, served over MCP so every harness gets the same set.
@@ -20,10 +20,21 @@ export interface ToolContext {
 const when = z.string().describe('Local time "2026-10-02 09:30", a date "2026-10-02", ISO with offset, or relative "+2h" / "+3d"');
 const maybeWhen = when.nullable().optional();
 const id = z.number().int().positive();
+const fileRef = z.union([
+  z.string().describe("An absolute path on this machine, or an http(s) URL to download"),
+  z.object({
+    file: z.string().describe("An absolute path on this machine, or an http(s) URL to download"),
+    name: z.string().optional().describe('The name it arrives under, e.g. "Q4 report.pdf" (default: its own)'),
+    caption: z.string().optional().describe("A line shown with this one file"),
+    as: z.enum(["image", "file"]).optional().describe('"file" sends an image as a file — full quality, not shown inline. Other types always go as files.'),
+  }),
+]);
 const files = z
-  .array(z.string())
-  .max(10)
-  .describe("Images or files to send: absolute paths on this machine (a screenshot you took, a chart you made) or http(s) URLs to download");
+  .array(fileRef)
+  .max(20)
+  .describe(
+    "Files to send, of any type — images, PDFs, zips, spreadsheets, logs, audio, video, anything up to 100 MB — in the order the user should see them. Each is a path or URL, or {file, name, caption, as} to choose how it arrives.",
+  );
 
 type Result = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 
@@ -332,7 +343,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
 
   // ── reaching the user ────────────────────────────────────────────────
   /** Text plus files: the listed ones, and any Markdown image of a file on this machine. */
-  async function withFiles(text: string, refs: string[] | undefined) {
+  async function withFiles(text: string, refs: FileRef[] | undefined) {
     const kept = [];
     for (const ref of refs ?? []) kept.push((await attach(store, ref)).id);
     const lifted = liftLocalImages(store, text);
@@ -340,11 +351,12 @@ export function createToolServer(ctx: ToolContext): McpServer {
     if (!lifted.text.trim() && !attachments.length) throw new Error("nothing to send: give text or attachments");
     return { text: lifted.text, attachments };
   }
-  const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}` : "");
+  const sizeOf = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}` : "");
 
   tool(
     "message_user",
-    "Send the user a message now, with images or files if it helps (attachments). urgent = interrupt them (only for what can't wait); normal = ordinary; fyi = quiet background. Non-urgent messages wait out quiet hours. In a chat, your reply already reaches them — use this only for something separate, and use attach to put files on your reply.",
+    "Send the user a message now, with files of any type if it helps (attachments: images, PDFs, zips, anything; shown in the order you list them, after the text). urgent = interrupt them (only for what can't wait); normal = ordinary; fyi = quiet background. Non-urgent messages wait out quiet hours. In a chat, your reply already reaches them — use this only for something separate, and use attach to put files on your reply.",
     { text: z.string(), priority: z.enum(["urgent", "normal", "fyi"]).optional(), attachments: files.optional() },
     async (a) => {
       const body = await withFiles(a.text, a.attachments);
@@ -354,7 +366,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
   );
   tool(
     "ask_user",
-    "Ask the user a question, with optional answer choices they can tap, and images or files to look at (attachments). Their answer arrives as a normal message.",
+    "Ask the user a question, with optional answer choices they can tap, and files of any type to look at (attachments, in the order you list them). Their answer arrives as a normal message.",
     { question: z.string(), options: z.array(z.string()).max(8).optional(), priority: z.enum(["urgent", "normal", "fyi"]).optional(), attachments: files.optional() },
     async (a) => {
       const body = await withFiles(a.question, a.attachments);
@@ -367,13 +379,13 @@ export function createToolServer(ctx: ToolContext): McpServer {
   );
   tool(
     "attach",
-    "Put images or files on your reply in this chat — a screenshot you took, a chart you made, a photo from the web. They arrive with the reply and show inline in the user's app and on Telegram. Call it before you finish; your reply can be short or even empty.",
+    "Put files of any type on your reply in this chat — a screenshot you took, a chart, a PDF or zip you made, a log, a file from the web. They arrive with the reply, after its text, in the order you attach them (call it again to add more after); images show inline unless you send them as files. Works in the user's app and on Telegram. Call it before you finish; your reply can be short or even empty.",
     { files: files.min(1) },
     async (a) => {
       if (ctx.episodeKind !== "chat" || ctx.episodeId === null) throw new Error("there is no reply to attach to here — send files with message_user's attachments instead");
       const kept = [];
       for (const ref of a.files) kept.push(await attach(store, ref, { episodeId: ctx.episodeId }));
-      return `attached ${kept.map((f) => `${f.name} (${f.kind}, ${Math.max(1, Math.round(f.size / 1024))} KB)`).join(", ")} — they go with your reply`;
+      return `attached ${kept.map((f) => `${f.name} (${f.kind === "image" ? "image" : f.mime}, ${sizeOf(f.size)})`).join(", ")} — they go with your reply, in this order`;
     },
   );
 
