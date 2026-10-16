@@ -19,12 +19,13 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - **Desktop appearance (light/dark/system switch) and shared controls:** clients/desktop/src/style.css, clients/desktop/src/appearance.ts, clients/desktop/src/ui.tsx
 - **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
 - **midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon, assets/midna.svg
+- **Desktop images in the chat: attachments, Markdown images, the full-size viewer:** clients/desktop/src/media.tsx, clients/desktop/src/markdown.tsx, clients/desktop/src/screens/Chat.tsx
 
 ## How it works
 
 - **Desktop installation:** Welcome discovers and ranks machines → Install displays installation events → host runs the CLI through Tauri or the development server → the CLI installs and pairs the machine → the desktop app receives a Connection
 - **Desktop conversation:** Main creates useMidna with a Connection → useMidna uses MidnaClient for history and live events → Chat renders lines and sends messages
-- **Telegram bridge:** A one-time /start code binds the owner chat → Telegram messages pass through the bridge to MidnaClient → the bridge delivers outbox items to Telegram → saved offsets and sequence positions support restart
+- **Telegram bridge:** A one-time /start code binds the owner chat → Telegram messages, photos and files pass through the bridge to MidnaClient (files uploaded first) → the bridge delivers outbox items to Telegram, attachments as photos or documents → saved offsets and sequence positions support restart
 
 ## Key files
 
@@ -42,6 +43,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from
 - clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window
 - clients/desktop/scripts/icons.ts — renders every icon from the helmet and compiles the macOS 26 Assets.car from icons/midna.icon
+- clients/desktop/src/media.tsx — attachment images (fetched with the device token, drawn from object URLs at their own size), file chips, web images and the viewer
 
 ## Rules and traps
 
@@ -56,6 +58,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - Window dragging needs data-tauri-drag-region ("deep" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.
 - The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other.
 - macOS 26 draws an app with no Assets.car icon the legacy way, lightened and shaded. bun run icons writes the Icon Composer document src-tauri/icons/midna.icon (glass, specular, shadow off; helmet white in the dark and tinted/clear styles) and compiles it into icons/Assets.car with Xcode's actool run by path, since xcrun refuses while Xcode isn't selected or its licence is unaccepted. bundle.icon lists Assets.car, so Tauri copies it and sets CFBundleIconName; icon.icns stays for older macOS. Assets.car is committed, so building needs no Xcode — rerun bun run icons after changing the helmet.
+- An <img> can't send the device token: attachments are fetched with MidnaClient.attachment() and drawn from blob: URLs, cached per id for the window's life. The CSP's img-src must keep blob: (attachments) and https:/http: (Markdown web images). Size an image from its natural dimensions (loadImage in media.tsx): CSS max-width/max-height on an <img> inside a shrink-to-fit button leaves the frame wider than the picture.
 
 ## What it talks to
 

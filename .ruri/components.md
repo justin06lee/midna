@@ -23,3 +23,10 @@ Its files: clients/desktop/src/screens/Main.tsx
 Reaches into: clients/desktop/src-tauri/tauri.conf.json, clients/desktop/src/host.ts
 Tags: window, nav, header
 Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/e032f092-4953-4611-b1b8-f3a7a38fc4c5-midna-titlebar.png
+
+## chat-images — the chat images
+Images and files in the chat: attachments fetched with the device token and drawn at their own size (one up to 440×320, several in a 150px row), file chips, Markdown web images, and the full-size viewer they open in.
+Its files: clients/desktop/src/media.tsx
+Reaches into: clients/desktop/src/screens/Chat.tsx, clients/desktop/src/markdown.tsx, clients/desktop/src/ui.tsx, clients/desktop/src-tauri/tauri.conf.json
+Tags: chat, image, attachment, viewer, lightbox
+Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/20e7aa34-95bb-44e7-bb07-2eb939f31894-shot-10.png

@@ -70,3 +70,4 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - Supports terminal chat, a single-owner Telegram bridge, and desktop chat
 - Discovers machines and installs, starts, and pairs remote Midna hosts
 - Pairs each remote client with a revocable device token
+- Sends, serves, and renders image attachments in chat

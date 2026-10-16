@@ -12,7 +12,8 @@
     "Offers autonomous and ask permission modes",
     "Supports terminal chat, a single-owner Telegram bridge, and desktop chat",
     "Discovers machines and installs, starts, and pairs remote Midna hosts",
-    "Pairs each remote client with a revocable device token"
+    "Pairs each remote client with a revocable device token",
+    "Sends, serves, and renders image attachments in chat"
   ],
   "layers": [
     {
@@ -201,6 +202,14 @@
           "files": [
             "packages/agent/src/index.ts"
           ]
+        },
+        {
+          "name": "Images and files midna sends and receives",
+          "files": [
+            "packages/agent/src/attachments.ts",
+            "packages/agent/src/tools.ts",
+            "packages/agent/src/assistant.ts"
+          ]
         }
       ],
       "flows": [
@@ -232,7 +241,8 @@
         "packages/agent/src/mcp.ts — handles an MCP request with a fresh episode-bound server",
         "packages/agent/src/check.ts — runs a real brain turn and classifies sign-in and not-installed failures",
         "packages/agent/test/check.test.ts — tests the brain check against yagami's real toApiError",
-        "packages/agent/src/index.ts — exports the layer's public API"
+        "packages/agent/src/index.ts — exports the layer's public API",
+        "packages/agent/src/attachments.ts — turns host paths, URLs and Markdown images of local files into attachments; copies the user's attachments into the workspace for the brain"
       ],
       "rules": [
         "Bind tool calls to the correct episode ID so they appear under the right audit entry.",
@@ -241,7 +251,8 @@
         "A chat brain session restarts after four idle hours or 40 turns.",
         "Brain mode controls permissions: autonomous allows tools to run; ask restricts host actions.",
         "Preserve authentication failure details from yagami so the user can be told how to sign in.",
-        "Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract."
+        "Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract.",
+        "The brain sends images only through attach (on a chat reply, staged by episode until the reply is said), or attachments on message_user/ask_user. Before 0.4 midna learned to call Telegram's sendPhoto with the bridge's bot token, which reached Telegram only; the system prompt now forbids calling a bridge's API."
       ],
       "edges": [
         "Core — supplies the store, settings, planning data, context, episodes, and time helpers",
@@ -397,11 +408,20 @@
           ]
         },
         {
-          "name": "midna's mark: app icon, tray icon, in-app mark, README banner",
+          "name": "midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner",
           "files": [
             "clients/desktop/src/helmet.ts",
             "clients/desktop/scripts/icons.ts",
+            "clients/desktop/src-tauri/icons/midna.icon",
             "assets/midna.svg"
+          ]
+        },
+        {
+          "name": "Desktop images in the chat: attachments, Markdown images, the full-size viewer",
+          "files": [
+            "clients/desktop/src/media.tsx",
+            "clients/desktop/src/markdown.tsx",
+            "clients/desktop/src/screens/Chat.tsx"
           ]
         }
       ],
@@ -428,8 +448,8 @@
           "name": "Telegram bridge",
           "steps": [
             "A one-time /start code binds the owner chat",
-            "Telegram messages pass through the bridge to MidnaClient",
-            "the bridge delivers outbox items to Telegram",
+            "Telegram messages, photos and files pass through the bridge to MidnaClient (files uploaded first)",
+            "the bridge delivers outbox items to Telegram, attachments as photos or documents",
             "saved offsets and sequence positions support restart"
           ]
         }
@@ -447,7 +467,9 @@
         "clients/desktop/src/screens/Install.tsx — installation progress",
         "clients/desktop/src/screens/Chat.tsx — conversation display and input",
         "clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from",
-        "clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window"
+        "clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window",
+        "clients/desktop/scripts/icons.ts — renders every icon from the helmet and compiles the macOS 26 Assets.car from icons/midna.icon",
+        "clients/desktop/src/media.tsx — attachment images (fetched with the device token, drawn from object URLs at their own size), file chips, web images and the viewer"
       ],
       "rules": [
         "The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.",
@@ -459,7 +481,9 @@
         "The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit.",
         "Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.",
         "Window dragging needs data-tauri-drag-region (\"deep\" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.",
-        "The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other."
+        "The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other.",
+        "macOS 26 draws an app with no Assets.car icon the legacy way, lightened and shaded. bun run icons writes the Icon Composer document src-tauri/icons/midna.icon (glass, specular, shadow off; helmet white in the dark and tinted/clear styles) and compiles it into icons/Assets.car with Xcode's actool run by path, since xcrun refuses while Xcode isn't selected or its licence is unaccepted. bundle.icon lists Assets.car, so Tauri copies it and sets CFBundleIconName; icon.icns stays for older macOS. Assets.car is committed, so building needs no Xcode — rerun bun run icons after changing the helmet.",
+        "An <img> can't send the device token: attachments are fetched with MidnaClient.attachment() and drawn from blob: URLs, cached per id for the window's life. The CSP's img-src must keep blob: (attachments) and https:/http: (Markdown web images). Size an image from its natural dimensions (loadImage in media.tsx): CSS max-width/max-height on an <img> inside a shrink-to-fit button leaves the frame wider than the picture."
       ],
       "edges": [
         "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal",
@@ -505,6 +529,12 @@
           "files": [
             "packages/protocol/src/index.ts"
           ]
+        },
+        {
+          "name": "Attachments: the shape on outbox items, history and user messages, upload and fetch",
+          "files": [
+            "packages/protocol/src/index.ts"
+          ]
         }
       ],
       "flows": [
@@ -542,7 +572,8 @@
         "The desktop app never speaks SSH itself; it drives hosting only through `midna devices --json` and `midna host install --json`.",
         "DiscoveredDevice.id is a stable key of the form \"local\", \"makima:tenet\", or \"tailscale:tenet\"; keep it stable.",
         "Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way.",
-        "MidnaClient.events() closes its connection however the stream ends (its own AbortController, aborted in finally) and treats 60s without a byte as a dead connection; the daemon's 25s keepalive keeps a live one under that."
+        "MidnaClient.events() closes its connection however the stream ends (its own AbortController, aborted in finally) and treats 60s without a byte as a dead connection; the daemon's 25s keepalive keeps a live one under that.",
+        "OutboxItem.attachments defaults to [] and a host older than 0.4 sends none: clients read item.attachments ?? []. SendMessage.text may be empty only when attachments are given; an attachment's bytes come from GET /v1/attachments/:id with the bearer token, never a URL with the token in it."
       ],
       "edges": [
         "Clients — the Bun CLI and Telegram bridge use only the public API these schemas and MidnaClient define",

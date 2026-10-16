@@ -13,6 +13,7 @@ This layer is the one client-facing contract for midna: Zod schemas in index.ts 
 - **Device discovery shape:** packages/protocol/src/hosting.ts
 - **Host install steps and install events:** packages/protocol/src/hosting.ts
 - **Default port and service name:** packages/protocol/src/index.ts
+- **Attachments: the shape on outbox items, history and user messages, upload and fetch:** packages/protocol/src/index.ts
 
 ## How it works
 
@@ -34,6 +35,7 @@ This layer is the one client-facing contract for midna: Zod schemas in index.ts 
 - DiscoveredDevice.id is a stable key of the form "local", "makima:tenet", or "tailscale:tenet"; keep it stable.
 - Tailscale does not carry loopback, so a device with a listen address needs midna to listen there to be reachable that way.
 - MidnaClient.events() closes its connection however the stream ends (its own AbortController, aborted in finally) and treats 60s without a byte as a dead connection; the daemon's 25s keepalive keeps a live one under that.
+- OutboxItem.attachments defaults to [] and a host older than 0.4 sends none: clients read item.attachments ?? []. SendMessage.text may be empty only when attachments are given; an attachment's bytes come from GET /v1/attachments/:id with the bearer token, never a URL with the token in it.
 
 ## What it talks to
 

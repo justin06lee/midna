@@ -13,6 +13,7 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - **System and wakeup prompts:** packages/agent/src/prompt.ts
 - **Brain availability and sign-in check:** packages/agent/src/check.ts, packages/agent/src/brain.ts, packages/agent/test/check.test.ts
 - **Public exports:** packages/agent/src/index.ts
+- **Images and files midna sends and receives:** packages/agent/src/attachments.ts, packages/agent/src/tools.ts, packages/agent/src/assistant.ts
 
 ## How it works
 
@@ -29,6 +30,7 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - packages/agent/src/check.ts — runs a real brain turn and classifies sign-in and not-installed failures
 - packages/agent/test/check.test.ts — tests the brain check against yagami's real toApiError
 - packages/agent/src/index.ts — exports the layer's public API
+- packages/agent/src/attachments.ts — turns host paths, URLs and Markdown images of local files into attachments; copies the user's attachments into the workspace for the brain
 
 ## Rules and traps
 
@@ -39,6 +41,7 @@ The Assistant layer turns chats and due wakeups into audited episodes and runs t
 - Brain mode controls permissions: autonomous allows tools to run; ask restricts host actions.
 - Preserve authentication failure details from yagami so the user can be told how to sign in.
 - Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract.
+- The brain sends images only through attach (on a chat reply, staged by episode until the reply is said), or attachments on message_user/ask_user. Before 0.4 midna learned to call Telegram's sendPhoto with the bridge's bot token, which reached Telegram only; the system prompt now forbids calling a bridge's API.
 
 ## What it talks to
 
