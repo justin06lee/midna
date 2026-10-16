@@ -20,7 +20,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
 - **midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon, assets/midna.svg
 - **Desktop attachments: paste/drag/picker uploads, download and open, PDFs in the viewer, rendered in the order given:** clients/desktop/src/attach.tsx, clients/desktop/src/media.tsx, clients/desktop/src/screens/Chat.tsx, clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs
-- **Desktop text field persistence (typed text kept across view switches, quit/relaunch and failed sends):** clients/desktop/src/screens/Chat.tsx, clients/desktop/src/screens/Settings.tsx, clients/desktop/src/screens/Welcome.tsx
+- **Kept drafts in every text field:** clients/desktop/src/drafts.ts, clients/desktop/src/screens/Chat.tsx, clients/desktop/src/screens/Settings.tsx, clients/desktop/src/App.tsx
 
 ## How it works
 
@@ -63,7 +63,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - An <img> can't send the device token: attachments come through MidnaClient.attachment() and are drawn from cached blob: URLs (the CSP's img-src keeps blob:, and https:/http: for Markdown images). Size an image from its natural dimensions (loadImage): CSS max sizes inside a shrink-to-fit button leave the frame too wide.
 - Telegram bot limits: uploads up to 50 MB (bigger attachments get a note pointing to the app), photos up to 10 MB (bigger images go as documents), downloads via getFile up to 20 MB (bigger incoming files are refused with a reason). The bridge sends text first, then attachments in order; a question sends its files first so its buttons stay last.
 - Files in: dragDropEnabled is false so WebKit hands drops to the page as File objects (main.tsx refuses a drop outside the chat, or WebKit opens the file in the window). WebKit gives a paste of several Finder files only the first; Rust (copied_files, read_copied: NSPasteboard) reads them all. Uploads use XMLHttpRequest for progress.
-- Chat stays mounted (hidden) while another view shows, so the draft and its uploads live on. The text is also kept in localStorage as midna.draft:<url>#<device>, rewritten on every change except mid-send and removed only when a send succeeds. A draft handed over from another screen (Objectives) goes below what's typed, never over it.
+- Nothing typed is lost (drafts.ts): Chat stays mounted hidden; the composer, Settings' model, timezone and quiet hours keep drafts in localStorage (midna.draft:<url>#<device>[:field]; setup choices midna.draft:setup), dropped only once the send or save works. A saved value or handed-over draft never replaces what's typed. The Telegram bot token stays in memory only.
 
 ## What it talks to
 
