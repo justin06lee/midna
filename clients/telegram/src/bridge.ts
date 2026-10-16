@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
-import { Bot, type TgCallbackQuery, type TgMessage } from "./bot.ts";
+import { Bot, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 
 /**
  * The Telegram bridge: the user's phone, until midna has its own app.
@@ -126,12 +126,30 @@ export class TelegramBridge {
       return;
     }
     if (text.startsWith("/start")) return;
-    if (!text) {
-      await this.bot.send(m.chat.id, "I can only read text here for now.");
+    const file = await this.receiveFile(m);
+    if (!text && !file) {
+      await this.bot.send(m.chat.id, "I can only read text, photos and files here for now.");
       return;
     }
     const q = m.reply_to_message ? this.state.questions?.[String(m.reply_to_message.message_id)] : undefined;
-    await this.midna.send({ text, client: "telegram", ...(q ? { replyTo: q.id } : {}) });
+    await this.midna.send({ text, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(file ? { attachments: [file] } : {}) });
+  }
+
+  /** A photo or file the user sent, put on midna's host; its attachment id. */
+  private async receiveFile(m: TgMessage): Promise<string | null> {
+    const photo = m.photo?.length ? m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a)) : null;
+    const doc = m.document;
+    if (!photo && !doc) return null;
+    try {
+      const { data, path } = await this.bot.download((photo ?? doc)!.file_id);
+      const name = doc?.file_name ?? (photo ? `photo-${m.message_id}.jpg` : path.split("/").pop()!);
+      const mime = doc?.mime_type ?? (photo ? "image/jpeg" : "application/octet-stream");
+      return (await this.midna.upload(data, { name, mime })).id;
+    } catch (err) {
+      console.error("receiving a file failed:", (err as Error).message);
+      await this.bot.send(m.chat.id, `I couldn't take that file: ${(err as Error).message}`).catch(() => {});
+      return null;
+    }
   }
 
   private async onCallback(cb: TgCallbackQuery): Promise<void> {
@@ -188,17 +206,48 @@ export class TelegramBridge {
     }
   }
 
+  /**
+   * One outbox item, as Telegram shows it best: a lone image with a short
+   * text is a photo with a caption; otherwise the images and files go first
+   * and the text after, so a question's buttons stay at the bottom. Web
+   * images in the Markdown (`![…](https://…)`) are sent as photos too.
+   */
   private async deliver(chat: number, item: OutboxItem): Promise<void> {
     const prefix = item.priority === "urgent" && item.kind !== "message" ? "❗ " : "";
     const options = item.kind === "question" ? item.options ?? [] : [];
-    const sent = await this.bot.send(chat, prefix + item.text, {
-      silent: item.priority === "fyi",
-      ...(options.length ? { keyboard: options.map((o, i) => [{ text: o, callback_data: `q:${i}` }]) } : {}),
-    });
-    if (item.kind === "question") {
-      const last = sent[sent.length - 1]!;
+    const silent = item.priority === "fyi";
+    const keyboard = options.length ? options.map((o, i) => [{ text: o, callback_data: `q:${i}` }]) : undefined;
+    const { text, urls } = webImages(item.text);
+    const body = text ? prefix + text : "";
+    const media: Array<() => Promise<Media>> = [
+      ...(item.attachments ?? []).map((a) => async () => ({ data: await this.midna.attachment(a.id), name: a.name, mime: a.mime })),
+      ...urls.map((url) => async () => ({ url })),
+    ];
+
+    // The message that carries the text, and a question's buttons.
+    let asked: TgMessage | undefined;
+    if (media.length === 1 && body.length <= 1000) {
+      asked = await media[0]!()
+        .then((m) => this.bot.sendMedia(chat, m, { caption: body, silent, keyboard }))
+        .catch((err) => void console.error(`sending an image with its caption failed: ${(err as Error).message}`));
+      if (asked) media.length = 0;
+    }
+    for (const next of media) {
+      await next()
+        .then((m) => this.bot.sendMedia(chat, m, { silent }))
+        .catch(async (err) => {
+          // One that can't be sent shouldn't hold up the rest, nor the next item.
+          console.error(`sending an attachment failed: ${(err as Error).message}`);
+          await this.bot.send(chat, `(I couldn't send an attachment here: ${(err as Error).message})`, { silent: true }).catch(() => {});
+        });
+    }
+    if (!asked && body) {
+      const sent = await this.bot.send(chat, body, { silent, ...(keyboard ? { keyboard } : {}) });
+      asked = sent[sent.length - 1];
+    }
+    if (item.kind === "question" && asked) {
       const questions = (this.state.questions ??= {});
-      questions[String(last.message_id)] = { id: item.id, options };
+      questions[String(asked.message_id)] = { id: item.id, options };
       // Keep the map small: only recent questions can still be answered by tap.
       const keys = Object.keys(questions);
       for (const k of keys.slice(0, Math.max(0, keys.length - 100))) delete questions[k];
@@ -217,6 +266,13 @@ export class TelegramBridge {
     if (this.typingTimer) clearInterval(this.typingTimer);
     this.typingTimer = null;
   }
+}
+
+/** Markdown images of web URLs, taken out of the text to be sent as photos. */
+export function webImages(md: string): { text: string; urls: string[] } {
+  const urls: string[] = [];
+  const text = md.replace(/!\[[^\]\n]*\]\((https?:\/\/[^)\s]+)\)/g, (_, url: string) => (urls.push(url), ""));
+  return { text: urls.length ? text.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim() : md, urls };
 }
 
 /**

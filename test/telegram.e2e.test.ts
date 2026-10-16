@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -9,9 +9,13 @@ import type { Brain, BrainRun } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "@midna/daemon";
 import { TelegramBridge, setupTelegram, loadState } from "@midna/telegram";
 
-/** A fake Telegram Bot API: records what the bot sends, serves queued updates by long-poll. */
+const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+
+/** A fake Telegram Bot API: records what the bot sends, serves queued updates by long-poll, and files by path. */
 class FakeTelegram {
   sent: Array<{ chat_id: number; text: string; parse_mode?: string; reply_markup?: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> }; message_id: number }> = [];
+  /** Photos and files the bot sent: a URL, or an uploaded file with its bytes. */
+  media: Array<{ method: string; chat_id: number; caption?: string; parse_mode?: string; url?: string; name?: string; bytes?: Uint8Array; reply_markup?: string; message_id: number }> = [];
   calls: string[] = [];
   private updates: unknown[] = [];
   private nextUpdate = 1;
@@ -20,8 +24,12 @@ class FakeTelegram {
   server = Bun.serve({
     port: 0,
     fetch: async (req) => {
-      const method = new URL(req.url).pathname.split("/").pop()!;
-      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const path = new URL(req.url).pathname;
+      if (path.startsWith("/file/")) return new Response(PNG);
+      const method = path.split("/").pop()!;
+      const multipart = req.headers.get("content-type")?.startsWith("multipart/form-data");
+      const form = multipart ? await req.formData() : null;
+      const body = form ? Object.fromEntries(form.entries()) : ((await req.json().catch(() => ({}))) as Record<string, unknown>);
       this.calls.push(method);
       const ok = (result: unknown) => Response.json({ ok: true, result });
       switch (method) {
@@ -38,6 +46,22 @@ class FakeTelegram {
           this.sent.push(msg);
           return ok({ message_id: msg.message_id, chat: { id: msg.chat_id, type: "private" }, text: msg.text });
         }
+        case "sendPhoto":
+        case "sendDocument": {
+          const file = body.photo ?? body.document;
+          const media = {
+            method,
+            chat_id: Number(body.chat_id),
+            message_id: this.nextMessage++,
+            ...(typeof body.caption === "string" ? { caption: body.caption, parse_mode: body.parse_mode as string } : {}),
+            ...(typeof body.reply_markup === "string" ? { reply_markup: body.reply_markup } : {}),
+            ...(typeof file === "string" ? { url: file } : { name: (file as File).name, bytes: new Uint8Array(await (file as File).arrayBuffer()) }),
+          };
+          this.media.push(media);
+          return ok({ message_id: media.message_id, chat: { id: media.chat_id, type: "private" } });
+        }
+        case "getFile":
+          return ok({ file_id: body.file_id, file_path: `photos/${body.file_id}.jpg` });
         default:
           return ok(true);
       }
@@ -173,5 +197,62 @@ describe("telegram bridge", () => {
     tg.text(OWNER, "/resume");
     await until("resumed", () => tg.sent.find((m) => m.text.startsWith("Resumed")));
     expect(daemon.store.settings().mode).toBe("autonomous");
+  });
+  test("an image midna attaches arrives as a photo, captioned with the reply", async () => {
+    const chart = join(home, "workspace", "chart.png");
+    writeFileSync(chart, PNG);
+    script = async (run, tools) => {
+      if (run.prompt.includes("the chart")) await tools.callTool({ name: "attach", arguments: { files: [chart] } });
+      return "**The** chart";
+    };
+    tg.text(OWNER, "send me the chart");
+    const photo = await until("photo", () => tg.media.find((m) => m.caption?.includes("chart")));
+    expect(photo).toMatchObject({ method: "sendPhoto", chat_id: OWNER, caption: "<b>The</b> chart", parse_mode: "HTML", name: "chart.png" });
+    expect(photo.bytes).toEqual(PNG);
+    expect(tg.sent.some((m) => m.text.includes("chart"))).toBe(false);
+  });
+
+  test("several images go first and the text after; web images go by URL", async () => {
+    const chart = join(home, "workspace", "chart.png");
+    script = async (run, tools) => {
+      if (run.prompt.includes("both")) await tools.callTool({ name: "attach", arguments: { files: [chart, chart] } });
+      return "Both, and the map:\n![map](https://example.com/map.png)";
+    };
+    const before = tg.media.length;
+    const callsBefore = tg.calls.length;
+    tg.text(OWNER, "both please");
+    const text = await until("text", () => tg.sent.find((m) => m.text === "Both, and the map:"));
+    const sent = tg.media.slice(before);
+    expect(sent.map((m) => m.url ?? m.name)).toEqual(["chart.png", "chart.png", "https://example.com/map.png"]);
+    const order = tg.calls.slice(callsBefore).filter((c) => c === "sendPhoto" || c === "sendMessage");
+    expect(order).toEqual(["sendPhoto", "sendPhoto", "sendPhoto", "sendMessage"]);
+    expect(text.message_id).toBeGreaterThan(sent[2]!.message_id);
+  });
+
+  test("photos the owner sends reach midna, the largest size, with the caption", async () => {
+    let prompt = "";
+    script = async (run) => {
+      prompt = run.prompt;
+      return "Nice receipt.";
+    };
+    tg.push({
+      message: {
+        message_id: 777,
+        chat: { id: OWNER, type: "private" },
+        from: { id: OWNER },
+        caption: "my receipt",
+        photo: [
+          { file_id: "small", width: 90, height: 90 },
+          { file_id: "big", width: 1280, height: 960 },
+        ],
+      },
+    });
+    await until("reply", () => tg.sent.find((m) => m.text === "Nice receipt."));
+    expect(prompt).toContain("my receipt");
+    expect(prompt).toMatch(/Attached image "photo-777\.jpg" \(image\/png\), saved at \S+photo-777\.jpg/);
+    const history = await new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim()).history({ limit: 5 });
+    const line = history.find((h) => h.role === "user" && h.text === "my receipt")!;
+    expect(line.client).toBe("telegram");
+    expect(line.attachments).toMatchObject([{ kind: "image", name: "photo-777.jpg", size: PNG.byteLength }]);
   });
 });
