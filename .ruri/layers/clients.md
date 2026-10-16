@@ -18,7 +18,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - **Desktop host integration:** clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs, clients/desktop/vite.config.ts
 - **Desktop appearance (light/dark/system switch) and shared controls:** clients/desktop/src/style.css, clients/desktop/src/appearance.ts, clients/desktop/src/ui.tsx
 - **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
-- **midna's mark: app icon, tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, assets/midna.svg
+- **midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon, assets/midna.svg
 
 ## How it works
 
@@ -41,6 +41,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - clients/desktop/src/screens/Chat.tsx — conversation display and input
 - clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from
 - clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window
+- clients/desktop/scripts/icons.ts — renders every icon from the helmet and compiles the macOS 26 Assets.car from icons/midna.icon
 
 ## Rules and traps
 
@@ -54,6 +55,7 @@ The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. Th
 - Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.
 - Window dragging needs data-tauri-drag-region ("deep" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.
 - The title row lines up with the traffic lights through trafficLightPosition in tauri.conf.json: measured on macOS 26, the lights' centre sits at y − 2 (y=24 → 22, the middle of the 44px bar), and they end ~80px in, so the sidebar title pads 92px (macTitleBar in host.ts). Change one, re-measure the other.
+- macOS 26 draws an app with no Assets.car icon the legacy way, lightened and shaded. bun run icons writes the Icon Composer document src-tauri/icons/midna.icon (glass, specular, shadow off; helmet white in the dark and tinted/clear styles) and compiles it into icons/Assets.car with Xcode's actool run by path, since xcrun refuses while Xcode isn't selected or its licence is unaccepted. bundle.icon lists Assets.car, so Tauri copies it and sets CFBundleIconName; icon.icns stays for older macOS. Assets.car is committed, so building needs no Xcode — rerun bun run icons after changing the helmet.
 
 ## What it talks to
 
