@@ -1,11 +1,20 @@
 import { Fragment, type ReactNode } from "react";
 import { openUrl } from "./host";
+import { WebImage } from "./media";
 
 /**
  * The little Markdown models write — paragraphs, lists, bold, italics, code,
- * links, the odd heading — as React elements. Never HTML: what midna writes
- * can quote an email or a web page, and none of that gets to be markup.
+ * links, images, the odd heading — as React elements. Never HTML: what midna
+ * writes can quote an email or a web page, and none of that gets to be markup.
  */
+
+/** An image on a line of its own: `![alt](src)`, or a bare URL of an image file. */
+function imageLine(line: string): { src: string; alt: string } | null {
+  const md = /^\s*!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)\s*$/.exec(line);
+  if (md) return { alt: md[1]!, src: md[2]! };
+  const bare = /^\s*(https?:\/\/\S+\.(?:png|jpe?g|gif|webp|avif|svg)(?:[?#]\S*)?)\s*$/i.exec(line);
+  return bare ? { alt: "", src: bare[1]! } : null;
+}
 export function Markdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   const lines = text.replace(/\r\n/g, "\n").split("\n");
@@ -37,6 +46,16 @@ export function Markdown({ text }: { text: string }) {
       );
       continue;
     }
+    const image = imageLine(line);
+    if (image) {
+      blocks.push(
+        <div key={key++}>
+          <WebImage src={image.src} alt={image.alt} />
+        </div>,
+      );
+      i++;
+      continue;
+    }
     const heading = /^#{1,6}\s+(.*)$/.exec(line);
     if (heading) {
       blocks.push(<h3 key={key++}>{inline(heading[1]!)}</h3>);
@@ -48,7 +67,7 @@ export function Markdown({ text }: { text: string }) {
       continue;
     }
     const para: string[] = [];
-    while (i < lines.length && lines[i]!.trim() && !/^(```|#{1,6}\s|\s*[-*•]\s+|\s*\d+[.)]\s+)/.test(lines[i]!)) para.push(lines[i++]!);
+    while (i < lines.length && lines[i]!.trim() && !/^(```|#{1,6}\s|\s*[-*•]\s+|\s*\d+[.)]\s+)/.test(lines[i]!) && !imageLine(lines[i]!)) para.push(lines[i++]!);
     blocks.push(
       <p key={key++}>
         {para.map((l, j) => (
@@ -63,7 +82,7 @@ export function Markdown({ text }: { text: string }) {
   return <div className="prose-midna selectable">{blocks}</div>;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\((?:https?:\/\/|tg:\/\/)[^)\s]+\))|(https?:\/\/[^\s)]+)|((?:^|[\s(])_[^_\n]+_(?=[\s).,!?:;]|$))/g;
+const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\((?:https?:\/\/|tg:\/\/)[^)\s]+\))|(https?:\/\/[^\s)]+)|((?:^|[\s(])_[^_\n]+_(?=[\s).,!?:;]|$))|(!\[[^\]]*\]\([^)\s]+\))/g;
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -72,7 +91,10 @@ function inline(text: string): ReactNode[] {
   for (const m of text.matchAll(INLINE)) {
     if (m.index! > last) out.push(text.slice(last, m.index));
     const [tok] = m;
-    if (m[1]) out.push(<code key={k++}>{tok.slice(1, -1)}</code>);
+    if (m[6]) {
+      const [, alt, src] = /\[([^\]]*)\]\(([^)\s]+)\)$/.exec(tok)!;
+      out.push(<WebImage key={k++} src={src!} alt={alt!} />);
+    } else if (m[1]) out.push(<code key={k++}>{tok.slice(1, -1)}</code>);
     else if (m[2]) out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
     else if (m[3]) {
       const [, label, href] = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok)!;

@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "../markdown";
+import { Attachments, Media, Viewer, type Viewing } from "../media";
 import { Icon, Mark, Spinner } from "../ui";
 import type { Line } from "../useMidna";
 
@@ -16,6 +17,7 @@ export function Chat({
   olderExhausted,
   draft,
   onDraftUsed,
+  loadAttachment,
 }: {
   lines: Line[];
   thinking: { tool: string | null } | null;
@@ -25,9 +27,15 @@ export function Chat({
   olderExhausted: boolean;
   draft?: string | null;
   onDraftUsed?: () => void;
+  /** An attachment's bytes, fetched with this device's token. */
+  loadAttachment: (id: string) => Promise<Blob>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const [viewing, setViewing] = useState<Viewing | null>(null);
+  const closeViewer = useCallback(() => setViewing(null), []);
+  const media = useMemo(() => ({ load: loadAttachment, open: setViewing }), [loadAttachment]);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -45,6 +53,17 @@ export function Chat({
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines, thinking]);
+
+  // Images arrive after their line does: stay at the bottom as they open up.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !content.current) return;
+    const watch = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    watch.observe(content.current);
+    return () => watch.disconnect();
+  }, []);
 
   const onScroll = () => {
     const el = scroller.current!;
@@ -78,91 +97,102 @@ export function Chat({
   }, [text]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[720px] px-6 pt-4 pb-6">
-          {lines.length === 0 && !thinking && (
-            <div className="flex flex-col items-center pt-24 text-center">
-              <Mark className="mb-3 size-8 text-dimmer" />
-              <p className="text-[14px] font-medium">Say hello.</p>
-              <p className="mt-1 max-w-[340px] text-[12.5px] text-dim">midna will start by getting to know you — what you're aiming for, and what's on your plate.</p>
-            </div>
-          )}
-          {lines.map((l, i) => {
-            const prev = lines[i - 1];
-            const newDay = !prev || new Date(prev.at).toDateString() !== new Date(l.at).toDateString();
-            const gap = prev && !newDay && (prev.role !== l.role || l.at - prev.at > 5 * 60_000);
-            return (
-              <Fragment key={l.key}>
-                {newDay && (
-                  <div className="my-5 flex items-center gap-3 text-[11px] font-medium tracking-wide text-dimmer uppercase">
-                    <span className="h-px flex-1 bg-line" />
-                    {day(l.at)}
-                    <span className="h-px flex-1 bg-line" />
+    <Media.Provider value={media}>
+      <div className="flex h-full min-h-0 flex-col">
+        <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={content} className="mx-auto w-full max-w-[720px] px-6 pt-4 pb-6">
+            {lines.length === 0 && !thinking && (
+              <div className="flex flex-col items-center pt-24 text-center">
+                <Mark className="mb-3 size-8 text-dimmer" />
+                <p className="text-[14px] font-medium">Say hello.</p>
+                <p className="mt-1 max-w-[340px] text-[12.5px] text-dim">midna will start by getting to know you — what you're aiming for, and what's on your plate.</p>
+              </div>
+            )}
+            {lines.map((l, i) => {
+              const prev = lines[i - 1];
+              const newDay = !prev || new Date(prev.at).toDateString() !== new Date(l.at).toDateString();
+              const gap = prev && !newDay && (prev.role !== l.role || l.at - prev.at > 5 * 60_000);
+              return (
+                <Fragment key={l.key}>
+                  {newDay && (
+                    <div className="my-5 flex items-center gap-3 text-[11px] font-medium tracking-wide text-dimmer uppercase">
+                      <span className="h-px flex-1 bg-line" />
+                      {day(l.at)}
+                      <span className="h-px flex-1 bg-line" />
+                    </div>
+                  )}
+                  <div className={gap ? "mt-4" : "mt-1.5"}>
+                    <LineView line={l} onAnswer={(option) => void submit(option, l.outboxId)} canSend={canSend} />
                   </div>
-                )}
-                <div className={gap ? "mt-4" : "mt-1.5"}>
-                  <LineView line={l} onAnswer={(option) => void submit(option, l.outboxId)} canSend={canSend} />
-                </div>
-              </Fragment>
-            );
-          })}
-          {thinking && (
-            <div className="rise mt-4 flex items-center gap-2 text-[12.5px] text-dim">
-              <span className="dots flex gap-0.5 text-[18px] leading-none">
-                <span>·</span>
-                <span>·</span>
-                <span>·</span>
-              </span>
-              {thinking.tool ? <span>using <span className="font-mono text-[11.5px] text-ink-2">{thinking.tool}</span></span> : "thinking"}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="shrink-0 px-6 pt-1 pb-5">
-        <div className="mx-auto w-full max-w-[720px]">
-          {error && <p className="mb-2 text-[12px] text-ink-2">Couldn't send: {error}</p>}
-          <div className="field flex items-end gap-2 rounded-[14px] py-1.5 pr-1.5 pl-3.5">
-            <textarea
-              ref={input}
-              rows={1}
-              value={text}
-              autoFocus
-              placeholder={canSend ? "Message midna" : "Reconnecting…"}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void submit();
-                }
-              }}
-              className="selectable min-h-[22px] flex-1 resize-none bg-transparent py-[5px] text-[13.5px] leading-[1.45] outline-none placeholder:text-dimmer"
-            />
-            <button
-              type="button"
-              title="Send (Enter)"
-              disabled={!text.trim() || !canSend}
-              onClick={() => void submit()}
-              className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-ink transition-opacity disabled:opacity-25"
-            >
-              <Icon name="send" className="size-4" />
-            </button>
+                </Fragment>
+              );
+            })}
+            {thinking && (
+              <div className="rise mt-4 flex items-center gap-2 text-[12.5px] text-dim">
+                <span className="dots flex gap-0.5 text-[18px] leading-none">
+                  <span>·</span>
+                  <span>·</span>
+                  <span>·</span>
+                </span>
+                {thinking.tool ? <span>using <span className="font-mono text-[11.5px] text-ink-2">{thinking.tool}</span></span> : "thinking"}
+              </div>
+            )}
           </div>
-          <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line</p>
+        </div>
+
+        <div className="shrink-0 px-6 pt-1 pb-5">
+          <div className="mx-auto w-full max-w-[720px]">
+            {error && <p className="mb-2 text-[12px] text-ink-2">Couldn't send: {error}</p>}
+            <div className="field flex items-end gap-2 rounded-[14px] py-1.5 pr-1.5 pl-3.5">
+              <textarea
+                ref={input}
+                rows={1}
+                value={text}
+                autoFocus
+                placeholder={canSend ? "Message midna" : "Reconnecting…"}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void submit();
+                  }
+                }}
+                className="selectable min-h-[22px] flex-1 resize-none bg-transparent py-[5px] text-[13.5px] leading-[1.45] outline-none placeholder:text-dimmer"
+              />
+              <button
+                type="button"
+                title="Send (Enter)"
+                disabled={!text.trim() || !canSend}
+                onClick={() => void submit()}
+                className="flex size-8 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-ink transition-opacity disabled:opacity-25"
+              >
+                <Icon name="send" className="size-4" />
+              </button>
+            </div>
+            <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line</p>
+          </div>
         </div>
       </div>
-    </div>
+      <Viewer viewing={viewing} onClose={closeViewer} />
+    </Media.Provider>
   );
 }
 
 function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (option: string) => void; canSend: boolean }) {
+  const files = l.attachments ?? [];
   if (l.role === "user") {
     return (
-      <div className="flex flex-col items-end">
-        <div className={`selectable max-w-[78%] rounded-[16px] rounded-br-[5px] bg-primary px-3.5 py-2 text-[13.5px] leading-[1.45] whitespace-pre-wrap text-primary-ink ${l.pending ? "opacity-60" : ""}`}>
-          {l.text}
-        </div>
+      <div className="flex flex-col items-end gap-1">
+        {files.length > 0 && (
+          <div className="max-w-[78%]">
+            <Attachments items={files} align="end" />
+          </div>
+        )}
+        {l.text && (
+          <div className={`selectable max-w-[78%] rounded-[16px] rounded-br-[5px] bg-primary px-3.5 py-2 text-[13.5px] leading-[1.45] whitespace-pre-wrap text-primary-ink ${l.pending ? "opacity-60" : ""}`}>
+            {l.text}
+          </div>
+        )}
         <span className="mt-0.5 px-1 text-[10.5px] text-dimmer">
           {l.pending ? <Spinner className="inline size-2.5" /> : time(l.at)}
           {l.client && l.client !== "desktop" && ` · via ${l.client}`}
@@ -176,9 +206,16 @@ function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (optio
   return (
     <div className={`max-w-[86%] ${aside ? `border-l-2 pl-3 ${l.priority === "urgent" ? "border-ink" : "border-line-2"}` : ""}`}>
       {aside && <div className={`mb-0.5 text-[10.5px] font-medium tracking-wide uppercase ${l.priority === "urgent" ? "text-ink" : "text-dimmer"}`}>{label} · {time(l.at)}</div>}
-      <div className={`text-[13.5px] leading-[1.55] ${l.priority === "fyi" ? "text-ink-2" : ""}`}>
-        <Markdown text={l.text} />
-      </div>
+      {l.text && (
+        <div className={`text-[13.5px] leading-[1.55] ${l.priority === "fyi" ? "text-ink-2" : ""}`}>
+          <Markdown text={l.text} />
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className={l.text ? "mt-2" : ""}>
+          <Attachments items={files} />
+        </div>
+      )}
       {l.kind === "question" && l.options && l.options.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {l.options.map((o) => (
