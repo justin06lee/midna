@@ -16,6 +16,7 @@ Its files: clients/desktop/src/helmet.ts, clients/desktop/src/ui.tsx, clients/de
 Reaches into: assets/midna.svg
 Tags: logo, icon, brand
 Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/68ff780c-a51a-4df5-a8eb-855b8b99c4b7-sheet.png, /Users/huiyunlee/.config/ruri/uploads/3c2ba7a5-69be-410c-a014-bc4bc1a90ee7-midna-helmet-sheet.png
+Its code has changed since that picture — if you change it, `ruri edit helmet-mark --shot <new picture>`
 
 ## title-bar — the title bar
 "midna on <host>" beside the macOS traffic lights, in a 44px drag strip. Its 92px left padding is tied to trafficLightPosition in tauri.conf.json; change one, re-measure the other.
@@ -23,10 +24,16 @@ Its files: clients/desktop/src/screens/Main.tsx
 Reaches into: clients/desktop/src-tauri/tauri.conf.json, clients/desktop/src/host.ts
 Tags: window, nav, header
 Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/e032f092-4953-4611-b1b8-f3a7a38fc4c5-midna-titlebar.png
+Its code has changed since that picture — if you change it, `ruri edit title-bar --shot <new picture>`
 
 ## chat-images — the chat images
-Images and files in the chat: attachments fetched with the device token and drawn at their own size (one up to 440×320, several in a 150px row), file chips, Markdown web images, and the full-size viewer they open in.
+Images and files in the chat, in the order they were sent: attachments fetched with the device token and drawn at their own size (one up to 440×320, a run of several in a 150px row), file chips that open on click (a PDF in the viewer) with a save-to-Downloads button, captions under each, Markdown web images, and the full-size viewer for images and PDFs with Download and Open.
 Its files: clients/desktop/src/media.tsx
 Reaches into: clients/desktop/src/screens/Chat.tsx, clients/desktop/src/markdown.tsx, clients/desktop/src/ui.tsx, clients/desktop/src-tauri/tauri.conf.json
 Tags: chat, image, attachment, viewer, lightbox
-Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/20e7aa34-95bb-44e7-bb07-2eb939f31894-shot-10.png
+Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/8af92063-d162-4716-9475-4aa0ceca4172-chat-attachments.png, /Users/huiyunlee/.config/ruri/uploads/20e7aa34-95bb-44e7-bb07-2eb939f31894-shot-10.png
+
+## composer-files — composer files
+The composer's pending files: pasted, dropped or picked files as thumbnails and chips above the message box, each with upload progress, a cross to remove it and Try again when it failed; the paperclip opens the picker and a drop shows a 'Drop to attach' overlay.
+Its files: clients/desktop/src/attach.tsx, clients/desktop/src/screens/Chat.tsx
+Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/8bd192d4-81bb-4d2e-ba2b-e5a05383936a-composer-files.png
