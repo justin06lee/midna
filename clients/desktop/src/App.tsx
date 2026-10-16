@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Connection, DiscoveredDevice } from "@midna/protocol";
 import { clearConnection, loadConnection, saveConnection, type InstallChoices } from "./host";
 import { Boundary } from "./Boundary";
+import { dropDraft, loadDraft, saveDraft } from "./drafts";
 import { Install } from "./screens/Install";
 import { Main } from "./screens/Main";
 import { Welcome } from "./screens/Welcome";
@@ -9,18 +10,26 @@ import { Spinner } from "./ui";
 
 type Screen = { at: "loading" } | { at: "welcome"; notice?: string } | { at: "install"; device: DiscoveredDevice } | { at: "main"; connection: Connection };
 
+/** The setup choices once changed, until a machine is set up with them. */
+const SETUP_DRAFT = "midna.draft:setup";
+
 /**
  * Not connected: pick the machine midna lives on. Picking one sets it up
  * there and pairs this computer. Connected: talk to it.
  */
 export function App() {
   const [screen, setScreen] = useState<Screen>({ at: "loading" });
-  const [choices, setChoices] = useState<InstallChoices>({
+  const [choices, setChoices] = useState<InstallChoices>(() => ({
     model: "claude:opus",
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     mode: "autonomous",
     deviceName: "",
-  });
+    ...loadDraft<Partial<InstallChoices>>(SETUP_DRAFT),
+  }));
+  const choose = useCallback((c: InstallChoices) => {
+    saveDraft(SETUP_DRAFT, c);
+    setChoices(c);
+  }, []);
 
   useEffect(() => {
     void loadConnection().then(
@@ -31,6 +40,7 @@ export function App() {
 
   const connected = useCallback(async (c: Connection) => {
     await saveConnection(c);
+    dropDraft(SETUP_DRAFT);
     setScreen({ at: "main", connection: c });
   }, []);
 
@@ -47,7 +57,7 @@ export function App() {
         </div>
       );
     case "welcome":
-      return <Welcome choices={choices} onChoices={setChoices} notice={screen.notice} onPick={(device) => setScreen({ at: "install", device })} />;
+      return <Welcome choices={choices} onChoices={choose} notice={screen.notice} onPick={(device) => setScreen({ at: "install", device })} />;
     case "install":
       return <Install device={screen.device} choices={choices} onDone={(c) => void connected(c)} onBack={() => setScreen({ at: "welcome" })} />;
     case "main":

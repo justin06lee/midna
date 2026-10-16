@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import type { BrainInfo, BridgeInfo, BridgeSetupResult, Connection, DeviceInfo, MidnaClient, Status } from "@midna/protocol";
 import { loadAppearance, setAppearance, type Appearance } from "../appearance";
+import { draftKey, useDraft, useSecretDraft } from "../drafts";
 import { copy, inApp, launchAtLogin, openUrl } from "../host";
 import { Button, Icon, Section, Segmented, StateMark } from "../ui";
 
 const SUGGESTED = ["claude:opus", "claude:sonnet", "claude:haiku", "codex", "gemini", "opencode"];
+
+/** Saves a change; says whether it took, so a draft goes only then. */
+type Save = (what: string, patch: Parameters<MidnaClient["updateSettings"]>[0]) => Promise<boolean>;
 
 /** Everything about how midna runs, and where. */
 export function Settings({
@@ -27,8 +31,9 @@ export function Settings({
   const [brains, setBrains] = useState<BrainInfo[]>([]);
   const [bridges, setBridges] = useState<BridgeInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  const [model, setModel] = useState(status?.model ?? "");
-  const [timezone, setTimezone] = useState(status?.timezone ?? "");
+  const drafts = draftKey(connection);
+  const model = useDraft(`${drafts}:model`, status?.model ?? "");
+  const timezone = useDraft(`${drafts}:timezone`, status?.timezone ?? "");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -41,20 +46,15 @@ export function Settings({
     void client.devices().then(setDevices, () => {});
     void launchAtLogin().then(setAtLogin, () => setAtLogin(null));
   }, [client]);
-  useEffect(() => {
-    if (status) {
-      setModel(status.model);
-      setTimezone(status.timezone);
-    }
-  }, [status?.model, status?.timezone]);
-
-  const save = async (what: string, patch: Parameters<MidnaClient["updateSettings"]>[0]) => {
+  const save: Save = async (what, patch) => {
     setSaving(what);
     setError(null);
     try {
       onStatus(await client.updateSettings(patch));
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
       setSaving(null);
     }
@@ -75,13 +75,13 @@ export function Settings({
             The agent CLI midna thinks with, as <span className="font-mono text-[11.5px]">provider:model</span>. Installed on {status?.host.name ?? "the host"}: {installed.length ? installed.join(", ") : "…"}.
           </p>
           <div className="mt-3 flex items-center gap-2">
-            <input list="models" className="field h-8 w-56 px-2.5 font-mono text-[12px]" value={model} onChange={(e) => setModel(e.target.value)} spellCheck={false} />
+            <input list="models" className="field h-8 w-56 px-2.5 font-mono text-[12px]" value={model.value} onChange={(e) => model.set(e.target.value)} spellCheck={false} />
             <datalist id="models">
               {SUGGESTED.filter((s) => installed.includes(s.split(":")[0]!)).map((s) => (
                 <option key={s} value={s} />
               ))}
             </datalist>
-            <Button onClick={() => void save("model", { model })} busy={saving === "model"} disabled={!model.trim() || model === status?.model}>
+            <Button onClick={async () => (await save("model", { model: model.value })) && model.clear()} busy={saving === "model"} disabled={!model.value.trim() || model.value === status?.model}>
               Use this
             </Button>
           </div>
@@ -131,12 +131,12 @@ export function Settings({
       <Section title="Time">
         <Card>
           <Row label="Timezone">
-            <input className="field h-8 w-56 px-2.5 text-[12.5px]" value={timezone} onChange={(e) => setTimezone(e.target.value)} spellCheck={false} />
-            <Button onClick={() => void save("tz", { timezone })} busy={saving === "tz"} disabled={!timezone.trim() || timezone === status?.timezone}>
+            <input className="field h-8 w-56 px-2.5 text-[12.5px]" value={timezone.value} onChange={(e) => timezone.set(e.target.value)} spellCheck={false} />
+            <Button onClick={async () => (await save("tz", { timezone: timezone.value })) && timezone.clear()} busy={saving === "tz"} disabled={!timezone.value.trim() || timezone.value === status?.timezone}>
               Save
             </Button>
           </Row>
-          {status && <QuietHours client={client} initial={status.quietHours} onStatus={onStatus} />}
+          {status && <QuietHours saved={status.quietHours} drafts={drafts} save={save} />}
         </Card>
       </Section>
 
@@ -147,7 +147,7 @@ export function Settings({
               <StateMark state="running" /> Telegram is connected. midna messages you there when you're away from here.
             </div>
           ) : (
-            <TelegramSetup client={client} onDone={() => void client.bridges().then(setBridges)} />
+            <TelegramSetup client={client} drafts={drafts} onDone={() => void client.bridges().then(setBridges)} />
           )}
         </Card>
       </Section>
@@ -235,15 +235,19 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function QuietHours({ client, initial, onStatus }: { client: MidnaClient; initial: Status["quietHours"]; onStatus: (s: Status) => void }) {
-  const [on, setOn] = useState(initial !== null);
-  const [start, setStart] = useState(initial?.start ?? "23:00");
-  const [end, setEnd] = useState(initial?.end ?? "08:00");
-  const [saved, setSaved] = useState(false);
+function QuietHours({ saved, drafts, save }: { saved: Status["quietHours"]; drafts: string; save: Save }) {
+  const [on, setOn] = useState(saved !== null);
+  const start = useDraft(`${drafts}:quiet-start`, saved?.start ?? "23:00");
+  const end = useDraft(`${drafts}:quiet-end`, saved?.end ?? "08:00");
+  const [done, setDone] = useState(false);
   const commit = async (next: { on: boolean; start: string; end: string }) => {
-    setSaved(false);
-    onStatus(await client.updateSettings({ quietHours: next.on ? { start: next.start, end: next.end } : null }));
-    setSaved(true);
+    setDone(false);
+    if (!(await save("quiet", { quietHours: next.on ? { start: next.start, end: next.end } : null }))) return;
+    if (next.on) {
+      start.clear();
+      end.clear();
+    }
+    setDone(true);
   };
   return (
     <Row label="Quiet hours">
@@ -251,7 +255,7 @@ function QuietHours({ client, initial, onStatus }: { client: MidnaClient; initia
         value={on ? "on" : "off"}
         onChange={(v) => {
           setOn(v === "on");
-          void commit({ on: v === "on", start, end });
+          void commit({ on: v === "on", start: start.value, end: end.value });
         }}
         options={[
           { value: "on", label: "On" },
@@ -260,18 +264,18 @@ function QuietHours({ client, initial, onStatus }: { client: MidnaClient; initia
       />
       {on && (
         <>
-          <input type="time" className="field h-8 px-2 text-[12.5px]" value={start} onChange={(e) => setStart(e.target.value)} onBlur={() => void commit({ on, start, end })} />
+          <input type="time" className="field h-8 px-2 text-[12.5px]" value={start.value} onChange={(e) => start.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
           <span className="text-dimmer">–</span>
-          <input type="time" className="field h-8 px-2 text-[12.5px]" value={end} onChange={(e) => setEnd(e.target.value)} onBlur={() => void commit({ on, start, end })} />
+          <input type="time" className="field h-8 px-2 text-[12.5px]" value={end.value} onChange={(e) => end.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
         </>
       )}
-      {saved && <Icon name="check" className="size-3.5 text-dim" />}
+      {done && <Icon name="check" className="size-3.5 text-dim" />}
     </Row>
   );
 }
 
-function TelegramSetup({ client, onDone }: { client: MidnaClient; onDone: () => void }) {
-  const [token, setToken] = useState("");
+function TelegramSetup({ client, drafts, onDone }: { client: MidnaClient; drafts: string; onDone: () => void }) {
+  const [token, setToken] = useSecretDraft(`${drafts}:telegram-token`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<BridgeSetupResult | null>(null);
@@ -325,6 +329,7 @@ function TelegramSetup({ client, onDone }: { client: MidnaClient; onDone: () => 
             setError(null);
             try {
               setResult(await client.setupBridge("telegram", { token: token.trim() }));
+              setToken("");
             } catch (err) {
               setError((err as Error).message);
             } finally {

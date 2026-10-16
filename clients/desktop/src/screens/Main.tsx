@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
+import { draftKey } from "../drafts";
 import { macTitleBar, openTerminal } from "../host";
 import { Button, Icon, Loading, Mark, Spinner } from "../ui";
 import { useMidna } from "../useMidna";
@@ -158,7 +159,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
               upload={m.upload}
               discardUpload={m.discardUpload}
               shown={view === "chat"}
-              draftKey={`midna.draft:${connection.url}#${connection.device ?? ""}`}
+              draftKey={draftKey(connection)}
             />
           </div>
           {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
