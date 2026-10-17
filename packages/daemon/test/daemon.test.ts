@@ -421,4 +421,91 @@ describe("midnad", () => {
     expect(reply.attachments.map((a) => a.name)).toEqual(["report.pdf", "notes-v2.txt"]);
     expect(new TextDecoder().decode(await (await client.attachment(reply.attachments[1]!.id)).arrayBuffer())).toBe("raw notes");
   });
+  test("a reply swallowed by a background-task notification is asked for again, once, plainly", async () => {
+    const asked: BrainRun[] = [];
+    script = async (run) => {
+      if (!run.prompt.includes("meeting is tonight")) return "ok";
+      asked.push(run);
+      return asked.length === 1 ? "No response requested." : "Noted — see you there.";
+    };
+    await client.send({ text: "the meeting is tonight", client: "test" });
+    await until("reply", () => outbox().find((i) => i.text === "Noted — see you there."));
+    expect(outbox().some((i) => /no response requested/i.test(i.text))).toBe(false);
+    expect(asked[0]!.prompt).toStartWith("[midna] A message from the user — real user input, and it needs a reply.");
+    expect(asked[1]!.prompt).toContain("ended without a reply to the user");
+    expect(asked[1]!.prompt).toContain("User: the meeting is tonight");
+    expect(asked[1]!.resume).toBe(`session-${runs.indexOf(asked[0]!) + 1}`);
+    expect(daemon.store.log.unseen("main")).toEqual([]);
+  });
+
+  test("when asking again gets nothing too, the user hears it arrived and a follow-up answers it", async () => {
+    script = async (run, tools) => {
+      if (run.prompt.includes("[Wakeup") && run.prompt.includes("dentist")) {
+        await call(tools, "message_user", { text: "Booked the dentist for Tuesday." });
+        return "answered";
+      }
+      return run.prompt.includes("dentist") ? "" : "ok";
+    };
+    await client.send({ text: "book the dentist", client: "test" });
+    const fallback = await until("fallback", () => outbox().find((i) => i.text.startsWith("Got your message")));
+    expect(fallback.kind).toBe("message");
+    const followup = daemon.store.schedule.pending(100).find((w) => w.reason.includes("book the dentist"))!;
+    expect(followup.due_at).toBeGreaterThan(Date.now() + 30_000);
+    daemon.store.schedule.reschedule(followup.id, Date.now());
+    await until("follow-up answer", () => outbox().find((i) => i.text === "Booked the dentist for Tuesday."));
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+  });
+
+  test("a message that arrives mid-turn waits, unhandled, for a turn and a reply of its own", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const prompts: string[] = [];
+    script = async (run) => {
+      if (run.prompt.includes("first thing")) {
+        prompts.push(run.prompt);
+        await gate;
+        return "Reply to the first.";
+      }
+      if (run.prompt.includes("second thing")) {
+        prompts.push(run.prompt);
+        return "Reply to the second.";
+      }
+      return "ok";
+    };
+    await client.send({ text: "first thing", client: "test" });
+    await until("first turn running", () => prompts.length === 1 || undefined);
+    await client.send({ text: "second thing", client: "test" });
+    await Bun.sleep(100);
+    // Neither counts as handled while the first turn runs.
+    const waiting = daemon.store.log.unseen("main").filter((m) => m.role === "user").map((m) => m.text);
+    release();
+    expect(waiting).toEqual(["first thing", "second thing"]);
+    await until("second reply", () => outbox().find((i) => i.text === "Reply to the second."));
+    expect(outbox().some((i) => i.text === "Reply to the first.")).toBe(true);
+    const userPart = prompts[1]!.split("\n\n")[0]!;
+    expect(userPart).toContain("User: second thing");
+    expect(userPart).not.toContain("first thing");
+    expect(daemon.store.log.unseen("main")).toEqual([]);
+  });
+
+  test("a turn that fails leaves the user's message waiting for the next one", async () => {
+    let prompt = "";
+    script = async (run) => {
+      if (run.prompt.includes("try again")) {
+        prompt = run.prompt;
+        return "Both handled.";
+      }
+      if (run.prompt.includes("flaky question")) throw new Error("overloaded");
+      return "ok";
+    };
+    await client.send({ text: "flaky question", client: "test" });
+    await until("error", () => outbox().find((i) => i.text.includes("overloaded")));
+    expect(daemon.store.log.unseen("main").some((m) => m.text === "flaky question")).toBe(true);
+    await client.send({ text: "try again", client: "test" });
+    await until("reply", () => outbox().find((i) => i.text === "Both handled."));
+    const userPart = prompt.split("\n\n")[0]!;
+    expect(userPart).toContain("User: flaky question");
+    expect(userPart).toContain("User: try again");
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+  });
 });

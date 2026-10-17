@@ -169,6 +169,11 @@ export class Log {
       .run({ e: episodeId, t: tool, i: input === undefined ? null : JSON.stringify(input).slice(0, 4000), now });
   }
 
+  /** The tools an episode called, in order. */
+  toolsUsed(episodeId: number): string[] {
+    return (this.db.query("SELECT tool FROM actions WHERE episode_id = $e ORDER BY id").all({ e: episodeId }) as Array<{ tool: string }>).map((r) => r.tool);
+  }
+
   actions(since: number, limit = 200): Array<{ episode_id: number | null; tool: string; input: string | null; at: number }> {
     return this.db.query("SELECT episode_id, tool, input, at FROM actions WHERE at >= $s ORDER BY id LIMIT $n").all({ s: since, n: limit }) as never;
   }

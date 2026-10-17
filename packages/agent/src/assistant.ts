@@ -22,6 +22,17 @@ const BRAIN_ALERT_EVERY = 6 * HOUR;
 const SESSION_IDLE = 4 * HOUR;
 const SESSION_TURNS = 40;
 const HISTORY_ON_FRESH = 20;
+/** When a chat turn ends without a word to the user even after asking again, a follow-up answers it this soon. */
+const NO_REPLY_FOLLOWUP = 60_000;
+
+/**
+ * A reply that says nothing: empty, or what a model writes when it took the
+ * turn for an automated event ("No response requested.").
+ */
+export function isNoReply(text: string): boolean {
+  const t = text.trim().replace(/^[*_`"']+|[*_`"'.!]+$/g, "").trim();
+  return !t || /^(no (response|reply) (is )?(requested|needed|required)|nothing to (say|reply|add)|no reply)$/i.test(t);
+}
 
 /**
  * The orchestrator. It turns user messages into chat turns and due wakeups
@@ -98,11 +109,21 @@ export class Assistant {
     }
   }
 
+  /**
+   * Answer what the user wrote. Their messages count as handled only once
+   * the turn is over and they got an answer: one that comes in mid-turn
+   * waits for a turn of its own, and a turn that fails leaves them waiting
+   * for the next. A turn that ends without a word to the user — Claude Code
+   * can put a background-task notification in front of their message, and
+   * the model answers that instead — is asked again, once, plainly; if that
+   * still says nothing, the user hears their message arrived and a
+   * follow-up answers it.
+   */
   private async chatTurn(conv: string): Promise<void> {
     const { store } = this;
     const unseen = store.log.unseen(conv);
-    if (!unseen.some((m) => m.role === "user")) return; // only midna's own news: nothing to answer yet
-    store.log.markSeen(unseen.map((m) => m.id));
+    const asked = unseen.filter((m) => m.role === "user");
+    if (!asked.length) return; // only midna's own news: nothing to answer yet
 
     const settings = store.settings();
     const convo = store.log.conversation(conv);
@@ -134,16 +155,30 @@ export class Assistant {
         fresh = true;
         result = await run(true);
       }
-      store.log.setBrain(conv, {
-        model: settings.model,
-        session: result.sessionId ?? null,
-        startedAt: fresh ? now : convo.brain_started_at,
-        turns: fresh ? 1 : convo.brain_turns + 1,
-      });
+      let turns = fresh ? 1 : convo.brain_turns + 1;
+      store.log.setBrain(conv, { model: settings.model, session: result.sessionId ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
       // What the brain attached during the turn, and any Markdown image of a file on this machine, go with the reply.
-      const reply = liftLocalImages(store, result.text.trim(), { episodeId: result.episodeId });
-      const attachments = store.attachments.staged(result.episodeId);
-      if (reply.text || attachments.length) store.say({ kind: "message", conversationId: conv, text: reply.text, attachments }, { client: "chat", seenByBrain: true });
+      const replyOf = (r: typeof result) => ({ ...liftLocalImages(store, r.text.trim(), { episodeId: r.episodeId }), attachments: store.attachments.staged(r.episodeId), episodeId: r.episodeId });
+      // A question or message sent with ask_user/message_user during the turn answers the user too.
+      const answered = (r: ReturnType<typeof replyOf>) => !isNoReply(r.text) || r.attachments.length > 0 || store.log.toolsUsed(r.episodeId).some((t) => t === "ask_user" || t === "message_user");
+      let reply = replyOf(result);
+      if (!answered(reply)) {
+        console.error(`[midna] chat turn in ${conv} ended without a reply to the user (${JSON.stringify(result.text.trim().slice(0, 80))}); asking again`);
+        const session = result.sessionId ?? convo.brain_session ?? undefined;
+        const again = await this.episode({ kind: "chat", conversationId: conv, prompt: askAgainPrompt(asked, settings.timezone), resume: session });
+        turns++;
+        store.log.setBrain(conv, { model: settings.model, session: again.sessionId ?? session ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
+        reply = replyOf(again);
+      }
+      if (answered(reply)) {
+        if (reply.text && !isNoReply(reply.text) || reply.attachments.length) store.say({ kind: "message", conversationId: conv, text: isNoReply(reply.text) ? "" : reply.text, attachments: reply.attachments }, { client: "chat", seenByBrain: true });
+      } else {
+        console.error(`[midna] chat turn in ${conv} still ended without a reply; telling the user and following up`);
+        store.say({ kind: "message", conversationId: conv, text: "Got your message — I'm on it, and I'll reply shortly." }, { client: "fallback", seenByBrain: true });
+        const quoted = asked.map((m) => `[${fmt(m.created_at, settings.timezone)}${m.client ? ` via ${m.client}` : ""}] "${m.text.slice(0, 1500)}"`).join("\n");
+        store.schedule.add({ dueAt: Date.now() + NO_REPLY_FOLLOWUP, reason: `Answer the user: their chat message got no reply from you (only "Got your message — I'm on it"). They wrote:\n${quoted}`, kind: "followup", createdBy: "system", tz: settings.timezone });
+      }
+      store.log.markSeen(unseen.map((m) => m.id));
     } catch (err) {
       const p = brainProblem(err);
       const why =
@@ -339,6 +374,11 @@ export class Assistant {
  * own since the last turn (so a reply to a notification makes sense), and
  * the user's new message(s). A fresh session also gets recent history.
  */
+/** The second ask, when a turn carrying the user's message ended without a word to them. */
+function askAgainPrompt(asked: Message[], tz: string): string {
+  return `[midna] Your last turn ended without a reply to the user — perhaps a system or background-task notification arrived with their message and you answered that instead. The user is waiting. Reply to them now:\n${asked.map((m) => `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] User: ${m.text}`).join("\n")}`;
+}
+
 const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
 function turnPrompt(
@@ -360,11 +400,12 @@ function turnPrompt(
         : "";
     return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
   };
-  const parts: string[] = [];
-  if (history.length) parts.push(`Earlier in this conversation (for continuity; already handled):\n${history.map(line).join("\n")}`);
-  const own = unseen.filter((m) => m.role === "midna");
-  if (own.length) parts.push(`Since the last exchange you sent, on your own:\n${own.map(line).join("\n")}`);
+  // The user's words come first, marked as theirs: Claude Code may put a background-task
+  // notification ("NOT USER INPUT") in front of this prompt, and it must not swallow them.
   const user = unseen.filter((m) => m.role === "user");
-  parts.push(`Now ${fmt(now, tz)}. The user wrote:\n${user.map(line).join("\n")}`);
+  const parts = [`[midna] A message from the user — real user input, and it needs a reply. Anything before this marked as a system or background-task notification is separate: deal with it if it matters, then answer the user.\nNow ${fmt(now, tz)}. The user wrote:\n${user.map(line).join("\n")}`];
+  const own = unseen.filter((m) => m.role === "midna");
+  if (own.length) parts.push(`For context — since the last exchange you sent, on your own:\n${own.map(line).join("\n")}`);
+  if (history.length) parts.push(`Earlier in this conversation (for continuity; already handled):\n${history.map(line).join("\n")}`);
   return parts.join("\n\n");
 }
