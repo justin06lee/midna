@@ -49,6 +49,8 @@ enum StreamEvent {
     Command { signed: String, sig: String },
     Cancel { id: String },
     Bye { reason: String },
+    /// Something waits for Justin's yes here ("pending"), or no longer does.
+    Approval { approval: Value },
 }
 
 /// A command, once its signature checks out.
@@ -140,6 +142,23 @@ fn set_connected(app: &AppHandle, connected: bool, problem: Option<String>) {
         h.problem = problem;
     }
     super::changed(app);
+}
+
+/// Answer an approval here, as "device": POST /v1/approvals/:id with this device's token.
+pub async fn answer(app: &AppHandle, id: &str, answer: &str) -> Result<(), String> {
+    let conn = connection(app).ok_or("this app isn't connected to midna")?;
+    let r = reqwest::Client::new()
+        .post(format!("{}/v1/approvals/{id}", conn.url))
+        .header("authorization", format!("Bearer {}", conn.token))
+        .json(&json!({ "answer": answer, "client": "device" }))
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach midna: {e}"))?;
+    match r.status().as_u16() {
+        200 => Ok(()),
+        409 => Err("it was already answered, or ran out of time".into()),
+        _ => Err(r.json::<Value>().await.ok().and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string)).unwrap_or_else(|| "midna didn't take the answer".into())),
+    }
 }
 
 fn connection(app: &AppHandle) -> Option<Connection> {
@@ -255,6 +274,7 @@ async fn session(app: &AppHandle, http: &reqwest::Client, seen: &mut Seen) -> Re
                     }
                 }
                 Ok(StreamEvent::Bye { reason }) => break 'read if reason == "revoked" { Err(Pause(600)) } else { Ok(()) },
+                Ok(StreamEvent::Approval { approval }) => super::approval(app, approval),
                 Err(e) => eprintln!("hands: an event it doesn't know: {e}"),
             }
         }
@@ -267,37 +287,33 @@ async fn session(app: &AppHandle, http: &reqwest::Client, seen: &mut Seen) -> Re
 async fn run(app: AppHandle, http: reqwest::Client, conn: Connection, cmd: Command, stop: Arc<Notify>) {
     let auth = format!("Bearer {}", conn.token);
     let started = std::time::Instant::now();
-    let outcome = super::execute(&app, &cmd.id, &cmd.op, &cmd.args, Duration::from_millis(cmd.timeout_ms), stop.notified()).await;
+    let link = super::Link { http: http.clone(), url: conn.url.clone(), token: conn.token.clone() };
+    let outcome = super::execute(&app, &link, &cmd.id, &cmd.op, &cmd.args, Duration::from_millis(cmd.timeout_ms), stop.notified()).await;
     if matches!(&outcome, Err(r) if r.code == "cancelled") {
         return;
     }
     let result = match outcome {
         Ok(out) => {
             let mut attachments = vec![];
-            if let Some((name, bytes)) = out.file {
+            for file in out.files {
                 let up = http
                     .post(format!("{}/v1/attachments", conn.url))
-                    .query(&[("name", name.as_str())])
+                    .query(&[("name", file.name.as_str())])
                     .header("authorization", &auth)
-                    .header("content-type", "image/png")
-                    .body(bytes)
+                    .header("content-type", file.mime.as_str())
+                    .body(file.bytes)
                     .send()
                     .await;
-                match up {
-                    Ok(r) if r.status().is_success() => {
-                        if let Ok(v) = r.json::<Value>().await {
-                            if let Some(id) = v.get("id").and_then(Value::as_str) {
-                                attachments.push(id.to_string());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-                if attachments.is_empty() {
+                let id = match up {
+                    Ok(r) if r.status().is_success() => r.json::<Value>().await.ok().and_then(|v| v.get("id").and_then(Value::as_str).map(str::to_string)),
+                    _ => None,
+                };
+                let Some(id) = id else {
                     let ms = started.elapsed().as_millis() as u64;
-                    post_result(&http, &conn, &cmd.id, json!({ "id": cmd.id, "ok": false, "ms": ms, "error": { "code": "failed", "message": "couldn't upload the picture" } })).await;
+                    post_result(&http, &conn, &cmd.id, json!({ "id": cmd.id, "ok": false, "ms": ms, "error": { "code": "failed", "message": format!("couldn't upload {}", file.name) } })).await;
                     return;
-                }
+                };
+                attachments.push(id);
             }
             json!({ "id": cmd.id, "ok": true, "data": out.data, "attachments": attachments, "ms": started.elapsed().as_millis() as u64 })
         }

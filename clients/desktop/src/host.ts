@@ -1,4 +1,4 @@
-import type { Connection, DiscoveredDevice, InstallEvent } from "@midna/protocol";
+import type { Approval, ApprovalAnswer, Connection, DiscoveredDevice, InstallEvent } from "@midna/protocol";
 
 /**
  * Everything the window asks of the computer it runs on. In the app that is
@@ -201,6 +201,14 @@ export async function openPermissionSettings(id: string): Promise<void> {
 }
 export async function relaunchApp(): Promise<void> {
   if (inApp) await (await core()).invoke("relaunch");
+}
+/** What waits for a yes on this computer: packages/protocol's Approval, oldest first. */
+export async function handsApprovals(): Promise<Approval[]> {
+  return inApp ? (await core()).invoke<Approval[]>("hands_approvals") : [];
+}
+/** Answer an approval from this computer's panel; rejects with why when it's already over. */
+export async function answerHere(id: string, answer: ApprovalAnswer): Promise<void> {
+  if (inApp) await (await core()).invoke("hands_answer", { id, answer });
 }
 /** Called whenever the hands' state changes: a command starts or ends, a toggle, a pause. */
 export async function onHands(listener: () => void): Promise<() => void> {

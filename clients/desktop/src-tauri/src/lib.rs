@@ -388,6 +388,8 @@ pub fn run() {
             hands::hands_defaults,
             hands::permission_request,
             hands::permission_open,
+            hands::hands_approvals,
+            hands::hands_answer,
             hands::relaunch
         ])
         .setup(|app| {

@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import type { Attachment } from "@midna/protocol";
-import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
+import type { Approval, ApprovalAnswer, Attachment } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MAX_ATTACHMENT_BYTES } from "@midna/protocol";
 import { MAX_FILES, PendingFiles, typeFor, usePendingFiles, type Upload } from "../attach";
 import { copiedFiles, showInFolder } from "../host";
 import { Markdown } from "../markdown";
@@ -36,6 +36,8 @@ export function Chat({
   loadAttachment,
   upload,
   discardUpload,
+  approvals,
+  answerApproval,
 }: {
   lines: Line[];
   thinking: { tool: string | null } | null;
@@ -51,6 +53,9 @@ export function Chat({
   upload: Upload;
   /** Take back an upload removed before sending. */
   discardUpload: (id: string) => Promise<unknown>;
+  /** Device hands approvals, by the question that asks each. */
+  approvals: Map<number, Approval>;
+  answerApproval: (a: Approval, answer: ApprovalAnswer) => Promise<void>;
   /** False while another screen shows: the chat stays mounted, hidden, so nothing typed or uploading is lost. */
   shown: boolean;
   /** Where what's typed is kept until it is sent (localStorage), one per connection. */
@@ -263,7 +268,13 @@ export function Chat({
                     </div>
                   )}
                   <div className={gap ? "mt-4" : "mt-1.5"}>
-                    <LineView line={l} onAnswer={(option) => void submit(option, l.outboxId)} canSend={canSend} />
+                    <LineView
+                      line={l}
+                      onAnswer={(option) => void submit(option, l.outboxId)}
+                      canSend={canSend}
+                      approval={l.outboxId === undefined ? undefined : approvals.get(l.outboxId)}
+                      onApprove={answerApproval}
+                    />
                   </div>
                 </Fragment>
               );
@@ -375,7 +386,30 @@ export function Chat({
   );
 }
 
-function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (option: string) => void; canSend: boolean }) {
+/** How an approval ended, in words: "Allowed for 10 min by Justin's iPhone (telegram)". */
+function approvalOutcome(a: Approval): string {
+  const by = a.answeredBy ? ` by ${a.answeredBy}${a.answeredVia ? ` (${a.answeredVia})` : ""}` : "";
+  if (a.state === "allowed") return `${a.answer === "allow_10_min" ? "Allowed for 10 min" : "Allowed"}${by}`;
+  if (a.state === "denied") return `Denied${by}`;
+  if (a.state === "expired") return "No answer in time, so no";
+  return "No longer needed";
+}
+
+function LineView({
+  line: l,
+  onAnswer,
+  canSend,
+  approval,
+  onApprove,
+}: {
+  line: Line;
+  onAnswer: (option: string) => void;
+  canSend: boolean;
+  /** When the line asks for a device hands approval: its buttons answer it, and it says how it ended. */
+  approval?: Approval;
+  onApprove: (a: Approval, answer: ApprovalAnswer) => Promise<void>;
+}) {
+  const [answering, setAnswering] = useState(false);
   const files = l.attachments ?? [];
   if (l.role === "user") {
     return (
@@ -411,7 +445,30 @@ function LineView({ line: l, onAnswer, canSend }: { line: Line; onAnswer: (optio
           <Attachments items={files} />
         </div>
       )}
-      {l.kind === "question" && l.options && l.options.length > 0 && (
+      {approval ? (
+        <div className="mt-2">
+          {approval.state === "pending" ? (
+            <div className="flex flex-wrap gap-1.5">
+              {APPROVAL_OPTIONS.map((o) => (
+                <button
+                  key={o.answer}
+                  type="button"
+                  disabled={answering || !canSend}
+                  onClick={() => {
+                    setAnswering(true);
+                    void onApprove(approval, o.answer).finally(() => setAnswering(false));
+                  }}
+                  className="h-7 rounded-full border border-line-2 bg-panel px-3 text-[12.5px] font-medium transition-colors hover:bg-sunken disabled:opacity-45"
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[12px] text-dim">{approvalOutcome(approval)}</div>
+          )}
+        </div>
+      ) : l.kind === "question" && l.options && l.options.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {l.options.map((o) => (
             <button

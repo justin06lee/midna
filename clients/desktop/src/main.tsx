@@ -7,6 +7,7 @@ import { App } from "./App";
 import { applyAppearance, loadAppearance } from "./appearance";
 import { HANDS_POLICY } from "@midna/protocol";
 import { setHandsDefaults } from "./host";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { Pill } from "./Pill";
 
 // Before the first paint, so the window never flashes the wrong way. The
@@ -23,9 +24,10 @@ window.addEventListener("dragover", (e) => {
 });
 window.addEventListener("drop", (e) => e.preventDefault());
 
-// The same page is the pill shown over the screen while midna works it: a transparent window of its own.
-const pill = location.hash === "#pill";
-if (pill) document.documentElement.classList.add("pill");
+// The same page is the pill shown over the screen while midna works it, and the panel that asks for a
+// yes: each a transparent window of its own.
+const overlay = location.hash === "#pill" ? <Pill /> : location.hash === "#approval" ? <ApprovalPanel /> : null;
+if (overlay) document.documentElement.classList.add("pill");
 else void setHandsDefaults(HANDS_POLICY.defaults);
 
-createRoot(document.getElementById("root")!).render(<StrictMode>{pill ? <Pill /> : <App />}</StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode>{overlay ?? <App />}</StrictMode>);

@@ -5,16 +5,21 @@ import { useHands } from "../useHands";
 
 const CAPABILITY: Record<string, { label: string; what: string }> = {
   screen: { label: "See the screen", what: "Screenshots of any display, scaled down" },
+  input: { label: "Use the mouse and keyboard", what: "Click, type, press keys, scroll and drag; stops when you touch either" },
+  script: { label: "Run AppleScript", what: "AppleScript and JavaScript for Automation, to work other apps" },
+  shell: { label: "Run commands", what: "In your login shell, as you" },
+  files: { label: "Read and write files", what: "Anywhere macOS lets midna.app reach" },
+  clipboard: { label: "Use the clipboard", what: "Read it, and put text, images or files on it" },
   open: { label: "Open things", what: "Links, apps and files, each in its usual app" },
   notify: { label: "Notify you", what: "Notifications here" },
 };
 
 const PERMISSION: Record<string, { label: string; what: string }> = {
   screen_recording: { label: "Screen Recording", what: "to see the screen" },
-  accessibility: { label: "Accessibility", what: "to use the mouse and keyboard, later" },
-  "automation:com.apple.MobileSMS": { label: "Automation: Messages", what: "to read and send messages, later" },
-  "automation:com.apple.systemevents": { label: "Automation: System Events", what: "to work other apps, later" },
-  full_disk_access: { label: "Full Disk Access", what: "to read files outside your folders, later" },
+  accessibility: { label: "Accessibility", what: "to use the mouse and keyboard" },
+  "automation:com.apple.MobileSMS": { label: "Automation: Messages", what: "to read and send messages" },
+  "automation:com.apple.systemevents": { label: "Automation: System Events", what: "to work other apps" },
+  full_disk_access: { label: "Full Disk Access", what: "to reach files outside your folders, like Messages' history" },
   notifications: { label: "Notifications", what: "to notify you" },
 };
 
@@ -99,7 +104,7 @@ export function Computer() {
             );
           })}
           <p className="mt-2 border-t border-line pt-3 text-[12px] text-dimmer">
-            Ask: midna needs your yes each time. Until it can ask you, it tells you what it wanted instead. Mouse and keyboard, AppleScript, the shell, files and the clipboard come later.
+            Ask: midna asks first, each time, here, in the chat and on Telegram; the first answer wins, and none in 2 minutes means no. In ask mode, anything that changes something asks first even when it's On.
           </p>
         </Card>
       </Section>
@@ -164,6 +169,8 @@ const OUTCOME: Record<string, string> = {
   paused: "paused",
   off: "turned off",
   locked: "locked",
+  asleep: "display asleep",
+  user_active: "you were using it",
   permission: "no permission",
   unsupported: "can't yet",
   bad_args: "didn't make sense",

@@ -75,7 +75,7 @@ export class Bot {
   }
 
   /** Send text, as HTML when it converts cleanly, plain when Telegram refuses the markup. */
-  async send(chatId: number, text: string, opts: { silent?: boolean; keyboard?: InlineKeyboard } = {}): Promise<TgMessage[]> {
+  async send(chatId: number, text: string, opts: { silent?: boolean; keyboard?: InlineKeyboard; replyTo?: number } = {}): Promise<TgMessage[]> {
     const sent: TgMessage[] = [];
     const chunks = chunk(text, 3900);
     for (const [i, part] of chunks.entries()) {
@@ -84,6 +84,7 @@ export class Bot {
         disable_notification: !!opts.silent,
         link_preview_options: { is_disabled: true },
         ...(opts.keyboard && i === chunks.length - 1 ? { reply_markup: { inline_keyboard: opts.keyboard } } : {}),
+        ...(opts.replyTo && i === 0 ? { reply_parameters: { message_id: opts.replyTo, allow_sending_without_reply: true } } : {}),
       };
       try {
         sent.push(await this.call<TgMessage>("sendMessage", { ...extra, text: toHtml(part), parse_mode: "HTML" }));

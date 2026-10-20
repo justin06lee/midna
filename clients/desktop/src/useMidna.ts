@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MidnaClient, MidnaError, type Attachment, type Connection, type HistoryItem, type OutboxItem, type Priority, type Status, type StreamEvent } from "@midna/protocol";
+import { MidnaClient, MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Connection, type HistoryItem, type OutboxItem, type Priority, type Status, type StreamEvent } from "@midna/protocol";
 import { notify } from "./host";
 
 /** One line of the conversation, however it arrived. */
@@ -91,6 +91,12 @@ export function useMidna(connection: Connection) {
   const [thinking, setThinking] = useState<{ tool: string | null } | null>(null);
   const [olderExhausted, setOlderExhausted] = useState(false);
   const [changed, setChanged] = useState(0); // bumps when midna touched its records
+  /** Device hands approvals, by the chat question that asks each one. */
+  const [approvals, setApprovals] = useState<Map<number, Approval>>(new Map());
+  const noteApproval = useCallback((a: Approval) => {
+    if (a.outboxId === null) return;
+    setApprovals((cur) => new Map(cur).set(a.outboxId!, a));
+  }, []);
   const pending = useRef(0);
 
   const merge = useCallback((incoming: Line[], where: "append" | "prepend" = "append") => {
@@ -180,10 +186,36 @@ export function useMidna(connection: Connection) {
         if (e.state === "idle") setChanged((n) => n + 1);
       } else if (e.type === "activity") {
         setThinking({ tool: e.tool });
+      } else if (e.type === "approval") {
+        noteApproval(e.approval);
       }
     }
     return () => abort.abort();
-  }, [client, merge, setStatus]);
+  }, [client, merge, setStatus, noteApproval]);
+
+  // What waits for a yes now (a host before 0.9 has no approvals).
+  useEffect(() => {
+    setApprovals(new Map());
+    client.approvals().then((all) => all.forEach(noteApproval), () => {});
+  }, [client, noteApproval]);
+
+  /** Answer an approval from the chat; when it's already over, show how it ended. */
+  const answerApproval = useCallback(
+    async (a: Approval, answer: ApprovalAnswer) => {
+      try {
+        noteApproval(await client.answerApproval(a.id, { answer, client: "desktop" }));
+      } catch (err) {
+        if (!(err instanceof MidnaError && err.status === 409)) throw err;
+        // Over already; the stream says how, unless it hasn't yet.
+        setApprovals((cur) => {
+          const known = cur.get(a.outboxId!);
+          if (known && known.state !== "pending") return cur;
+          return new Map(cur).set(a.outboxId!, { ...a, state: a.expiresAt <= Date.now() ? "expired" : "cancelled" });
+        });
+      }
+    },
+    [client, noteApproval],
+  );
 
   const loadOlder = useCallback(async () => {
     const ids = lines.flatMap((l) => (l.messageId ? [l.messageId] : []));
@@ -245,5 +277,5 @@ export function useMidna(connection: Connection) {
 
   const discardUpload = useCallback((id: string) => client.deleteAttachment(id), [client]);
 
-  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment, upload, discardUpload };
+  return { client, status, setStatus, refreshStatus, lines, link, thinking, send, loadOlder, olderExhausted, changed, loadAttachment, upload, discardUpload, approvals, answerApproval };
 }

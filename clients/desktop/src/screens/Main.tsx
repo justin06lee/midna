@@ -174,6 +174,8 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
               loadAttachment={m.loadAttachment}
               upload={m.upload}
               discardUpload={m.discardUpload}
+              approvals={m.approvals}
+              answerApproval={m.answerApproval}
               shown={view === "chat"}
               draftKey={draftKey(connection)}
             />

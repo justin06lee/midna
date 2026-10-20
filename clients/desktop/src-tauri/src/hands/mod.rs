@@ -11,6 +11,7 @@
 pub mod conn;
 #[cfg(target_os = "macos")]
 mod mac;
+mod ops;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -27,8 +28,11 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 pub const HANDS_PROTOCOL: u32 = 1;
 /// Everything a device may offer, in the design's order.
 pub const CAPABILITIES: [&str; 8] = ["screen", "input", "script", "shell", "files", "clipboard", "open", "notify"];
-/// What this version can do; the rest wait on decisions.
-pub const AVAILABLE: [&str; 3] = ["screen", "open", "notify"];
+/// What this computer can do: everything on macOS; Linux's screen, input, scripts and clipboard come later.
+#[cfg(target_os = "macos")]
+pub const AVAILABLE: &[&str] = &CAPABILITIES;
+#[cfg(not(target_os = "macos"))]
+pub const AVAILABLE: &[&str] = &["shell", "files", "open", "notify"];
 const KEEP: usize = 200;
 /// The indicator stays this long after a command, so a quick one is still seen.
 const LINGER: Duration = Duration::from_secs(3);
@@ -113,6 +117,10 @@ pub struct Hands {
     pub connected: bool,
     /// Something Justin should know about the connection (a host key that changed).
     pub problem: Option<String>,
+    /// The width in pixels of the latest screenshot of each display: pointer coordinates are in its pixels.
+    pub shots: BTreeMap<String, u32>,
+    /// What waits for Justin's yes on this computer: packages/protocol's Approval, as the daemon sent it.
+    pub approvals: Vec<Value>,
     /// The fingerprint of the daemon key commands are checked against, for people to compare.
     pub fingerprint: Option<String>,
 }
@@ -134,10 +142,24 @@ impl Refusal {
     }
 }
 
-/// What a command produced: JSON for midna, and a file to upload alongside (a screenshot).
+/// A file a command hands back, uploaded as an attachment before its result.
+pub struct Upload {
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+/// What a command produced: JSON for midna, and files to upload alongside (a screenshot, long output).
 pub struct Outcome {
     pub data: Value,
-    pub file: Option<(String, Vec<u8>)>,
+    pub files: Vec<Upload>,
+}
+
+/// The daemon, for a command that fetches an attachment.
+pub struct Link {
+    pub http: reqwest::Client,
+    pub url: String,
+    pub token: String,
 }
 
 fn now_ms() -> u64 {
@@ -219,10 +241,12 @@ pub fn state(h: &Hands) -> &'static str {
     "ready"
 }
 
-/// The permission a capability can't work without, here.
+/// The permission a capability can't work without, here. Scripts need Automation per app, which
+/// osascript reports for the one it targets; files need Full Disk Access only outside the user's folders.
 fn needs(capability: &str) -> Option<&'static str> {
     match capability {
         "screen" => Some("screen_recording"),
+        "input" => Some("accessibility"),
         "notify" => Some("notifications"),
         _ => None,
     }
@@ -232,6 +256,7 @@ fn permission(id: &str) -> PermissionState {
     #[cfg(target_os = "macos")]
     return match id {
         "screen_recording" => mac::screen_recording(),
+        "accessibility" => mac::accessibility(),
         "notifications" => mac::notifications(),
         _ => PermissionState::Unknown,
     };
@@ -386,7 +411,7 @@ pub fn relaunch(app: AppHandle) {
 /// lacking a permission; otherwise done, shown while it runs, and logged.
 /// Past `limit`, or once `stop` fires, it gives up, and the indicator and
 /// the log still say how it ended.
-pub async fn execute(app: &AppHandle, id: &str, op: &str, args: &Value, limit: Duration, stop: impl std::future::Future<Output = ()>) -> Result<Outcome, Refusal> {
+pub async fn execute(app: &AppHandle, link: &Link, id: &str, op: &str, args: &Value, limit: Duration, stop: impl std::future::Future<Output = ()>) -> Result<Outcome, Refusal> {
     let started = now_ms();
     let capability = capability_of(op);
     let summary = describe(op, args);
@@ -398,9 +423,9 @@ pub async fn execute(app: &AppHandle, id: &str, op: &str, args: &Value, limit: D
     let result = match checked {
         Err(r) => Err(r),
         Ok(()) => {
-            begin(app, &summary, capability == "screen");
+            begin(app, &summary, matches!(capability, "screen" | "input" | "script"));
             let r = tokio::select! {
-                r = tokio::time::timeout(limit, run(app, op, args)) => r.unwrap_or_else(|_| Err(Refusal::new("timeout", format!("didn't finish within {} ms", limit.as_millis())))),
+                r = tokio::time::timeout(limit, run(app, link, op, args)) => r.unwrap_or_else(|_| Err(Refusal::new("timeout", format!("didn't finish within {} ms", limit.as_millis())))),
                 _ = stop => Err(Refusal::new("cancelled", "midna cancelled it")),
             };
             end(app);
@@ -432,9 +457,15 @@ pub async fn execute(app: &AppHandle, id: &str, op: &str, args: &Value, limit: D
     result
 }
 
+/// packages/protocol's OPS.
 fn capability_of(op: &str) -> &'static str {
     match op {
         "screenshot" => "screen",
+        "click" | "move" | "drag" | "scroll" | "type" | "key" => "input",
+        "script" => "script",
+        "shell" => "shell",
+        "file_read" | "file_list" | "file_write" => "files",
+        "clipboard_read" | "clipboard_write" => "clipboard",
         "open" => "open",
         "notify" => "notify",
         _ => "unknown",
@@ -452,12 +483,13 @@ fn gate(h: &Hands, capability: &str, args: &Value) -> Result<(), Refusal> {
         return Err(Refusal::new("off", format!("{capability} is turned off on this computer")));
     }
     let s = state(h);
-    if capability == "screen" && s == "locked" {
+    // Locked, the screen would be the lock screen, and input would go to the login window.
+    if matches!(capability, "screen" | "input" | "script") && s == "locked" {
         return Err(Refusal::new("locked", "the screen is locked"));
     }
     // A sleeping display is woken only when midna asks to (screenshot's `wake`).
     if capability == "screen" && s == "display_asleep" && args.get("wake").and_then(Value::as_bool) != Some(true) {
-        return Err(Refusal::new("locked", "the display is asleep: take the screenshot with wake: true to wake it"));
+        return Err(Refusal::new("asleep", "the display is asleep: take the screenshot with wake: true to wake it"));
     }
     if let Some(p) = needs(capability) {
         let st = permission(p);
@@ -468,16 +500,36 @@ fn gate(h: &Hands, capability: &str, args: &Value) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// What a command does, in a few words for the indicator and the log. Typed text marked secret never shows.
 fn describe(op: &str, args: &Value) -> String {
+    let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("");
+    let short = |t: &str| {
+        let line = t.lines().next().unwrap_or("");
+        if line.chars().count() > 48 || t.contains('\n') { format!("{}…", line.chars().take(48).collect::<String>()) } else { line.to_string() }
+    };
     match op {
         "screenshot" => "taking a screenshot".into(),
+        "click" => "clicking".into(),
+        "move" => "moving the pointer".into(),
+        "drag" => "dragging".into(),
+        "scroll" => "scrolling".into(),
+        "type" if args.get("secret").and_then(Value::as_bool) == Some(true) => "typing something secret".into(),
+        "type" => format!("typing “{}”", short(s("text"))),
+        "key" => format!("pressing {}", s("keys")),
+        "script" => "running a script".into(),
+        "shell" => format!("running `{}`", short(s("command"))),
+        "file_read" => format!("reading {}", s("path")),
+        "file_list" => format!("looking in {}", s("path")),
+        "file_write" => format!("writing {}", s("path")),
+        "clipboard_read" => "reading the clipboard".into(),
+        "clipboard_write" => "setting the clipboard".into(),
         "open" => format!("opening {}", args.get("url").or(args.get("app")).or(args.get("path")).and_then(Value::as_str).unwrap_or("something")),
         "notify" => "showing a notification".into(),
         other => other.to_string(),
     }
 }
 
-async fn run(app: &AppHandle, op: &str, args: &Value) -> Result<Outcome, Refusal> {
+async fn run(app: &AppHandle, link: &Link, op: &str, args: &Value) -> Result<Outcome, Refusal> {
     let failed = |e: String| Refusal::new("failed", e);
     match op {
         "screenshot" => {
@@ -498,7 +550,7 @@ async fn run(app: &AppHandle, op: &str, args: &Value) -> Result<Outcome, Refusal
                 if !status.success() {
                     return Err(failed(format!("couldn't open {value}")));
                 }
-                Ok(Outcome { data: json!({}), file: None })
+                Ok(Outcome { data: json!({}), files: vec![] })
             })
             .await
             .map_err(|e| Refusal::new("failed", e.to_string()))?
@@ -508,8 +560,16 @@ async fn run(app: &AppHandle, op: &str, args: &Value) -> Result<Outcome, Refusal
             let title = args.get("title").and_then(Value::as_str).unwrap_or("midna");
             let body = args.get("body").and_then(Value::as_str).unwrap_or("");
             app.notification().builder().title(title).body(body).show().map_err(|e| failed(e.to_string()))?;
-            Ok(Outcome { data: json!({}), file: None })
+            Ok(Outcome { data: json!({}), files: vec![] })
         }
+        "click" | "move" | "drag" | "scroll" | "type" | "key" => ops::input(app, op, args).await,
+        "script" => ops::script(args).await,
+        "shell" => ops::shell(args).await,
+        "file_read" => ops::file_read(args).await,
+        "file_list" => ops::file_list(args).await,
+        "file_write" => ops::file_write(link, args).await,
+        "clipboard_read" => ops::clipboard_read().await,
+        "clipboard_write" => ops::clipboard_write(link, args).await,
         _ => Err(Refusal::new("unsupported", format!("this computer doesn't know {op}"))),
     }
 }
@@ -528,11 +588,11 @@ fn screenshot(app: &AppHandle, args: &Value) -> Result<Outcome, Refusal> {
             mac::wake_display();
         }
         let tmp = std::env::temp_dir().join(format!("midna-shot-{}.png", now_ms()));
-        let _ = app;
         mac::screenshot(&display.id, if full { None } else { Some(1568) }, &tmp).map_err(|e| Refusal::new("failed", e))?;
         let bytes = std::fs::read(&tmp).map_err(|e| Refusal::new("failed", e.to_string()))?;
         let _ = std::fs::remove_file(&tmp);
         let (width, height) = mac::png_size(&bytes);
+        app.state::<Shared>().lock().unwrap().shots.insert(display.id.clone(), width);
         let (cx, cy) = mac::cursor();
         // The pointer in this picture's pixels, when it's on this display.
         let sx = width as f64 / display.width;
@@ -540,7 +600,7 @@ fn screenshot(app: &AppHandle, args: &Value) -> Result<Outcome, Refusal> {
         let cursor = if inside { json!({ "x": ((cx - display.x) * sx).round(), "y": ((cy - display.y) * sx).round() }) } else { Value::Null };
         Ok(Outcome {
             data: json!({ "display": display.id, "width": width, "height": height, "scale": sx, "cursor": cursor }),
-            file: Some((format!("screenshot-{}-{}.png", display.id, now_ms()), bytes)),
+            files: vec![Upload { name: format!("screenshot-{}-{}.png", display.id, now_ms()), mime: "image/png".into(), bytes }],
         })
     }
     #[cfg(not(target_os = "macos"))]
@@ -681,6 +741,92 @@ fn show_pill(app: &AppHandle) {
     let _ = pill.show();
 }
 
+// ── approvals ────────────────────────────────────────────────────────────
+
+/// An approval came or went on the stream: keep what's pending, and show the panel while anything is.
+pub fn approval(app: &AppHandle, approval: Value) {
+    let Some(id) = approval.get("id").and_then(Value::as_str).map(str::to_string) else { return };
+    let pending = approval.get("state").and_then(Value::as_str) == Some("pending");
+    let any = {
+        let shared = app.state::<Shared>();
+        let mut h = shared.lock().unwrap();
+        h.approvals.retain(|a| a.get("id").and_then(Value::as_str) != Some(&id));
+        if pending {
+            h.approvals.push(approval);
+        }
+        !h.approvals.is_empty()
+    };
+    changed(app);
+    if any {
+        show_approval_panel(app);
+    } else if let Some(w) = app.get_webview_window("approval") {
+        let _ = w.hide();
+    }
+}
+
+/// What waits for Justin's yes here, oldest first.
+#[tauri::command]
+pub fn hands_approvals(app: AppHandle) -> Vec<Value> {
+    app.state::<Shared>().lock().unwrap().approvals.clone()
+}
+
+/// Justin's answer from the panel on this computer: "allow", "allow_10_min" or "deny".
+#[tauri::command]
+pub async fn hands_answer(app: AppHandle, id: String, answer: String) -> Result<(), String> {
+    let r = conn::answer(&app, &id, &answer).await;
+    if r.is_err() {
+        // Over already (answered elsewhere, or out of time): don't keep asking.
+        approval(&app, json!({ "id": id, "state": "over" }));
+    }
+    r
+}
+
+/// The panel at the top of the main display that asks for a yes: on top of everything, clickable without first activating midna.
+fn show_approval_panel(app: &AppHandle) {
+    const W: f64 = 440.0;
+    const H: f64 = 156.0;
+    let panel = match app.get_webview_window("approval") {
+        Some(p) => p,
+        None => {
+            let Ok(p) = WebviewWindowBuilder::new(app, "approval", WebviewUrl::App("index.html#approval".into()))
+                .title("midna")
+                .inner_size(W, H)
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .resizable(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .visible_on_all_workspaces(true)
+                .accept_first_mouse(true)
+                .focused(false)
+                .visible(false)
+                .build()
+            else {
+                return;
+            };
+            #[cfg(target_os = "macos")]
+            {
+                let handle = p.clone();
+                let _ = p.run_on_main_thread(move || {
+                    if let Ok(ns) = handle.ns_window() {
+                        mac::exclude_from_capture(ns);
+                    }
+                });
+            }
+            p
+        }
+    };
+    if let Ok(Some(m)) = app.primary_monitor() {
+        let scale = m.scale_factor();
+        let size = m.size().to_logical::<f64>(scale);
+        let pos = m.position().to_logical::<f64>(scale);
+        // Below the pill, so both can show.
+        let _ = panel.set_position(tauri::LogicalPosition::new(pos.x + (size.width - W) / 2.0, pos.y + 92.0));
+    }
+    let _ = panel.show();
+}
+
 // ── what midna hears about this computer ─────────────────────────────────
 
 /// A permission as the protocol says it; None when it can't be known now.
@@ -727,11 +873,11 @@ pub fn hello(app: &AppHandle, nonce: &str) -> Value {
             }
         }
     }
-    // Automation as one permission: granted when every app asked about is.
+    // Automation as one permission: granted when any app is (osascript reports the others one by one), denied when all are.
     if !automation.is_empty() {
-        let all = automation.values().all(|v| v == "granted");
-        let denied = automation.values().any(|v| v == "denied");
-        perms.insert("automation".into(), json!(if all { "granted" } else if denied { "denied" } else { "not_asked" }));
+        let any = automation.values().any(|v| v == "granted");
+        let all_denied = automation.values().all(|v| v == "denied");
+        perms.insert("automation".into(), json!(if any { "granted" } else if all_denied { "denied" } else { "not_asked" }));
     }
     let mac = cfg!(target_os = "macos");
     json!({

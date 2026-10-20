@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { MidnaClient, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 
 /**
@@ -223,7 +223,32 @@ export class TelegramBridge {
       await this.deliver(chat, e.item);
       this.state.lastSeq = e.item.seq;
       this.save();
+    } else if (e.type === "approval" && e.approval.state !== "pending") {
+      await this.approvalOver(chat, e.approval);
     }
+  }
+
+  /**
+   * A device hands approval was answered, ran out of time or was dropped:
+   * its question's buttons go, and unless it was answered here, a quiet
+   * reply says how it ended.
+   */
+  private async approvalOver(chat: number, a: Approval): Promise<void> {
+    const asked = Object.entries(this.state.questions ?? {}).filter(([, q]) => q.id === a.outboxId);
+    if (!asked.length) return;
+    for (const [messageId] of asked) {
+      await this.bot.clearKeyboard(chat, Number(messageId)).catch(() => {});
+      delete this.state.questions![messageId];
+    }
+    this.save();
+    if (a.answeredVia === "telegram") return;
+    const by = a.answeredBy ? ` by ${a.answeredBy}${a.answeredVia ? ` (${a.answeredVia})` : ""}` : "";
+    const how =
+      a.state === "allowed" ? `${a.answer === "allow_10_min" ? "Allowed for 10 min" : "Allowed"}${by}.`
+      : a.state === "denied" ? `Denied${by}.`
+      : a.state === "expired" ? "No answer in time, so no."
+      : "No longer needed.";
+    await this.bot.send(chat, how, { silent: true, replyTo: Number(asked[asked.length - 1]![0]) }).catch(() => {});
   }
 
   /**
