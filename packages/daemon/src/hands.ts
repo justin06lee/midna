@@ -24,6 +24,7 @@ import {
   type Permission,
   type Policy,
 } from "@midna/protocol";
+import { Approvals } from "./approvals.ts";
 import { writePrivate } from "./config.ts";
 
 /**
@@ -60,6 +61,8 @@ export interface ApprovalRequest {
   deviceName: string;
   op: Op;
   capability: Capability;
+  /** The command it would let through. */
+  commandId: string;
   /** As it will be sent, secrets redacted. */
   args: Record<string, unknown>;
   /** What a person is asked to allow, in plain words: "open https://… on MacBook Air". */
@@ -67,26 +70,20 @@ export interface ApprovalRequest {
   episodeId: number | null;
 }
 
-export interface ApprovalAnswer {
+export interface ApprovalDecision {
   approved: boolean;
   /** Who answered, from which client. */
   by?: string;
   /** Why not, in words midna can pass on. */
   reason?: string;
+  /** The approval that decided it. */
+  approvalId?: string;
 }
 
-/** Asks a person whether a command may run, and waits for the answer (fork 1 decides how). */
+/** Asks a person whether a command may run, and waits for the answer: Approvals (approvals.ts). */
 export interface Approver {
-  request(req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalAnswer>;
+  request(req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalDecision>;
 }
-
-/** Until approvals are built (fork 1), whatever needs a yes is denied, and midna is told why. */
-export const NO_APPROVALS: Approver = {
-  request: async () => ({
-    approved: false,
-    reason: "needs the user's approval, and approvals aren't built yet. Tell the user what you wanted to do; they can set this capability to On in the midna app on that computer",
-  }),
-};
 
 /** The daemon's Ed25519 key, made on first use and kept private in MIDNA_HOME. Devices pin its public half. */
 export function loadHandsKey(file: string): KeyObject {
@@ -151,12 +148,36 @@ function redact(op: Op, args: Record<string, unknown>): Record<string, unknown> 
   return op === "type" && args.secret ? { ...args, text: `[${String(args.text ?? "").length} characters, secret]` } : args;
 }
 
-function summarize(op: Op, args: Record<string, unknown>, device: string): string {
-  const what =
-    op === "open" ? `open ${String(args.url ?? args.app ?? args.path)}`
-    : op === "notify" ? `show the notification "${String(args.title)}"`
-    : op === "screenshot" ? "take a screenshot"
-    : op.replace("_", " ");
+/** At most this much of a command, a script or typed text goes in a summary. */
+const clip = (v: unknown, n = 120) => {
+  const s = String(v ?? "").replace(/\s+/g, " ").trim();
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+};
+
+/** What a command does, in the words an approval asks with: "run `brew upgrade` on MacBook Air". */
+export function summarize(op: Op, args: Record<string, unknown>, device: string): string {
+  const at = (a: Record<string, unknown>) => `${Math.round(Number(a.x))}, ${Math.round(Number(a.y))}`;
+  const path = Array.isArray(args.path) ? (args.path as Array<Record<string, unknown>>) : [];
+  const what = (() => {
+    switch (op) {
+      case "screenshot": return "take a screenshot";
+      case "click": return `${args.button === "right" ? "right-" : ""}click at ${at(args)}`;
+      case "move": return `move the pointer to ${at(args)}`;
+      case "drag": return `drag from ${at(path[0] ?? {})} to ${at(path.at(-1) ?? {})}`;
+      case "scroll": return "scroll";
+      case "type": return args.secret ? `type ${String(args.text ?? "").length} secret characters` : `type "${clip(args.text, 80)}"`;
+      case "key": return `press ${clip(args.keys, 40)}`;
+      case "script": return `run ${args.language === "jxa" ? "JXA" : "AppleScript"} "${clip(args.source)}"`;
+      case "shell": return `run \`${clip(args.command)}\``;
+      case "file_read": return `read ${clip(args.path)}`;
+      case "file_list": return `list ${clip(args.path)}`;
+      case "file_write": return `${args.mode === "append" ? "append to" : args.mode === "overwrite" ? "overwrite" : "write"} ${clip(args.path)}`;
+      case "clipboard_read": return "read the clipboard";
+      case "clipboard_write": return "set the clipboard";
+      case "open": return `open ${clip(args.url ?? args.app ?? args.path)}`;
+      case "notify": return `show the notification "${clip(args.title, 80)}"`;
+    }
+  })();
   return `${what} on ${device}`;
 }
 
@@ -165,7 +186,8 @@ export class HandsHub implements HandsHandle {
   readonly fingerprint: string;
   private readonly key: KeyObject;
   private readonly store: Store;
-  private readonly approver: Approver;
+  /** What waits for the user's yes, and the answers. */
+  readonly approvals: Approvals;
   private readonly policy: { observe: readonly Op[] };
   private readonly graceMs: number;
   /** The live session of each device that said hello. */
@@ -173,10 +195,14 @@ export class HandsHub implements HandsHandle {
   private readonly pending = new Map<string, Pending>();
   private readonly nonces = new Map<string, string[]>();
 
-  constructor(opts: { store: Store; keyFile: string; approver?: Approver; policy?: { observe: readonly Op[] }; graceMs?: number }) {
+  constructor(opts: { store: Store; keyFile: string; policy?: { observe: readonly Op[] }; graceMs?: number; approvalMs?: number }) {
     this.store = opts.store;
     this.key = loadHandsKey(opts.keyFile);
-    this.approver = opts.approver ?? NO_APPROVALS;
+    this.approvals = new Approvals({
+      store: opts.store,
+      toDevice: (deviceId, e) => this.sessions.get(deviceId)?.conn?.send(e),
+      ...(opts.approvalMs !== undefined ? { timeoutMs: opts.approvalMs } : {}),
+    });
     this.policy = opts.policy ?? HANDS_POLICY;
     this.graceMs = opts.graceMs ?? RESULT_GRACE;
     this.publicKey = createPublicKey(this.key).export({ format: "jwk" }).x!;
@@ -241,13 +267,15 @@ export class HandsHub implements HandsHandle {
     return row.deviceId === deviceId ? "done" : "other";
   }
 
-  /** The device was unpaired: its stream ends at once. */
+  /** The device was unpaired: its stream ends at once, and nothing waits on its approvals. */
   disconnect(deviceId: string): void {
     this.end(deviceId, "revoked");
+    this.approvals.cancelAll(deviceId);
   }
 
-  /** The user paused every device: what's in flight is cancelled. */
+  /** The user paused every device: what's in flight, or waiting for a yes, is cancelled. */
   pauseAll(): void {
+    this.approvals.cancelAll();
     for (const [id, p] of this.pending) {
       p.session.conn?.send({ type: "cancel", id });
       p.settle({ kind: "cancelled", why: "the user paused every device's hands" });
@@ -255,6 +283,7 @@ export class HandsHub implements HandsHandle {
   }
 
   shutdown(): void {
+    this.approvals.cancelAll();
     for (const deviceId of [...this.sessions.keys()]) this.end(deviceId, "shutdown");
   }
 
@@ -281,13 +310,9 @@ export class HandsHub implements HandsHandle {
   async run(req: HandsRequest): Promise<HandsOutcome> {
     const { op, episodeId } = req;
     const capability = OPS[op];
-    let args = req.args;
-    const schema = OP_ARGS[op];
-    if (schema) {
-      const parsed = schema.safeParse(args);
-      if (!parsed.success) return { ok: false, code: "bad_args", message: `${op}: ${parsed.error.issues.map((i) => i.message).join("; ")}` };
-      args = parsed.data as Record<string, unknown>;
-    }
+    const parsed = OP_ARGS[op].safeParse(req.args);
+    if (!parsed.success) return { ok: false, code: "bad_args", message: `${op}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ")}` };
+    const args = parsed.data as Record<string, unknown>;
     const settings = this.store.settings();
 
     // 1. The device exists and isn't revoked.
@@ -320,17 +345,19 @@ export class HandsHub implements HandsHandle {
     const gate = decide(offer, settings.mode, op, this.policy);
     if (gate === "refuse") return refuse("off", `${name} doesn't allow ${capability}`);
     let approval: HandsCommand["approval"];
+    let approvalId: string | null = null;
     if (gate === "approve") {
       const summary = summarize(op, args, name);
-      const answer = await this.approver.request({ deviceId, deviceName: name, op, capability, args: logged, summary, episodeId }, req.signal);
+      const answer = await this.approvals.request({ deviceId, deviceName: name, op, capability, commandId: id, args: logged, summary, episodeId }, req.signal);
+      approvalId = answer.approvalId ?? null;
       if (!answer.approved) {
         const reason = answer.reason ?? "the user said no";
-        this.store.hands.record({ id, deviceId, episodeId, op, args: logged, decision: "denied", decidedBy: answer.by ?? null, reason });
+        this.store.hands.record({ id, deviceId, episodeId, op, args: logged, decision: "denied", decidedBy: answer.by ?? null, reason, approvalId });
         return { ok: false, code: "denied", message: `${summary}: ${reason}` };
       }
       approval = { by: answer.by ?? "the user", at: Date.now() };
     }
-    this.store.hands.record({ id, deviceId, episodeId, op, args: logged, decision: approval ? "approved" : "allowed", decidedBy: approval?.by ?? "policy" });
+    this.store.hands.record({ id, deviceId, episodeId, op, args: logged, decision: approval ? "approved" : "allowed", decidedBy: approval?.by ?? "policy", approvalId });
     // Waiting for a yes, the device may have gone.
     const session = this.sessions.get(deviceId);
     if (!session?.conn) return this.close(id, op, name, { kind: "disconnected", why: `${name} went offline before it could be sent` });

@@ -8,7 +8,7 @@
 import { z } from "zod";
 
 export * from "./hands.ts";
-import type { DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
+import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
 
 export const DEFAULT_PORT = 7717;
 export const SERVICE = "midna";
@@ -82,7 +82,9 @@ export type StreamEvent =
   | { type: "outbox"; item: OutboxItem }
   | { type: "user_message"; id: number; conversationId: string; text: string; client: string; createdAt: number; replyTo: number | null; attachments: Attachment[] }
   | { type: "status"; conversationId: string | null; state: "thinking" | "idle" }
-  | { type: "activity"; conversationId: string | null; tool: string };
+  | { type: "activity"; conversationId: string | null; tool: string }
+  /** Device hands: something waits for the user's yes (state "pending"), or was answered, expired or dropped. 0.9+. */
+  | { type: "approval"; approval: Approval };
 
 export const SendMessage = z
   .object({
@@ -304,6 +306,14 @@ export class MidnaClient {
   }
   handsResult(result: HandsResult): Promise<{ ok: true }> {
     return this.call("POST", `/v1/hands/results/${encodeURIComponent(result.id)}`, result);
+  }
+  /** What waits for the user's yes right now. */
+  approvals(): Promise<Approval[]> {
+    return this.call("GET", "/v1/approvals");
+  }
+  /** Answer an approval; the first answer wins (409 once it's over). */
+  answerApproval(id: string, answer: AnswerApproval): Promise<Approval> {
+    return this.call("POST", `/v1/approvals/${encodeURIComponent(id)}`, answer);
   }
   /** Tell midna about something that happened elsewhere; it hears it in the background. */
   event(e: SendEvent): Promise<EventReceipt> {

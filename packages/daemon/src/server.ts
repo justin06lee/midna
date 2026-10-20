@@ -6,6 +6,7 @@ import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
 import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
 import {
+  AnswerApproval,
   HandsHello,
   HandsResult,
   HandsStateUpdate,
@@ -23,6 +24,7 @@ import {
   type StreamEvent,
   type Status,
 } from "@midna/protocol";
+import { answerIn } from "./approvals.ts";
 import type { HandsHub } from "./hands.ts";
 import { VERSION } from "./version.ts";
 
@@ -39,6 +41,8 @@ export interface ServerDeps {
   onSettingsChanged: (changed: SettingsPatch) => void;
   /** The user's computers that offer midna their hands. */
   hands: HandsHub;
+  /** midna's working directory, where its tools put files for the brain. */
+  workspace: string;
 }
 
 type Env = { Variables: { device: Device } };
@@ -105,7 +109,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, signal: c.req.raw.signal });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, signal: c.req.raw.signal, workspace: deps.workspace });
   });
 
   // ── everything else needs a paired device ────────────────────────────
@@ -200,6 +204,14 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.post("/v1/messages", async (c) => {
     const msg = SendMessage.safeParse(await c.req.json().catch(() => null));
     if (!msg.success) return c.json({ error: msg.error.message }, 400);
+    // A reply to an approval's question that answers it ("Allow", a tapped button) is that answer, not a message for midna.
+    if (msg.data.replyTo !== undefined && store.hands.approvalAsked(msg.data.replyTo) && !msg.data.attachments?.length) {
+      const refused = fromHost(c);
+      const r = refused ? null : deps.hands.approvals.reply({ replyTo: msg.data.replyTo, text: msg.data.text, client: msg.data.client }, { name: c.get("device").name });
+      if (refused && answerIn(msg.data.text)) return refused;
+      if (r === "over") return c.json({ error: "that approval is already over: answered, timed out or dropped" }, 409);
+      if (r) return c.json({ conversationId: MAIN, approval: r }, 202);
+    }
     if (!msg.data.text.replace(QUEUE_PREFIX, "").trim() && !msg.data.attachments?.length) return c.json({ error: "a message needs text or an attachment" }, 400);
     const unknown = msg.data.attachments?.find((id) => !store.attachments.get(id));
     if (unknown) return c.json({ error: `no attachment ${unknown} — upload it first` }, 400);
@@ -264,6 +276,9 @@ export function createApp(deps: ServerDeps): Hono<Env> {
 
   // ── device hands: the desktop app on the user's computers, as midna's hands ──
   // Only the app offers them; commands go out solely from midna's tools, never from a /v1 route.
+  // midna's own host token is on the machine midna runs on, where its brain could reach it: a yes comes from a person's device.
+  const fromHost = (c: Context<Env>) =>
+    c.get("device").kind === "host" ? c.json({ error: "approvals are answered from the user's own devices, not from midna's host" }, 403) : null;
   const handsDevice = (c: Context<Env>) => (c.get("device").kind === "desktop" ? null : c.json({ error: "only the midna desktop app offers its hands" }, 403));
 
   app.post("/v1/hands/hello", async (c) => {
@@ -340,6 +355,20 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   });
 
   app.get("/v1/hands/devices", (c) => c.json(deps.hands.devices()));
+
+  // ── approvals: what waits for the user's yes; the first answer wins ──
+  app.get("/v1/approvals", (c) => c.json(deps.hands.approvals.pending()));
+
+  app.post("/v1/approvals/:id", async (c) => {
+    const refused = fromHost(c);
+    if (refused) return refused;
+    const body = AnswerApproval.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: body.error.message }, 400);
+    const r = deps.hands.approvals.answer(c.req.param("id"), body.data.answer, { name: c.get("device").name, via: body.data.client });
+    if (r === "unknown") return c.json({ error: "no such approval" }, 404);
+    if (r === "over") return c.json({ error: "that approval is already over: answered, timed out or dropped", approval: store.hands.approval(c.req.param("id")) }, 409);
+    return c.json(r);
+  });
 
   app.get("/v1/outbox", (c) => c.json(store.outbox.since(Number(c.req.query("since") ?? 0))));
 

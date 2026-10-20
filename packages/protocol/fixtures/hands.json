@@ -71,6 +71,27 @@
     "bye": {
       "type": "bye",
       "reason": "replaced"
+    },
+    "approval": {
+      "type": "approval",
+      "approval": {
+        "id": "apr_fixture1",
+        "deviceId": "dev_fixture",
+        "deviceName": "MacBook Air",
+        "capability": "shell",
+        "op": "shell",
+        "summary": "run `brew upgrade` on MacBook Air",
+        "commandId": "cmd_fixture3",
+        "episodeId": 42,
+        "outboxId": 7,
+        "requestedAt": 1792447200000,
+        "expiresAt": 1792447320000,
+        "state": "pending",
+        "answer": null,
+        "answeredBy": null,
+        "answeredVia": null,
+        "answeredAt": null
+      }
     }
   },
   "results": [
