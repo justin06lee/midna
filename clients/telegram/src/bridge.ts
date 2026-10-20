@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { MidnaClient, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { MidnaClient, MidnaError, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 
 /**
@@ -179,7 +179,17 @@ export class TelegramBridge {
     const q = this.state.questions?.[String(msg.message_id)];
     const option = q && idx !== undefined ? q.options[Number(idx)] : undefined;
     if (!q || option === undefined) return void (await this.bot.answerCallback(cb.id, "That question has expired."));
-    await this.midna.send({ text: option, client: "telegram", replyTo: q.id });
+    try {
+      await this.midna.send({ text: option, client: "telegram", replyTo: q.id });
+    } catch (err) {
+      // An approval's question, tapped after it was answered elsewhere or ran out of time.
+      if (!(err instanceof MidnaError && err.status === 409)) throw err;
+      await this.bot.answerCallback(cb.id, "That's already over: answered, timed out or dropped.");
+      await this.bot.clearKeyboard(msg.chat.id, msg.message_id).catch(() => {});
+      delete this.state.questions![String(msg.message_id)];
+      this.save();
+      return;
+    }
     await this.bot.answerCallback(cb.id, option);
     await this.bot.clearKeyboard(msg.chat.id, msg.message_id).catch(() => {});
     delete this.state.questions![String(msg.message_id)];
