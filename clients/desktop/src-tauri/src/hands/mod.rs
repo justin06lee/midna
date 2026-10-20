@@ -113,6 +113,8 @@ pub struct Hands {
     pub connected: bool,
     /// Something Justin should know about the connection (a host key that changed).
     pub problem: Option<String>,
+    /// The fingerprint of the daemon key commands are checked against, for people to compare.
+    pub fingerprint: Option<String>,
 }
 
 pub type Shared = Mutex<Hands>;
@@ -260,6 +262,7 @@ pub struct Status {
     state: &'static str,
     connected: bool,
     problem: Option<String>,
+    fingerprint: Option<String>,
     active: Option<String>,
     permissions: Vec<Permission>,
     displays: Vec<Display>,
@@ -281,6 +284,7 @@ pub async fn hands_status(app: AppHandle) -> Status {
         state: state(&h),
         connected: h.connected,
         problem: h.problem.clone(),
+        fingerprint: h.fingerprint.clone(),
         active: h.active.clone(),
         permissions: permissions(),
         displays: displays(),
@@ -380,20 +384,25 @@ pub fn relaunch(app: AppHandle) {
 
 /// Run one of midna's commands here: refused when paused, off, locked or
 /// lacking a permission; otherwise done, shown while it runs, and logged.
-pub async fn execute(app: &AppHandle, id: &str, op: &str, args: &Value) -> Result<Outcome, Refusal> {
+/// Past `limit`, or once `stop` fires, it gives up, and the indicator and
+/// the log still say how it ended.
+pub async fn execute(app: &AppHandle, id: &str, op: &str, args: &Value, limit: Duration, stop: impl std::future::Future<Output = ()>) -> Result<Outcome, Refusal> {
     let started = now_ms();
     let capability = capability_of(op);
     let summary = describe(op, args);
     let checked = {
         let shared = app.state::<Shared>();
         let h = shared.lock().unwrap();
-        gate(&h, capability)
+        gate(&h, capability, args)
     };
     let result = match checked {
         Err(r) => Err(r),
         Ok(()) => {
             begin(app, &summary, capability == "screen");
-            let r = run(app, op, args).await;
+            let r = tokio::select! {
+                r = tokio::time::timeout(limit, run(app, op, args)) => r.unwrap_or_else(|_| Err(Refusal::new("timeout", format!("didn't finish within {} ms", limit.as_millis())))),
+                _ = stop => Err(Refusal::new("cancelled", "midna cancelled it")),
+            };
             end(app);
             r
         }
@@ -432,7 +441,7 @@ fn capability_of(op: &str) -> &'static str {
     }
 }
 
-fn gate(h: &Hands, capability: &str) -> Result<(), Refusal> {
+fn gate(h: &Hands, capability: &str, args: &Value) -> Result<(), Refusal> {
     if h.config.paused {
         return Err(Refusal::new("paused", "Justin has paused midna's hands on this computer"));
     }
@@ -443,8 +452,12 @@ fn gate(h: &Hands, capability: &str) -> Result<(), Refusal> {
         return Err(Refusal::new("off", format!("{capability} is turned off on this computer")));
     }
     let s = state(h);
-    if capability == "screen" && (s == "locked" || s == "display_asleep") {
-        return Err(Refusal::new("locked", if s == "locked" { "the screen is locked" } else { "the display is asleep" }));
+    if capability == "screen" && s == "locked" {
+        return Err(Refusal::new("locked", "the screen is locked"));
+    }
+    // A sleeping display is woken only when midna asks to (screenshot's `wake`).
+    if capability == "screen" && s == "display_asleep" && args.get("wake").and_then(Value::as_bool) != Some(true) {
+        return Err(Refusal::new("locked", "the display is asleep: take the screenshot with wake: true to wake it"));
     }
     if let Some(p) = needs(capability) {
         let st = permission(p);
@@ -475,15 +488,20 @@ async fn run(app: &AppHandle, op: &str, args: &Value) -> Result<Outcome, Refusal
         "open" => {
             let target = ["url", "app", "path"].iter().find_map(|k| args.get(*k).and_then(Value::as_str).map(|v| (*k, v.to_string())));
             let Some((kind, value)) = target else { return Err(Refusal::new("bad_args", "open needs a url, an app or a path")) };
-            let mut cmd = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" });
-            if kind == "app" && cfg!(target_os = "macos") {
-                cmd.arg("-a");
-            }
-            let status = cmd.arg(&value).status().map_err(|e| failed(e.to_string()))?;
-            if !status.success() {
-                return Err(failed(format!("couldn't open {value}")));
-            }
-            Ok(Outcome { data: json!({}), file: None })
+            // Off the async threads, so a timeout or a cancel isn't held up by it.
+            tauri::async_runtime::spawn_blocking(move || {
+                let mut cmd = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" });
+                if kind == "app" && cfg!(target_os = "macos") {
+                    cmd.arg("-a");
+                }
+                let status = cmd.arg(&value).status().map_err(|e| failed(e.to_string()))?;
+                if !status.success() {
+                    return Err(failed(format!("couldn't open {value}")));
+                }
+                Ok(Outcome { data: json!({}), file: None })
+            })
+            .await
+            .map_err(|e| Refusal::new("failed", e.to_string()))?
         }
         "notify" => {
             use tauri_plugin_notification::NotificationExt;
@@ -506,6 +524,9 @@ fn screenshot(app: &AppHandle, args: &Value) -> Result<Outcome, Refusal> {
             None => all.iter().find(|x| x.primary).or(all.first()).cloned().ok_or_else(|| Refusal::new("failed", "no display"))?,
         };
         let full = args.get("full").and_then(Value::as_bool).unwrap_or(false);
+        if mac::display_asleep() && args.get("wake").and_then(Value::as_bool) == Some(true) {
+            mac::wake_display();
+        }
         let tmp = std::env::temp_dir().join(format!("midna-shot-{}.png", now_ms()));
         let _ = app;
         mac::screenshot(&display.id, if full { None } else { Some(1568) }, &tmp).map_err(|e| Refusal::new("failed", e))?;

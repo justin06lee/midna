@@ -58,6 +58,11 @@ export function Computer() {
             )}
             {hands.problem && <div className="mt-1 text-[12.5px] text-ink-2">{hands.problem}</div>}
             <div className="mt-0.5 text-[12px] text-dimmer">{mac ? "⌃⌥⌘P" : "Ctrl+Alt+Super+P"} pauses or resumes from anywhere, as does the menu bar icon.</div>
+            {hands.connected && hands.fingerprint && (
+              <div className="mt-0.5 text-[12px] text-dimmer" title="Commands run here only when they're signed with this key, the one this computer trusts for its midna.">
+                midna's key: <span className="font-mono">{hands.fingerprint}</span>
+              </div>
+            )}
           </div>
           <Button variant={hands.paused ? "primary" : "default"} onClick={() => void setHandsPaused(!hands.paused).then(refresh)} icon={hands.paused ? undefined : <Icon name="pause" className="size-3.5" />}>
             {hands.paused ? "Resume" : "Pause"}
@@ -94,7 +99,7 @@ export function Computer() {
             );
           })}
           <p className="mt-2 border-t border-line pt-3 text-[12px] text-dimmer">
-            Ask: midna asks you first, each time. Mouse and keyboard, AppleScript, the shell, files and the clipboard come later.
+            Ask: midna needs your yes each time. Until it can ask you, it tells you what it wanted instead. Mouse and keyboard, AppleScript, the shell, files and the clipboard come later.
           </p>
         </Card>
       </Section>
@@ -145,7 +150,7 @@ function PermissionRow({ id, state, first, onChange }: { id: string; state: Perm
       </div>
       {id === "screen_recording" && state !== "granted" && (
         <div className="mt-1.5 ml-7 flex items-center gap-2 text-[12px] text-dimmer">
-          macOS lets midna use it only after a relaunch.
+          Once it's on in System Settings, it works after a relaunch.
           <Button size="sm" variant="ghost" className="-my-1" onClick={() => void relaunchApp()}>
             Relaunch midna
           </Button>
@@ -163,6 +168,8 @@ const OUTCOME: Record<string, string> = {
   unsupported: "can't yet",
   bad_args: "didn't make sense",
   failed: "failed",
+  timeout: "took too long",
+  cancelled: "cancelled",
 };
 
 function Recent({ entries }: { entries: HandsStatus["recent"] }) {

@@ -5,7 +5,7 @@
 //! one before it and an id never seen. The shapes are packages/protocol's
 //! hands.ts; fixtures/hands.json keeps the two in step (the test below).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +30,9 @@ struct Connection {
     token: String,
     #[serde(default)]
     device: Option<String>,
+    /// The daemon's key as /v1/pair gave it (hosts from 0.8 on): trusted from the start, not from the first hello.
+    #[serde(default, rename = "daemonKey")]
+    daemon_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -80,7 +83,9 @@ pub fn start(app: AppHandle) {
         let mut backoff = 1;
         loop {
             let ended = session(&app, &http).await;
-            set_connected(&app, false, None);
+            // Offline now; a problem the session found stays shown until a session connects.
+            let problem = app.state::<Shared>().lock().unwrap().problem.clone();
+            set_connected(&app, false, problem);
             let wait = match ended {
                 Ok(()) => {
                     backoff = 1;
@@ -116,8 +121,11 @@ fn connection(app: &AppHandle) -> Option<Connection> {
     serde_json::from_slice(&std::fs::read(file).ok()?).ok()
 }
 
-/// The daemon key pinned for a connection: on its first hello, from then on the only one trusted.
+/// The daemon key pinned for a connection: the one pairing gave, else the first hello's; from then on the only one trusted.
 fn pinned(app: &AppHandle, conn: &Connection) -> Option<String> {
+    if conn.daemon_key.is_some() {
+        return conn.daemon_key.clone();
+    }
     let pins: BTreeMap<String, Value> = super::load(app, "hands-keys.json");
     pins.get(&pin_id(conn)).and_then(|v| v.get("key")).and_then(Value::as_str).map(str::to_string)
 }
@@ -156,12 +164,15 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
         None => pin(app, &conn, &welcome),
         Some(k) if k == welcome.daemon_key => {}
         Some(_) => {
-            set_connected(app, false, Some(format!("midna's host has a different key ({}) from the one this computer trusts, so its commands aren't accepted.", welcome.fingerprint)));
+            let problem = format!("midna's host has a different key ({}) from the one this computer trusts, so its commands aren't accepted. If midna was set up again on purpose, connect this app to it again.", welcome.fingerprint);
+            eprintln!("hands: {problem}");
+            set_connected(app, false, Some(problem));
             return Err(Pause(300));
         }
     }
     let key = welcome.daemon_key.clone();
     let session = welcome.session.clone();
+    app.state::<Shared>().lock().unwrap().fingerprint = Some(welcome.fingerprint.clone());
 
     let stream = http
         .get(format!("{}/v1/hands/stream", conn.url))
@@ -183,6 +194,8 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
     let mut buf = String::new();
     let mut last_seq = 0u64;
     let mut seen: HashSet<String> = HashSet::new();
+    // The commands still running, so a cancel can stop one.
+    let mut running: HashMap<String, Arc<Notify>> = HashMap::new();
     let ended = 'read: loop {
         // The daemon writes a keepalive every 25 s; a minute of nothing is a dead connection.
         let chunk = match tokio::time::timeout(Duration::from_secs(60), bytes.next()).await {
@@ -203,12 +216,19 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
                     Ok(cmd) if !seen.insert(cmd.id.clone()) => eprintln!("hands: refused {}: already run", cmd.id),
                     Ok(cmd) => {
                         last_seq = cmd.seq;
-                        tauri::async_runtime::spawn(run(app.clone(), http.clone(), conn.clone(), cmd));
+                        running.retain(|_, stop| Arc::strong_count(stop) > 1);
+                        let stop = Arc::new(Notify::new());
+                        running.insert(cmd.id.clone(), stop.clone());
+                        tauri::async_runtime::spawn(run(app.clone(), http.clone(), conn.clone(), cmd, stop));
                     }
                     Err(e) => eprintln!("hands: refused a command: {e}"),
                 },
-                // This phase's operations finish in seconds; a cancel arrives after them.
-                Ok(StreamEvent::Cancel { id }) => eprintln!("hands: cancel for {id}"),
+                // The daemon has stopped waiting (a timeout, a cancelled tool call, a pause): stop too.
+                Ok(StreamEvent::Cancel { id }) => {
+                    if let Some(stop) = running.remove(&id) {
+                        stop.notify_one();
+                    }
+                }
                 Ok(StreamEvent::Bye { reason }) => break 'read if reason == "revoked" { Err(Pause(600)) } else { Ok(()) },
                 Err(e) => eprintln!("hands: an event it doesn't know: {e}"),
             }
@@ -218,14 +238,14 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
     ended
 }
 
-/// Run one command and post its result, uploading any file first.
-async fn run(app: AppHandle, http: reqwest::Client, conn: Connection, cmd: Command) {
+/// Run one command and post its result, uploading any file first. A cancelled one has no result: the daemon is no longer waiting.
+async fn run(app: AppHandle, http: reqwest::Client, conn: Connection, cmd: Command, stop: Arc<Notify>) {
     let auth = format!("Bearer {}", conn.token);
     let started = std::time::Instant::now();
-    let outcome = match tokio::time::timeout(Duration::from_millis(cmd.timeout_ms), super::execute(&app, &cmd.id, &cmd.op, &cmd.args)).await {
-        Ok(r) => r,
-        Err(_) => Err(super::Refusal::new("timeout", format!("didn't finish within {} ms", cmd.timeout_ms))),
-    };
+    let outcome = super::execute(&app, &cmd.id, &cmd.op, &cmd.args, Duration::from_millis(cmd.timeout_ms), stop.notified()).await;
+    if matches!(&outcome, Err(r) if r.code == "cancelled") {
+        return;
+    }
     let result = match outcome {
         Ok(out) => {
             let mut attachments = vec![];

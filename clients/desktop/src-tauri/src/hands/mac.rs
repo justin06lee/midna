@@ -41,7 +41,9 @@ extern "C" {
     fn CGGetActiveDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGMainDisplayID() -> u32;
     fn CGDisplayBounds(display: u32) -> CGRect;
-    fn CGDisplayPixelsWide(display: u32) -> usize;
+    fn CGDisplayCopyDisplayMode(display: u32) -> *mut c_void;
+    fn CGDisplayModeGetPixelWidth(mode: *mut c_void) -> usize;
+    fn CGDisplayModeRelease(mode: *mut c_void);
     fn CGDisplayIsBuiltin(display: u32) -> u32;
     fn CGDisplayIsAsleep(display: u32) -> u32;
     fn CGSessionCopyCurrentDictionary() -> CFDictionaryRef;
@@ -189,6 +191,19 @@ fn display_ids() -> Vec<u32> {
     ids[..count as usize].to_vec()
 }
 
+/// A display's width in real pixels: the mode's, since CGDisplayPixelsWide gives points on a Retina display.
+fn pixel_width(id: u32) -> usize {
+    unsafe {
+        let mode = CGDisplayCopyDisplayMode(id);
+        if mode.is_null() {
+            return 0;
+        }
+        let w = CGDisplayModeGetPixelWidth(mode);
+        CGDisplayModeRelease(mode);
+        w
+    }
+}
+
 /// Every display, in points of the global layout, main display first.
 pub fn displays() -> Vec<Display> {
     let main = unsafe { CGMainDisplayID() };
@@ -212,7 +227,7 @@ pub fn displays() -> Vec<Display> {
                 y: b.origin.y,
                 width: b.size.width,
                 height: b.size.height,
-                scale: unsafe { CGDisplayPixelsWide(id) } as f64 / b.size.width.max(1.0),
+                scale: pixel_width(id) as f64 / b.size.width.max(1.0),
             }
         })
         .collect()
@@ -232,6 +247,19 @@ pub fn locked() -> bool {
 
 pub fn display_asleep() -> bool {
     unsafe { CGDisplayIsAsleep(CGMainDisplayID()) != 0 }
+}
+
+/// Wake the displays as a touch of the keyboard would (`caffeinate -u` declares the user active), and wait for them to light.
+pub fn wake_display() {
+    let _ = Command::new("/usr/bin/caffeinate").args(["-u", "-t", "2"]).spawn();
+    for _ in 0..20 {
+        if !display_asleep() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // A display that just woke draws its first frames black.
+    std::thread::sleep(std::time::Duration::from_millis(500));
 }
 
 /// Where the pointer is, in points of the global layout.

@@ -170,6 +170,8 @@ export interface HandsStatus {
   state: "ready" | "paused" | "locked" | "display_asleep";
   connected: boolean;
   problem: string | null;
+  /** The daemon key's fingerprint, "ab12 cd34 …": every command is checked against that key. */
+  fingerprint: string | null;
   active: string | null;
   permissions: Array<{ id: string; state: PermissionState }>;
   displays: Array<{ id: string; name: string; primary: boolean; width: number; height: number; scale: number }>;
