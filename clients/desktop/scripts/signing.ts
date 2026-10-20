@@ -1,6 +1,7 @@
 /**
  * The stable code-signing identity midna.app is signed with on this Mac,
- * "midna local signing": a self-signed certificate in the login keychain.
+ * "midna dev": a self-signed certificate in the login keychain, made the
+ * way ruri makes "ruri dev".
  *
  * Why: macOS keeps a permission grant (Screen Recording, Accessibility, Full
  * Disk Access, …) against the app's designated requirement. An ad-hoc
@@ -9,20 +10,20 @@
  * the requirement — identifier "sh.midna.desktop" and this certificate — stays
  * the same, and the grants survive every rebuild.
  *
- * `bun run signing` creates it once (doing nothing when it exists). It needs
- * no Apple account and isn't trusted: codesign uses it all the same, and
- * trust only matters to Gatekeeper on other Macs. One step needs the login
- * password, once: letting codesign (an "apple:" tool) use the key without
- * asking on every build. Run in a terminal, the script asks for it; otherwise
- * it prints the command. app.ts signs with the identity once it's ready.
- * Back it up with `security export -t identities -f pkcs12` (asks for the
- * login password); losing it means granting the permissions once more.
+ * `bun run signing` makes it once (an identity already there is kept), then
+ * does the two steps that need Justin, once each, in a terminal: trusting the
+ * certificate for code signing (macOS asks for his password), so it is a
+ * valid identity like "ruri dev"; and letting codesign (an "apple:" tool) use
+ * its key without asking on every build (his login password). app.ts signs
+ * with the identity once codesign can use it. Back it up with
+ * `security export -t identities -f pkcs12` (asks for the login password);
+ * losing it means granting the permissions once more.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const SIGNING_IDENTITY = "midna local signing";
+export const SIGNING_IDENTITY = "midna dev";
 const KEYCHAIN = join(homedir(), "Library", "Keychains", "login.keychain-db");
 
 const sh = (argv: string[]) => {
@@ -30,7 +31,7 @@ const sh = (argv: string[]) => {
   return { ok: r.exitCode === 0, out: r.stdout.toString() + r.stderr.toString() };
 };
 
-/** Whether this Mac has the identity. Listed without -v: an untrusted self-signed one isn't "valid", yet codesign signs with it. */
+/** Whether this Mac has the identity. Listed without -v: until it's trusted it isn't "valid", yet codesign signs with it. */
 export function hasSigningIdentity(): boolean {
   return process.platform === "darwin" && sh(["security", "find-identity", "-p", "codesigning"]).out.includes(`"${SIGNING_IDENTITY}"`);
 }
@@ -39,7 +40,8 @@ export function hasSigningIdentity(): boolean {
 function keyPartitions(): string[] {
   const dump = sh(["security", "dump-keychain", "-a", KEYCHAIN]).out;
   const record = dump.split(/^keychain: /m).find((r) => r.includes("class: 0x00000010") && r.includes(`0x00000001 <blob>="${SIGNING_IDENTITY}"`));
-  const m = record && /authorizations \(\d+\): partition_id\s*\n\s*description: ([^\n]*)/.exec(record);
+  // "authorizations (1): partition_id", then (on current macOS) "don't-require-password", then "description: apple-tool:".
+  const m = record && /authorizations \(\d+\): partition_id\n(?:[^\n]*\n)*?\s*description: ([^\n]*)/.exec(record);
   return m ? m[1]!.split(",").map((p) => p.trim()).filter(Boolean) : [];
 }
 
@@ -51,39 +53,60 @@ export function signingReady(): boolean {
   return hasSigningIdentity() && keyPartitions().includes("apple:");
 }
 
+/** Trusted for code signing, so `security find-identity -v` lists it as valid, as it does "ruri dev". */
+export function signingTrusted(): boolean {
+  return process.platform === "darwin" && sh(["security", "find-identity", "-v", "-p", "codesigning"]).out.includes(`"${SIGNING_IDENTITY}"`);
+}
+
 function create(): void {
   if (process.platform !== "darwin") throw new Error("only macOS signs apps this way");
-  if (hasSigningIdentity()) {
-    console.log(`"${SIGNING_IDENTITY}" is already in the login keychain`);
-    allowCodesign();
-    return;
+  if (hasSigningIdentity()) console.log(`"${SIGNING_IDENTITY}" is already in the login keychain`);
+  else {
+    const dir = mkdtempSync(join(tmpdir(), "midna-signing-"));
+    try {
+      const run = (argv: string[]) => {
+        const r = sh(argv);
+        if (!r.ok) throw new Error(`${argv[0]} ${argv[1]} failed:\n${r.out}`);
+      };
+      writeFileSync(
+        join(dir, "cert.cnf"),
+        `[req]\ndistinguished_name = dn\nx509_extensions = ext\nprompt = no\n[dn]\nCN = ${SIGNING_IDENTITY}\n[ext]\nbasicConstraints = critical, CA:false\nkeyUsage = critical, digitalSignature\nextendedKeyUsage = critical, codeSigning\n`,
+      );
+      run(["/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650", "-config", join(dir, "cert.cnf"), "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem")]);
+      // Apple's own openssl writes a PKCS#12 the keychain reads.
+      run(["/usr/bin/openssl", "pkcs12", "-export", "-inkey", join(dir, "key.pem"), "-in", join(dir, "cert.pem"), "-name", SIGNING_IDENTITY, "-passout", "pass:midna", "-out", join(dir, "id.p12")]);
+      // -T: codesign and security may use the key.
+      run(["security", "import", join(dir, "id.p12"), "-k", KEYCHAIN, "-P", "midna", "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    if (!hasSigningIdentity()) throw new Error("the identity isn't in the keychain after importing it");
+    console.log(`created "${SIGNING_IDENTITY}" in the login keychain`);
+    console.log("once, after switching signatures: tccutil reset <service> sh.midna.desktop for each permission, then grant them again");
   }
+  trust();
+  allowCodesign();
+}
+
+/** Trust the certificate for code signing in the user's trust settings — macOS asks for the password, once. */
+function trust(): void {
+  if (signingTrusted()) return;
+  const pem = sh(["security", "find-certificate", "-c", SIGNING_IDENTITY, "-p", KEYCHAIN]).out;
   const dir = mkdtempSync(join(tmpdir(), "midna-signing-"));
+  const cert = join(dir, "cert.pem");
+  writeFileSync(cert, pem);
+  const argv = ["security", "add-trusted-cert", "-r", "trustRoot", "-p", "codeSign", "-k", KEYCHAIN, cert];
   try {
-    const run = (argv: string[]) => {
-      const r = sh(argv);
-      if (!r.ok) throw new Error(`${argv[0]} ${argv[1]} failed:\n${r.out}`);
-    };
-    run([
-      "/usr/bin/openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-days", "3650", "-nodes",
-      "-keyout", join(dir, "key.pem"), "-out", join(dir, "cert.pem"), "-subj", `/CN=${SIGNING_IDENTITY}`,
-      "-addext", "basicConstraints=critical,CA:false",
-      "-addext", "keyUsage=critical,digitalSignature",
-      "-addext", "extendedKeyUsage=critical,codeSigning",
-    ]);
-    // OpenSSL 3 writes a PKCS#12 that `security` can't read without -legacy; LibreSSL's is fine and has no such flag.
-    const legacy = sh(["/usr/bin/openssl", "pkcs12", "-help"]).out.includes("-legacy") ? ["-legacy"] : [];
-    run(["/usr/bin/openssl", "pkcs12", "-export", ...legacy, "-inkey", join(dir, "key.pem"), "-in", join(dir, "cert.pem"),
-      "-name", SIGNING_IDENTITY, "-out", join(dir, "id.p12"), "-passout", "pass:midna"]);
-    // -T: codesign may use the key without asking each build.
-    run(["security", "import", join(dir, "id.p12"), "-k", KEYCHAIN, "-P", "midna", "-T", "/usr/bin/codesign"]);
+    if (!process.stdin.isTTY) {
+      console.log(`to trust it (macOS asks for your password), run in a terminal: bun run signing`);
+      return;
+    }
+    console.log("trusting it for code signing — macOS asks for your password:");
+    Bun.spawnSync(argv, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    console.log(signingTrusted() ? "trusted" : "not trusted yet: run bun run signing again");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  if (!hasSigningIdentity()) throw new Error("the identity isn't in the keychain after importing it");
-  console.log(`created "${SIGNING_IDENTITY}" in the login keychain`);
-  console.log("once, after switching from ad-hoc builds: tccutil reset All sh.midna.desktop, then grant each permission again");
-  allowCodesign();
 }
 
 function allowCodesign(): void {

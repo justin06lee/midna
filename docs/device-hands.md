@@ -19,7 +19,7 @@ midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch de
   - Pause is in the window, the tray, behind a global shortcut, and in a daemon setting reachable from Telegram;
   - real input from Justin stops midna's input at once.
 - **Audit:** every command, its decision (allowed, approved by whom, denied) and its outcome, in the daemon's database next to the existing `actions` log. The app also shows its own recent list.
-- **macOS signing:** a stable self-signed identity, "midna local signing", in the login keychain. `app.ts` signs with it, so TCC grants survive every update.
+- **macOS signing:** a stable self-signed identity, "midna dev", in the login keychain, made the way ruri makes "ruri dev". `app.ts` signs with it, with the bundle id fixed at `sh.midna.desktop`, so TCC grants survive every update.
 
 ## What exists today (and matters here)
 
@@ -242,18 +242,21 @@ identifier "sh.midna.desktop" and certificate root = H"<sha1 of our cert>"
 
 Every build signed with the same certificate satisfies it, so grants survive updates and reinstalls into `~/Applications`. A self-signed certificate is enough for this; it doesn't need Apple's chain.
 
-**Create the identity once per Mac:** `bun run signing` in `clients/desktop` (`scripts/signing.ts`). It does nothing if the identity exists. Otherwise it:
-- makes a 10-year self-signed code-signing certificate with `/usr/bin/openssl req -x509` (CN "midna local signing", `extendedKeyUsage=codeSigning`);
-- packs it as PKCS#12 (`-legacy` only where OpenSSL 3 needs it);
-- imports it into the login keychain with `security import … -T /usr/bin/codesign`.
+**Create the identity once per Mac:** `bun run signing` in `clients/desktop` (`scripts/signing.ts`), the same recipe as ruri's `make identity` for "ruri dev":
+- a 10-year self-signed certificate from Apple's `/usr/bin/openssl req -x509` (CN "midna dev", `basicConstraints=CA:false`, `keyUsage=digitalSignature`, `extendedKeyUsage=codeSigning`), exported to PKCS#12;
+- `security import … -T /usr/bin/codesign -T /usr/bin/security` into the login keychain;
+- `security add-trusted-cert -r trustRoot -p codeSign` on the user keychain, so `security find-identity -v` lists it as valid, as it does "ruri dev" (macOS asks for Justin's password once; no sudo, no Apple account);
+- then `security set-key-partition-list -S apple-tool:,apple: -s -t private -l "midna dev" ~/Library/Keychains/login.keychain-db` (his login password, once).
+
+An identity already in the keychain is kept; run in a terminal, the script does whichever of the last two steps is still missing, and otherwise prints what to run.
 
 What building it showed:
-- **Trust isn't needed.** The certificate stays untrusted (no `add-trusted-cert`, so no password for that). `security find-identity -v` leaves it out as "not valid", but codesign signs with it all the same, and TCC matches the certificate, not its trust. `hasSigningIdentity()` therefore lists identities without `-v`.
-- **`-T /usr/bin/codesign` isn't enough on current macOS.** The key's partition list holds only `apple-tool:`, and codesign is an `apple:` binary, so every build stops at a keychain dialog. One command fixes it for good, and needs the login password once: `security set-key-partition-list -S apple-tool:,apple: -s -t private -l "midna local signing" ~/Library/Keychains/login.keychain-db`. In a terminal, `bun run signing` runs it; otherwise it prints it. `signingReady()` reads the key's partition list from `security dump-keychain -a` and is true only once `apple:` is there.
+- **The partition list is the step that matters.** After the import it holds only `apple-tool:`, and codesign is an `apple:` binary, so codesign stops at a keychain dialog on every build until `apple:` is added. `signingReady()` reads the key's partition list from `security dump-keychain -a` (on current macOS a `don't-require-password` line sits between `partition_id` and its description) and is true only once `apple:` is there. Trust makes the identity valid, like "ruri dev", but codesign and TCC don't need it: TCC matches the certificate, not its trust.
 - **Never run codesign with the identity before that:** the dialog appears on Justin's screen, mid-build.
 - **The key:** never commit it. Back it up with `security export -t identities -f pkcs12`. If it's lost, a new identity means granting each permission once more.
+- The first identity, "midna local signing" (untrusted, made before midna's decision), was deleted on 2026-10-20; no build was ever signed with it.
 
-**How `app.ts` signs.** After `tauri build` (and before `--no-install` exits), it signs the bundle inside out, if `signingReady()`:
+**How `app.ts` signs.** After `tauri build` (and before `--no-install` exits), it signs the bundle inside out, if `signingReady()`, and only a bundle whose id is `sh.midna.desktop` (a test build under another id is refused):
 - the bundled `midna` CLI (`Contents/MacOS/midna`), with `entitlements/sidecar.plist`: `com.apple.security.cs.allow-jit` only. Bun's JIT needs it under the hardened runtime, and nothing else does;
 - then the app, with `entitlements/app.plist`: `com.apple.security.automation.apple-events`, which the hardened runtime needs before the app may send Apple Events;
 - both with `--options runtime`, then `codesign --verify --strict`.

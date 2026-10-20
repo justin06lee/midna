@@ -4,7 +4,7 @@
  * where there is dpkg, an .rpm where there is rpm, an AppImage anywhere else
  * (Arch, say). `--no-install` stops after building.
  *
- * On macOS the app is signed with this Mac's "midna local signing" identity
+ * On macOS the app is signed with this Mac's "midna dev" identity
  * (scripts/signing.ts), so the permissions it's granted survive the update;
  * without it the build is ad hoc, and loses them.
  */
@@ -12,6 +12,9 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, write
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SIGNING_IDENTITY, signingReady } from "./signing.ts";
+
+/** tauri.conf.json's identifier, which every signed build keeps. */
+const BUNDLE_ID = "sh.midna.desktop";
 
 const here = join(import.meta.dir, "..");
 const bundleDir = join(here, "src-tauri", "target", "release", "bundle");
@@ -38,6 +41,9 @@ function sign(app: string): void {
     console.warn(`\n⚠ ad-hoc build: "${SIGNING_IDENTITY}" isn't ready on this Mac (bun run signing), so the permissions midna.app has been granted won't survive this update.\n`);
     return;
   }
+  // The grants are filed under the bundle id and the certificate: the id never changes.
+  const id = Bun.spawnSync(["/usr/bin/defaults", "read", join(app, "Contents", "Info.plist"), "CFBundleIdentifier"]).stdout.toString().trim();
+  if (id !== BUNDLE_ID) throw new Error(`${app} is ${id || "unidentified"}, not ${BUNDLE_ID}: only midna.app itself is signed with "${SIGNING_IDENTITY}"`);
   const entitlements = (name: string) => join(here, "src-tauri", "entitlements", `${name}.plist`);
   const codesign = (target: string, ent: string) =>
     run(["codesign", "--force", "--options", "runtime", "--entitlements", entitlements(ent), "--sign", SIGNING_IDENTITY, target]);
