@@ -540,7 +540,7 @@ const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}
     );
     tool(
       "device_shell",
-      "Run a shell command on one of the user's computers, as the user, in their login shell (zsh -lc on a Mac), in their home unless cwd says otherwise. Returns the exit code and the output; long output comes whole as a file.",
+      "Run a shell command on one of the user's computers, as the user, in their login shell (zsh -lc on a Mac), in their home unless cwd says otherwise. Returns the exit code and the output; long output comes whole as a file. If even simple commands time out, a macOS permission prompt is probably waiting on that machine (the login shell's profile touching another drive, say): ask the user to answer it, or to give the midna app Full Disk Access.",
       {
         device,
         command: z.string().min(1).max(100_000),
