@@ -307,7 +307,7 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
       );
     const paired = await client.pair({ code, deviceName: opts.deviceName ?? `${hostname().replace(/\.local$/, "")} (desktop)`, kind: "desktop" });
     step("pair", "done");
-    emit({ type: "done", connection: { url, token: paired.token, name: paired.name, host: device.name, ssh: device.self ? null : (device.sshTarget ?? device.address), device: paired.deviceId } });
+    emit({ type: "done", connection: { url, token: paired.token, name: paired.name, host: device.name, ssh: device.self ? null : (device.sshTarget ?? device.address), device: paired.deviceId, ...(paired.daemonKey ? { daemonKey: paired.daemonKey } : {}) } });
     return true;
   } catch (err) {
     if (err instanceof StepFailed) {
