@@ -3,6 +3,7 @@ import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt }
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
+import type { HandsHandle } from "./hands.ts";
 import { INTRODUCTION, eventsTask, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
@@ -15,6 +16,8 @@ export interface AssistantOptions {
   concurrency?: number;
   /** Messages this close together make one interrupt; tests make it short. */
   coalesceMs?: number;
+  /** The user's computers that offer their hands, for the prompt to name. */
+  hands?: HandsHandle;
 }
 
 /** How long to wait before retrying work the brain couldn't do, and how often to say so. */
@@ -349,7 +352,7 @@ export class Assistant {
       try {
         const result = await this.brain({
           prompt: e.prompt,
-          systemPrompt: systemPrompt(settings, opts.env, renderContext(store)),
+          systemPrompt: systemPrompt(settings, opts.env, renderContext(store), opts.hands?.devices()),
           model: settings.model,
           resume: e.resume,
           cwd: opts.env.workspace,

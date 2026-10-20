@@ -6,6 +6,9 @@ import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
 import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
 import {
+  HandsHello,
+  HandsResult,
+  HandsStateUpdate,
   MAX_ATTACHMENT_BYTES,
   MAX_EVENT_DATA_BYTES,
   PairRequest,
@@ -15,10 +18,12 @@ import {
   SERVICE,
   type BridgeInfo,
   type BridgeSetupResult,
+  type HandsStreamEvent,
   type Health,
   type StreamEvent,
   type Status,
 } from "@midna/protocol";
+import type { HandsHub } from "./hands.ts";
 import { VERSION } from "./version.ts";
 
 export interface ServerDeps {
@@ -32,6 +37,8 @@ export interface ServerDeps {
   /** Connect a bridge by name; throws with a message the user can act on. */
   setupBridge: (name: string, input: Record<string, string>) => Promise<BridgeSetupResult>;
   onSettingsChanged: (changed: SettingsPatch) => void;
+  /** The user's computers that offer midna their hands. */
+  hands: HandsHub;
 }
 
 type Env = { Variables: { device: Device } };
@@ -89,7 +96,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const paired = store.devices.pair(req.data.code, req.data.deviceName, req.data.kind);
     if (!paired) return c.json({ error: "that pairing code is wrong or expired" }, 403);
     console.log(`[midna] paired ${req.data.kind} "${req.data.deviceName}" (${paired.device.id})`);
-    return c.json({ deviceId: paired.device.id, token: paired.token, name: store.settings().name });
+    return c.json({ deviceId: paired.device.id, token: paired.token, name: store.settings().name, daemonKey: deps.hands.publicKey });
   });
 
   // ── midna's own tools, for its brain sessions only ───────────────────
@@ -98,7 +105,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, signal: c.req.raw.signal });
   });
 
   // ── everything else needs a paired device ────────────────────────────
@@ -124,6 +131,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       outboxSeq: store.outbox.head(),
       host: { name: hostname(), platform: `${platform()} ${arch()}` },
       brain: assistant.brainHealth,
+      hands: s.hands,
     };
   };
 
@@ -154,8 +162,10 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.get("/v1/devices", (c) => c.json(store.devices.list()));
   app.delete("/v1/devices/:id", (c) => {
     store.devices.revoke(c.req.param("id"));
+    deps.hands.disconnect(c.req.param("id"));
     return c.json({ ok: true });
   });
+  app.get("/v1/devices/:id/commands", (c) => c.json(store.hands.commands(c.req.param("id"), Math.min(500, Number(c.req.query("limit") ?? 200) || 200))));
 
   app.get("/v1/brains", (c) => c.json(installedBrains()));
   app.post("/v1/brains/check", async (c) => c.json(await assistant.checkBrain()));
@@ -251,6 +261,85 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     });
   });
+
+  // ── device hands: the desktop app on the user's computers, as midna's hands ──
+  // Only the app offers them; commands go out solely from midna's tools, never from a /v1 route.
+  const handsDevice = (c: Context<Env>) => (c.get("device").kind === "desktop" ? null : c.json({ error: "only the midna desktop app offers its hands" }, 403));
+
+  app.post("/v1/hands/hello", async (c) => {
+    const refused = handsDevice(c);
+    if (refused) return refused;
+    const hello = HandsHello.safeParse(await c.req.json().catch(() => null));
+    if (!hello.success) return c.json({ error: hello.error.message }, 400);
+    const welcome = deps.hands.hello(c.get("device").id, hello.data);
+    if ("error" in welcome) return c.json(welcome, 400);
+    const { os, app: a } = hello.data;
+    console.log(`[midna] hands: ${c.get("device").name} said hello (${os.family} ${os.version}, app ${a.version})`);
+    return c.json(welcome);
+  });
+
+  app.get("/v1/hands/stream", (c) => {
+    const refused = handsDevice(c);
+    if (refused) return refused;
+    const queue: HandsStreamEvent[] = [];
+    let wake: (() => void) | null = null;
+    let closing = false;
+    const detach = deps.hands.attach(c.get("device").id, c.req.query("session") ?? "", {
+      send: (e) => {
+        queue.push(e);
+        wake?.();
+      },
+      close: () => {
+        closing = true;
+        wake?.();
+      },
+    });
+    if (!detach) return c.json({ error: "that session is over — say hello again" }, 409);
+    return streamSSE(c, async (stream) => {
+      stream.onAbort(() => wake?.());
+      try {
+        // Headers go out with the first bytes: say something at once, so the device knows it's connected.
+        await stream.write(": connected\n\n");
+        while (!stream.aborted) {
+          const e = queue.shift();
+          if (e) {
+            await stream.writeSSE({ data: JSON.stringify(e) });
+            continue;
+          }
+          if (closing) break;
+          await Promise.race([new Promise<void>((r) => (wake = r)), stream.sleep(25_000)]);
+          wake = null;
+          if (!queue.length && !closing && !stream.aborted) await stream.write(": keepalive\n\n");
+        }
+      } finally {
+        detach();
+      }
+    });
+  });
+
+  app.post("/v1/hands/state", async (c) => {
+    const refused = handsDevice(c);
+    if (refused) return refused;
+    const update = HandsStateUpdate.safeParse(await c.req.json().catch(() => null));
+    if (!update.success) return c.json({ error: update.error.message }, 400);
+    if (!deps.hands.state(c.get("device").id, update.data)) return c.json({ error: "that session is over — say hello again" }, 409);
+    return c.json({ ok: true });
+  });
+
+  app.post("/v1/hands/results/:id", async (c) => {
+    const refused = handsDevice(c);
+    if (refused) return refused;
+    const result = HandsResult.safeParse(await c.req.json().catch(() => null));
+    if (!result.success) return c.json({ error: result.error.message }, 400);
+    if (result.data.id !== c.req.param("id")) return c.json({ error: "the result's id isn't the one in its path" }, 400);
+    const r = deps.hands.result(c.get("device").id, result.data);
+    if (r === "unknown") return c.json({ error: "no such command" }, 404);
+    if (r === "other") return c.json({ error: "that command was sent to another device" }, 403);
+    if (r === "done") return c.json({ error: "that command is already over: answered, timed out or cancelled" }, 409);
+    return c.json({ ok: true });
+  });
+
+  app.get("/v1/hands/devices", (c) => c.json(deps.hands.devices()));
 
   app.get("/v1/outbox", (c) => c.json(store.outbox.since(Number(c.req.query("since") ?? 0))));
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
 import { MAX_ATTACHMENTS_PER_MESSAGE } from "@midna/protocol";
 import { attach, liftLocalImages, type FileRef } from "./attachments.ts";
+import type { HandsHandle, HandsRequest } from "./hands.ts";
 
 /**
  * midna's own tools, served over MCP so every harness gets the same set.
@@ -16,15 +17,19 @@ export interface ToolContext {
   /** Chat replies reach the user anyway; on a wakeup only message_user does. */
   episodeKind: "chat" | "wakeup";
   conversationId: string;
+  /** The user's computers that offer their hands; without it, there are no device tools. */
+  hands?: HandsHandle;
+  /** Aborted when the brain gives up on the call (its turn was interrupted): a device command in flight is cancelled. */
+  signal?: AbortSignal;
 }
 
 const when = z.string().describe('Local time "2026-10-02 09:30", a date "2026-10-02", ISO with offset, or relative "+2h" / "+3d"');
 const maybeWhen = when.nullable().optional();
 const id = z.number().int().positive();
 const fileRef = z.union([
-  z.string().describe("An absolute path on this machine, or an http(s) URL to download"),
+  z.string().describe("An absolute path on this machine, an http(s) URL to download, or an attachment id (att_…) such as a device screenshot's"),
   z.object({
-    file: z.string().describe("An absolute path on this machine, or an http(s) URL to download"),
+    file: z.string().describe("An absolute path on this machine, an http(s) URL to download, or an attachment id (att_…)"),
     name: z.string().optional().describe('The name it arrives under, e.g. "Q4 report.pdf" (default: its own)'),
     caption: z.string().optional().describe("A line shown with this one file"),
     as: z.enum(["image", "file"]).optional().describe('"file" sends an image as a file — full quality, not shown inline. Other types always go as files.'),
@@ -37,7 +42,14 @@ const files = z
     "Files to send, of any type — images, PDFs, zips, spreadsheets, logs, audio, video, anything up to 100 MB — in the order the user should see them. Each is a path or URL, or {file, name, caption, as} to choose how it arrives.",
   );
 
-type Result = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
+type Block = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+type Result = { content: Block[]; isError?: boolean };
+/** A tool's answer that is more than words: an image for the model to see, say. */
+class Blocks {
+  constructor(readonly content: Block[]) {}
+}
+/** Images a model can look at. */
+const VIEWABLE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 export function createToolServer(ctx: ToolContext): McpServer {
   const { store } = ctx;
@@ -54,6 +66,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
       store.log.action(ctx.episodeId, name, args);
       try {
         const out = await run(args);
+        if (out instanceof Blocks) return { content: out.content };
         return { content: [{ type: "text", text: typeof out === "string" ? out : JSON.stringify(out, null, 1) }] };
       } catch (err) {
         return { content: [{ type: "text", text: `error: ${(err as Error).message}` }], isError: true };
@@ -389,6 +402,87 @@ const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}
       return `attached ${kept.map((f) => `${f.name} (${f.kind === "image" ? "image" : f.mime}, ${sizeOf(f.size)})`).join(", ")} — they go with your reply, in this order`;
     },
   );
+
+  // ── the user's computers ─────────────────────────────────────────────
+  // The daemon decides whether each command may run (pause, state, permissions, the device's
+  // toggles, ask mode), whatever the harness lets through.
+  const hands = ctx.hands;
+  if (hands) {
+    const device = z.string().optional().describe("The device's name or id, from device_list. Leave it out when only one online device can do this.");
+    const run = async (req: Pick<HandsRequest, "device" | "op" | "args">) => {
+      const r = await hands.run({ ...req, episodeId: ctx.episodeId, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+      if (!r.ok) throw new Error(r.message);
+      return r;
+    };
+
+    tool(
+      "device_list",
+      'The user\'s computers that offer you their hands, through the midna app on each: online or not (and when last seen), state (ready, paused, locked, display_asleep), displays, and what each lets you do. Under `can`, each capability is "on" (runs; in ask mode, only looking runs without a yes) or "ask" (needs the user\'s yes each time), with any permission it still needs; anything not listed is off, and only the user can turn it on. Look here first.',
+      {},
+      () => {
+        const list = hands.devices();
+        if (!list.length) return "No device offers its hands yet. They come from the midna app on the user's computers, once hands are turned on there.";
+        return list.map((d) => ({
+          name: d.name,
+          id: d.id,
+          online: d.online,
+          ...(d.online ? {} : { last_seen: t(d.lastSeenAt) }),
+          state: d.state,
+          os: d.os ? `${d.os.family} ${d.os.version} (${d.os.arch})` : null,
+          displays: d.displays.map((x) => `${x.id}: ${x.name}, ${x.width}×${x.height}${x.primary ? ", main" : ""}`),
+          can: Object.fromEntries(
+            d.capabilities.filter((c) => c.policy !== "off").map((c) => [c.capability, c.missing.length ? `${c.policy}, needs ${c.missing.join(", ")}` : c.policy]),
+          ),
+        }));
+      },
+    );
+    tool(
+      "device_screenshot",
+      "See a screen of one of the user's computers: you get the image, its size in pixels and where the pointer is. It is scaled so the long edge is at most 1568 px, unless full is true. To show it to the user, pass its attachment id to attach or message_user.",
+      {
+        device,
+        display: z.string().optional().describe("A display id from device_list; the main display when left out"),
+        full: z.boolean().optional().describe("Native resolution, for small text"),
+        wake: z.boolean().optional().describe("Wake a sleeping display to take it"),
+      },
+      async (a) => {
+        const r = await run({ device: a.device, op: "screenshot", args: { display: a.display, full: a.full, wake: a.wake } });
+        const png = r.attachments.find((x) => VIEWABLE.has(x.mime));
+        const file = png && store.attachments.read(png.id);
+        if (!png || !file) throw new Error(`${r.device.name} took the screenshot but sent no image`);
+        const d = (r.data ?? {}) as { width?: number; height?: number; display?: string; cursor?: { x: number; y: number } | null };
+        const where = d.cursor ? `, pointer at ${d.cursor.x},${d.cursor.y}` : "";
+        const text = `${r.device.name}, display ${d.display ?? "?"}: ${d.width ?? "?"}×${d.height ?? "?"} px${where}. Attachment ${png.id} (${sizeOf(png.size)}).`;
+        return new Blocks([
+          { type: "image", data: Buffer.from(file.data).toString("base64"), mimeType: png.mime },
+          { type: "text", text },
+        ]);
+      },
+    );
+    tool(
+      "device_open",
+      "Open a web page, an app, or a file in its default app, on one of the user's computers. Give exactly one of url, app or path.",
+      {
+        device,
+        url: z.string().optional(),
+        app: z.string().optional().describe('An app\'s name ("Safari") or bundle id'),
+        path: z.string().optional().describe("A file or folder on that computer"),
+      },
+      async (a) => {
+        const r = await run({ device: a.device, op: "open", args: { url: a.url, app: a.app, path: a.path } });
+        return `opened ${a.url ?? a.app ?? a.path} on ${r.device.name}`;
+      },
+    );
+    tool(
+      "device_notify",
+      "Show a system notification on one of the user's computers, to get their attention at that machine. To tell them something, message_user reaches them everywhere; this is for that computer.",
+      { device, title: z.string().min(1).max(200), body: z.string().max(2000) },
+      async (a) => {
+        const r = await run({ device: a.device, op: "notify", args: { title: a.title, body: a.body } });
+        return `notified on ${r.device.name}`;
+      },
+    );
+  }
 
   return server;
 }

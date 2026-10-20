@@ -307,6 +307,33 @@ const MIGRATIONS: string[] = [
   CREATE INDEX inbound_events_subject ON inbound_events(source, subject);
   CREATE INDEX inbound_events_wakeup ON inbound_events(wakeup_id);
   `,
+  // Device hands: the last hello of each device that offers its hands (state
+  // updates folded in), and every command midna had one do — how it was
+  // decided, and how it ended. Approvals come with fork 1.
+  `
+  CREATE TABLE hands_devices (
+    device_id TEXT PRIMARY KEY REFERENCES devices(id),
+    hello TEXT NOT NULL,
+    last_seen_at INTEGER NOT NULL
+  );
+  CREATE TABLE device_commands (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    episode_id INTEGER REFERENCES episodes(id),
+    op TEXT NOT NULL,
+    args TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('allowed','approved','denied','refused')),
+    decided_by TEXT,
+    reason TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    outcome TEXT CHECK (outcome IN ('ok','error','timeout','cancelled','disconnected')),
+    summary TEXT,
+    error_code TEXT,
+    attachments TEXT
+  );
+  CREATE INDEX device_commands_device ON device_commands(device_id, started_at);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

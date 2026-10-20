@@ -12,10 +12,12 @@ import { MAX_ATTACHMENT_BYTES, type Attachment } from "@midna/protocol";
  * workspace.
  */
 
-/** A file to send: a path or URL, or one with the name, caption and form the brain wants it to have. */
+/** A file to send: a path, URL or attachment id, or one with the name, caption and form the brain wants it to have. */
 export type FileRef = string | { file: string; name?: string; caption?: string; as?: "image" | "file" };
 
 const isUrl = (ref: string) => /^https?:\/\//i.test(ref);
+/** A file already kept in midna, such as a device's screenshot. */
+const ATTACHMENT_ID = /^att_[\w-]+$/;
 
 /** A path on this machine, from "/abs", "~/rel" or "file:///abs"; null for anything else. */
 function localPath(ref: string): string | null {
@@ -25,10 +27,11 @@ function localPath(ref: string): string | null {
   return isAbsolute(r) ? r : null;
 }
 
-/** Keep a file on this machine, or download a URL, as an attachment. */
+/** Keep a file on this machine, or download a URL, as an attachment; an attachment's id sends that one on. */
 export async function attach(store: Store, ref: FileRef, opts: { episodeId?: number } = {}): Promise<Attachment> {
   const { file, ...how } = typeof ref === "string" ? { file: ref } : ref;
   const options: AttachOptions = { ...opts, ...how };
+  if (ATTACHMENT_ID.test(file.trim())) return store.attachments.copy(file.trim(), options);
   if (isUrl(file)) {
     const { data, name, mime } = await download(file);
     return store.attachments.add({ data, mime, source: file, ...options, name: how.name || name });

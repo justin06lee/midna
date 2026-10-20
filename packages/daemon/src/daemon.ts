@@ -6,6 +6,7 @@ import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { ensureHome, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
+import { HandsHub, type Approver } from "./hands.ts";
 import { createApp } from "./server.ts";
 import { VERSION } from "./version.ts";
 
@@ -24,6 +25,9 @@ export interface DaemonOptions {
   introDelayMs?: number;
   /** How close together the user's messages make one interrupt; tests make it short. */
   coalesceMs?: number;
+  /** Device hands: who approves what needs a yes (until fork 1, nobody), and how long past its timeout a result may come; tests set both. */
+  approver?: Approver;
+  handsGraceMs?: number;
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
   /**
@@ -43,6 +47,7 @@ export interface RunningDaemon {
   url: string;
   store: Store;
   assistant: Assistant;
+  hands: HandsHub;
   stop(): Promise<void>;
 }
 
@@ -72,8 +77,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const host = opts.host ?? config.host;
   const base = `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
 
+  const hands = new HandsHub({
+    store,
+    keyFile: p.handsKey,
+    ...(opts.approver ? { approver: opts.approver } : {}),
+    ...(opts.handsGraceMs !== undefined ? { graceMs: opts.handsGraceMs } : {}),
+  });
+
   const assistant = new Assistant({
     store,
+    hands,
     env: { hostName: hostname(), platform: `${platform()} ${release()}`, workspace: p.workspace, home: homedir() },
     mcp: { url: (episode) => `${base}/mcp/${episode}`, token: mcpToken },
     ...(opts.brain ? { brain: opts.brain } : {}),
@@ -84,6 +97,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const app = createApp({
     store,
     assistant,
+    hands,
     mcpToken,
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
     bridges: () => {
@@ -103,6 +117,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     },
     onSettingsChanged: (changed) => {
       if (changed.timezone) store.schedule.retime(changed.timezone);
+      if (changed.hands === "paused") hands.pauseAll();
     },
   });
 
@@ -171,11 +186,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     url: base,
     store,
     assistant,
+    hands,
     async stop() {
       clearInterval(timer);
       clearInterval(bindTimer);
       for (const s of extra.values()) s.stop(true);
       bridges.stopAll();
+      hands.shutdown();
       await assistant.shutdown();
       server.stop(true);
       store.close();

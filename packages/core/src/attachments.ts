@@ -261,6 +261,32 @@ export class Attachments {
     return this.add({ data: new Uint8Array(readFileSync(path)), source: path, ...opts, name: opts.name || basename(path) });
   }
 
+  /**
+   * A new loose attachment with another one's bytes, going the way the
+   * sender says now: how midna passes on a file already kept here, such as
+   * a device's screenshot. Being new, it lines up with the other files of
+   * its episode in the order they were attached.
+   */
+  copy(id: string, opts: AttachOptions = {}, now = Date.now()): Attachment {
+    const src = this.db.query(`SELECT ${COLUMNS} FROM attachments WHERE id = $id`).get({ id }) as Row | null;
+    if (!src) throw new Error(`no attachment ${id}`);
+    const row = this.db
+      .query(
+        `INSERT INTO attachments (id, name, mime, size, data, source, episode_id, caption, kind, created_at)
+         SELECT $new, $name, mime, size, data, source, $episode, $caption, $kind, $now FROM attachments WHERE id = $id RETURNING ${COLUMNS}`,
+      )
+      .get({
+        id,
+        new: "att_" + randomBytes(12).toString("base64url"),
+        name: opts.name ? cleanName(opts.name, src.mime, src.mime !== "application/octet-stream") : src.name,
+        episode: opts.episodeId ?? null,
+        caption: opts.caption !== undefined ? opts.caption?.trim() || null : src.caption,
+        kind: opts.as === "file" ? "file" : opts.as === "image" ? null : src.kind,
+        now,
+      }) as Row;
+    return toAttachment(row);
+  }
+
   get(id: string): Attachment | null {
     const r = this.db.query(`SELECT ${COLUMNS} FROM attachments WHERE id = $id`).get({ id }) as Row | null;
     return r ? toAttachment(r) : null;

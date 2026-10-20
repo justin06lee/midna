@@ -4,6 +4,7 @@ import { Attachments } from "./attachments.ts";
 import { Bus } from "./bus.ts";
 import { openDatabase } from "./db.ts";
 import { Devices } from "./devices.ts";
+import { Hands } from "./hands.ts";
 import { Inbound } from "./inbound.ts";
 import { Log, MAIN } from "./log.ts";
 import { Memory } from "./memory.ts";
@@ -22,6 +23,8 @@ export interface Settings {
   quietHours: { start: string; end: string } | null;
   /** Local times of the daily rituals, as cron expressions. */
   rituals: { morning: string | null; evening: string | null; weekly: string | null };
+  /** "paused" stops every device's hands at once, whatever each app says. */
+  hands: "on" | "paused";
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },
+  hands: "on",
 };
 
 /** Everything midna knows, in one SQLite file. */
@@ -44,6 +48,7 @@ export class Store {
   readonly devices: Devices;
   readonly attachments: Attachments;
   readonly inbound: Inbound;
+  readonly hands: Hands;
 
   constructor(readonly db: Database) {
     this.planning = new Planning(db);
@@ -54,6 +59,7 @@ export class Store {
     this.outbox = new Outbox(db, this.bus, this.attachments);
     this.devices = new Devices(db);
     this.inbound = new Inbound(db, this.schedule);
+    this.hands = new Hands(db);
   }
 
   static open(path: string): Store {

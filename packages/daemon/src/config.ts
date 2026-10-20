@@ -40,6 +40,8 @@ export function paths(home = midnaHome()) {
     db: join(home, "midna.db"),
     config: join(home, "config.json"),
     hostToken: join(home, "host.token"),
+    /** The Ed25519 key device hands' commands are signed with. */
+    handsKey: join(home, "hands.key"),
     workspace: join(home, "workspace"),
     logs: join(home, "logs"),
   };

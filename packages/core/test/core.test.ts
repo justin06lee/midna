@@ -267,6 +267,62 @@ describe("attachments", () => {
     s.say({ kind: "message", text: "", attachments: s.attachments.staged(episode) }, { client: "chat", seenByBrain: true });
     expect(s.attachments.staged(episode)).toEqual([]);
   });
+
+  test("one already kept goes on as a copy, named and captioned anew, in the order it was attached", () => {
+    const s = fresh();
+    const shot = s.attachments.add({ data: PNG, name: "screenshot-1.png", source: "upload from MacBook Air" });
+    const episode = s.log.startEpisode({ kind: "chat", conversationId: "main", model: "test" });
+    const first = s.attachments.add({ data: PNG, name: "chart.png", episodeId: episode });
+    const copy = s.attachments.copy(shot.id, { episodeId: episode, name: "desk", caption: " your desktop " });
+    expect(copy).toMatchObject({ kind: "image", name: "desk.png", mime: "image/png", caption: "your desktop" });
+    expect(copy.id).not.toBe(shot.id);
+    expect(s.attachments.read(copy.id)!.data).toEqual(PNG);
+    // Made after chart.png, so it follows it, though the screenshot itself is older.
+    expect(s.attachments.staged(episode)).toEqual([first.id, copy.id]);
+    // Once sent, the original can still go again, as a file this time.
+    s.say({ kind: "message", text: "", attachments: [shot.id] }, { client: "chat", seenByBrain: true });
+    expect(s.attachments.copy(shot.id, { as: "file" })).toMatchObject({ kind: "file", name: "screenshot-1.png" });
+    expect(() => s.attachments.copy("att_nope")).toThrow(/no attachment/);
+  });
+});
+
+describe("device hands", () => {
+  const hello = {
+    protocol: 1 as const,
+    app: { version: "0.8.0" },
+    os: { family: "macos" as const, version: "26.0", arch: "arm64", hostname: "air" },
+    displays: [{ id: "1", name: "Built-in", primary: true, x: 0, y: 0, width: 1470, height: 956, scale: 2 }],
+    offers: { screen: "on" as const },
+    permissions: { screen_recording: "not_asked" as const },
+    state: "ready" as const,
+    nonce: "a-fresh-nonce-0001",
+  };
+
+  test("a device's last hello is kept without its nonce, with changes folded in, until it is unpaired", () => {
+    const s = fresh();
+    const { device } = s.devices.create("MacBook Air", "desktop", 1000);
+    s.hands.saveHello(device.id, hello, 2000);
+    expect(s.hands.get(device.id)).toMatchObject({ name: "MacBook Air", lastSeenAt: 2000, hello: { state: "ready", offers: { screen: "on" } } });
+    expect(s.hands.get(device.id)!.hello).not.toHaveProperty("nonce");
+    s.hands.update(device.id, { state: "locked", permissions: { screen_recording: "granted" }, offers: { screen: "on", open: "on" } }, 3000);
+    expect(s.hands.get(device.id)).toMatchObject({ lastSeenAt: 3000, hello: { state: "locked", permissions: { screen_recording: "granted" }, offers: { open: "on" } } });
+    s.devices.revoke(device.id);
+    expect(s.hands.list()).toEqual([]);
+  });
+
+  test("every command is in the audit log: decided, then ended once, newest first", () => {
+    const s = fresh();
+    const { device } = s.devices.create("MacBook Air", "desktop");
+    s.hands.saveHello(device.id, hello);
+    s.hands.record({ id: "cmd_1", deviceId: device.id, episodeId: null, op: "screenshot", args: {}, decision: "allowed", decidedBy: "policy" }, 1000);
+    s.hands.record({ id: "cmd_2", deviceId: device.id, episodeId: null, op: "open", args: { url: "https://x" }, decision: "refused", reason: "MacBook Air is offline" }, 2000);
+    expect(s.hands.finish("cmd_1", { outcome: "ok", summary: "x".repeat(10_000), attachments: ["att_a"] }, 1500)).toBe(true);
+    expect(s.hands.finish("cmd_1", { outcome: "timeout" }, 1600)).toBe(false);
+    const [refused, done] = s.hands.commands(device.id);
+    expect(refused).toMatchObject({ id: "cmd_2", decision: "refused", reason: "MacBook Air is offline", endedAt: 2000, outcome: null, args: { url: "https://x" } });
+    expect(done).toMatchObject({ id: "cmd_1", decision: "allowed", decidedBy: "policy", outcome: "ok", endedAt: 1500, attachments: ["att_a"] });
+    expect(done!.summary!.length).toBe(4096);
+  });
 });
 
 describe("inbound events", () => {

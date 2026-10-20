@@ -58,6 +58,11 @@ export class BrainError extends Error {
 const ASK_MODE_SAFE = new Set(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite", "LS", "NotebookRead"]);
 const ASK_MODE_DENIAL =
   "midna is in ask mode: this action needs the user's approval. Describe exactly what you want to do with ask_user, and do it in a later turn once they approve.";
+/**
+ * How long Claude Code waits on one MCP tool call: a device command can wait for the user's yes
+ * (2 min) and then run for up to its cap (a shell command, 10 min).
+ */
+const MCP_TOOL_TIMEOUT = 15 * 60_000;
 /** How long an interrupted harness may take to wind down before its process is closed. */
 const INTERRUPT_GRACE = 10_000;
 /** After a background-task notice's empty turn, how long to wait for the prompt's own turn to start. */
@@ -105,6 +110,8 @@ export const yagamiBrain: Brain = async (run) => {
 
 async function runClaude(run: BrainRun, model: string | undefined): Promise<BrainResult> {
   if (run.signal?.aborted) throw new BrainError("claude turn interrupted before it started");
+  // midna's own tools pass in ask mode: they touch midna's state, or — the device_* tools —
+  // are gated by the daemon itself, which knows each device's toggles and what counts as acting.
   const askPolicy: PermissionHandler = async (req) =>
     ASK_MODE_SAFE.has(req.toolName) || req.toolName.startsWith("mcp__midna__")
       ? { behavior: "allow" }
@@ -120,6 +127,7 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
       ...(run.resume ? { resume: run.resume } : {}),
       // alwaysLoad: midna's tools are its core abilities — never defer them behind tool search.
       mcpServers: { midna: { type: "http", url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, alwaysLoad: true } as never },
+      env: { MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT) },
       ...(run.mode === "autonomous" ? { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true } : {}),
     },
   });
@@ -189,6 +197,7 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
   const permissions: SessionPermissionHandler = {
     decide: async (req) => {
       if (run.mode === "autonomous") return "allow";
+      // As for Claude: the daemon gates midna's device tools itself.
       if (req.server === "midna" || req.kind === "read" || req.kind === "search" || req.kind === "fetch") return "allow";
       return "deny";
     },
