@@ -19,6 +19,8 @@ export interface DaemonOptions {
   tickMs?: number;
   /** How soon a brand-new midna introduces itself. */
   introDelayMs?: number;
+  /** How close together the user's messages make one interrupt; tests make it short. */
+  coalesceMs?: number;
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
   /**
@@ -72,6 +74,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     env: { hostName: hostname(), platform: `${platform()} ${release()}`, workspace: p.workspace, home: homedir() },
     mcp: { url: (episode) => `${base}/mcp/${episode}`, token: mcpToken },
     ...(opts.brain ? { brain: opts.brain } : {}),
+    ...(opts.coalesceMs !== undefined ? { coalesceMs: opts.coalesceMs } : {}),
   });
 
   const bridges = new Bridges({ MIDNA_URL: base });
@@ -127,6 +130,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   assistant.ensureIntroduced(opts.introDelayMs);
   const revived = assistant.reviveBrainFailures();
   if (revived) console.log(`  revived   ${revived} wakeup(s) that failed for want of a brain`);
+  if (assistant.answerLeftovers()) console.log(`  answering what the user wrote before the restart`);
   // Know at once whether midna can think, rather than at the first thing it tries.
   if (opts.checkBrainOnStart ?? !opts.brain) void assistant.checkBrain().then((h) => {
     if (h.ok === false) console.error(`[midna] the brain can't be reached: ${h.message}`);

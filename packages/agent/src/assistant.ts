@@ -13,6 +13,8 @@ export interface AssistantOptions {
   brain?: Brain;
   /** How many model sessions may run at once (subscriptions have rate limits). */
   concurrency?: number;
+  /** Messages this close together make one interrupt; tests make it short. */
+  coalesceMs?: number;
 }
 
 /** How long to wait before retrying work the brain couldn't do, and how often to say so. */
@@ -24,6 +26,34 @@ const SESSION_TURNS = 40;
 const HISTORY_ON_FRESH = 20;
 /** When a chat turn ends without a word to the user even after asking again, a follow-up answers it this soon. */
 const NO_REPLY_FOLLOWUP = 60_000;
+/** Messages this close together are one interrupt: the turn after it waits until the user has paused this long. */
+const COALESCE = 3_000;
+/** A wakeup set aside for the user's message carries on this soon after. */
+const WAKEUP_RESUME = 60_000;
+/** After a restart, what the user wrote this recently and never got a reply to is answered. */
+const LEFTOVER_WINDOW = 6 * HOUR;
+
+/** "/queue …" waits for the turn in progress instead of interrupting it. */
+export const QUEUE_PREFIX = /^\/queue(?:@\w+)?(?:\s+|$)/i;
+
+/** A model session in flight, and what it is doing, so the user's next message can interrupt it. */
+interface Turn {
+  abort: AbortController;
+  startedAt: number;
+  /** Whether the brain got going at all, rather than waiting for a slot. */
+  ran: boolean;
+  /** The tool call it is in the middle of, in a few words. */
+  doing: string | null;
+  tools: number;
+  /** For a wakeup: why it runs. */
+  reason?: string;
+}
+
+/** What a conversation's next turn hears about work that was cut short for it. */
+type Interruption =
+  | { by: "user"; ms: number; doing: string | null; tools: number; /** its session was kept, to carry on in */ kept: boolean }
+  | { by: "wakeup"; reason: string; doing: string | null }
+  | { by: "restart" };
 
 /**
  * A reply that says nothing: empty, or what a model writes when it took the
@@ -47,6 +77,16 @@ export class Assistant {
   private slots: number;
   private readonly waiting: Array<() => void> = [];
   private readonly aborts = new Set<AbortController>();
+  /** The chat turn running in each conversation, and the wakeups running, for the user's next message to interrupt. */
+  private readonly turns = new Map<string, Turn>();
+  private readonly wakeups = new Map<number, Turn>();
+  /** What each conversation's next turn should hear about work cut short for it. */
+  private readonly interruptions = new Map<string, Interruption[]>();
+  /** Wakeups set aside for the user, with the session that holds how far they got. */
+  private readonly paused = new Map<number, { session?: string; doing: string | null }>();
+  private readonly lastUserAt = new Map<string, number>();
+  private readonly coalesce: number;
+  private stopping = false;
   /** Can midna think right now, as of the last thing that tried? */
   private health: BrainHealth = { ok: null, checkedAt: null };
   /** Wakeups put off because the brain couldn't be reached; they run as soon as it can. */
@@ -56,6 +96,7 @@ export class Assistant {
     this.store = opts.store;
     this.brain = opts.brain ?? yagamiBrain;
     this.slots = opts.concurrency ?? 2;
+    this.coalesce = opts.coalesceMs ?? COALESCE;
   }
 
   get busy(): boolean {
@@ -64,17 +105,38 @@ export class Assistant {
 
   /**
    * A message from the user, from any client, with the ids of anything they
-   * uploaded to go with it. Answered as soon as the conversation is free.
+   * uploaded to go with it. It interrupts whatever midna is doing — the turn
+   * in progress in its conversation, and any wakeup — to be answered at
+   * once; one that starts with /queue waits for the turn in progress.
    */
   receive(m: { text: string; client: string; conversationId?: string; replyTo?: number; attachments?: string[] }): string {
     const conv = m.conversationId ?? MAIN;
+    const queued = QUEUE_PREFIX.test(m.text);
+    const text = queued ? m.text.replace(QUEUE_PREFIX, "") : m.text;
     const question = m.replyTo ? this.store.outbox.get(m.replyTo) : null;
     if (question) this.store.outbox.answered(question.id);
-    const msg = this.store.log.addMessage({ conversationId: conv, role: "user", text: m.text, client: m.client, seen: false, ...(question ? { replyTo: question.id } : {}) });
+    const msg = this.store.log.addMessage({ conversationId: conv, role: "user", text, client: m.client, seen: false, ...(question ? { replyTo: question.id } : {}) });
     const attachments = m.attachments?.length ? this.store.attachments.link(m.attachments, { messageId: msg.id }) : [];
-    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text: m.text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments });
+    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments });
+    this.lastUserAt.set(conv, Date.now());
+    if (!queued) this.interrupt(conv);
     this.kick(conv);
     return conv;
+  }
+
+  /**
+   * The user wrote: stop what midna is doing so their message is answered
+   * now. Only the user interrupts — a wakeup or notification never cuts a
+   * chat turn short.
+   */
+  private interrupt(conv: string): void {
+    this.turns.get(conv)?.abort.abort();
+    for (const w of this.wakeups.values()) {
+      if (w.abort.signal.aborted) continue;
+      w.abort.abort();
+      // Said now: the turn that answers the user starts before the wakeup has wound down.
+      if (w.ran) this.note(conv, { by: "wakeup", reason: w.reason!, doing: w.doing });
+    }
   }
 
   /** Run the conversation until nothing is left unread; messages arriving mid-turn are batched into the next. */
@@ -84,12 +146,30 @@ export class Assistant {
       return;
     }
     const loop = (async () => {
+      let r: "interrupted" | void;
       do {
         this.again.delete(conv);
-        await this.chatTurn(conv).catch((err) => console.error(`[midna] chat turn failed:`, err));
-      } while (this.again.has(conv));
+        r = await this.chatTurn(conv).catch((err) => console.error(`[midna] chat turn failed:`, err));
+        // The message that interrupted it may be the first of a few: answer them together.
+        if (r === "interrupted") await this.lull(conv);
+      } while (this.again.has(conv) && !this.stopping);
+      // An interrupted turn leaves "thinking" up for the turn after it; with none to come, take it down.
+      if (r === "interrupted") this.store.bus.emit({ type: "status", conversationId: conv, state: "idle" });
     })().finally(() => this.running.delete(conv));
     this.running.set(conv, loop);
+  }
+
+  /** Wait until the user has paused for a moment. */
+  private async lull(conv: string): Promise<void> {
+    for (let wait: number; !this.stopping && (wait = (this.lastUserAt.get(conv) ?? 0) + this.coalesce - Date.now()) > 0; ) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+
+  /** Something the conversation's next turn should hear; a newer note of the same kind replaces the older. */
+  private note(conv: string, n: Interruption): void {
+    const same = (o: Interruption) => o.by === n.by && (n.by !== "wakeup" || (o as typeof n).reason === n.reason);
+    this.interruptions.set(conv, [...(this.interruptions.get(conv) ?? []).filter((o) => !same(o)), n]);
   }
 
   /** Wait for every running conversation to settle (tests, shutdown). */
@@ -111,15 +191,15 @@ export class Assistant {
 
   /**
    * Answer what the user wrote. Their messages count as handled only once
-   * the turn is over and they got an answer: one that comes in mid-turn
-   * waits for a turn of its own, and a turn that fails leaves them waiting
-   * for the next. A turn that ends without a word to the user — Claude Code
-   * can put a background-task notification in front of their message, and
-   * the model answers that instead — is asked again, once, plainly; if that
-   * still says nothing, the user hears their message arrived and a
+   * the turn is over and they got an answer: a turn that fails, or that
+   * their next message interrupts, leaves them for the next turn, which
+   * answers them all. A turn that ends without a word to the user — Claude
+   * Code can put a background-task notification in front of their message,
+   * and the model answers that instead — is asked again, once, plainly; if
+   * that still says nothing, the user hears their message arrived and a
    * follow-up answers it.
    */
-  private async chatTurn(conv: string): Promise<void> {
+  private async chatTurn(conv: string): Promise<"interrupted" | void> {
     const { store } = this;
     const unseen = store.log.unseen(conv);
     const asked = unseen.filter((m) => m.role === "user");
@@ -129,34 +209,44 @@ export class Assistant {
     const convo = store.log.conversation(conv);
     const previous = store.log.recent(conv, 1, unseen[0]!.id)[0];
     const now = Date.now();
+    const notes = this.interruptions.get(conv) ?? [];
+    // A turn the user cut short a moment ago carries on in its own session, whose transcript holds what it did.
+    const carryOn = notes.some((n) => n.by === "user" && n.kept);
     const stale =
       !convo.brain_session ||
       convo.brain_model !== settings.model ||
-      convo.brain_turns >= SESSION_TURNS ||
-      !previous ||
-      now - previous.created_at > SESSION_IDLE;
+      (!carryOn && (convo.brain_turns >= SESSION_TURNS || !previous || now - previous.created_at > SESSION_IDLE));
 
+    const turn: Turn = { abort: new AbortController(), startedAt: now, ran: false, doing: null, tools: 0 };
+    this.turns.set(conv, turn);
+    let interrupted = false;
+    let fresh = stale;
+    let turns = fresh ? 0 : convo.brain_turns;
+    const keep = (session: string | null | undefined) => {
+      store.log.setBrain(conv, { model: settings.model, session: session ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
+    };
     store.bus.emit({ type: "status", conversationId: conv, state: "thinking" });
     try {
       const run = async (fresh: boolean) => {
         const history = fresh ? store.log.recent(conv, HISTORY_ON_FRESH, unseen[0]!.id) : [];
         const sent = store.attachments.forMessages([...history, ...unseen].filter((m) => m.role === "user").map((m) => m.id));
         const files = (m: Message) => (sent.get(m.id) ?? []).map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) }));
-        return this.episode({ kind: "chat", conversationId: conv, prompt: turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files), resume: fresh ? undefined : convo.brain_session! });
+        const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, notes.map((n) => interruptionNote(n, !fresh)));
+        return this.episode({ kind: "chat", conversationId: conv, prompt, resume: fresh ? undefined : convo.brain_session!, turn });
       };
-      let fresh = stale;
       let result: Awaited<ReturnType<typeof run>>;
       try {
         result = await run(fresh);
       } catch (err) {
-        if (fresh) throw err;
+        if (fresh || turn.abort.signal.aborted) throw err;
         // The saved session may be gone (harness updated, cache cleared): start over with history.
         console.error(`[midna] resuming ${conv} failed, starting fresh:`, (err as Error).message);
         fresh = true;
+        turns = 0;
         result = await run(true);
       }
-      let turns = fresh ? 1 : convo.brain_turns + 1;
-      store.log.setBrain(conv, { model: settings.model, session: result.sessionId ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
+      turns++;
+      keep(result.sessionId);
       // What the brain attached during the turn, and any Markdown image of a file on this machine, go with the reply.
       const replyOf = (r: typeof result) => ({ ...liftLocalImages(store, r.text.trim(), { episodeId: r.episodeId }), attachments: store.attachments.staged(r.episodeId), episodeId: r.episodeId });
       // A question or message sent with ask_user/message_user during the turn answers the user too.
@@ -165,9 +255,9 @@ export class Assistant {
       if (!answered(reply)) {
         console.error(`[midna] chat turn in ${conv} ended without a reply to the user (${JSON.stringify(result.text.trim().slice(0, 80))}); asking again`);
         const session = result.sessionId ?? convo.brain_session ?? undefined;
-        const again = await this.episode({ kind: "chat", conversationId: conv, prompt: askAgainPrompt(asked, settings.timezone), resume: session });
+        const again = await this.episode({ kind: "chat", conversationId: conv, prompt: askAgainPrompt(asked, settings.timezone), resume: session, turn });
         turns++;
-        store.log.setBrain(conv, { model: settings.model, session: again.sessionId ?? session ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
+        keep(again.sessionId ?? session);
         reply = replyOf(again);
       }
       if (answered(reply)) {
@@ -179,7 +269,21 @@ export class Assistant {
         store.schedule.add({ dueAt: Date.now() + NO_REPLY_FOLLOWUP, reason: `Answer the user: their chat message got no reply from you (only "Got your message — I'm on it"). They wrote:\n${quoted}`, kind: "followup", createdBy: "system", tz: settings.timezone });
       }
       store.log.markSeen(unseen.map((m) => m.id));
+      this.heard(conv, notes);
     } catch (err) {
+      if (turn.abort.signal.aborted) {
+        // Cut short by the user's next message, or by midna stopping: nothing to report, and the
+        // messages wait for the next turn. Its session holds what the turn did; keep it.
+        const session = (err as BrainError).sessionId;
+        if (session) {
+          turns++;
+          keep(session);
+        }
+        if (turn.ran && !this.stopping) this.note(conv, { by: "user", ms: Date.now() - turn.startedAt, doing: turn.doing, tools: turn.tools, kept: !!session || !fresh });
+        console.log(`[midna] chat turn in ${conv} interrupted${this.stopping ? " (stopping)" : " by a new message"}${turn.doing ? ` during ${turn.doing}` : ""}`);
+        interrupted = true;
+        return "interrupted";
+      }
       const p = brainProblem(err);
       const why =
         p?.reason === "signed_out"
@@ -190,18 +294,30 @@ export class Assistant {
               ? err.message
               : String(err);
       store.say({ kind: "message", conversationId: conv, text: `I couldn't finish that — ${why}` }, { client: "error", seenByBrain: false });
+      this.heard(conv, notes);
     } finally {
-      store.bus.emit({ type: "status", conversationId: conv, state: "idle" });
+      this.turns.delete(conv);
+      if (!interrupted) store.bus.emit({ type: "status", conversationId: conv, state: "idle" });
     }
   }
 
+  /** The notes a finished turn was given are spent; any that came in since stay for the next. */
+  private heard(conv: string, notes: Interruption[]): void {
+    const left = (this.interruptions.get(conv) ?? []).filter((n) => !notes.includes(n));
+    if (left.length) this.interruptions.set(conv, left);
+    else this.interruptions.delete(conv);
+  }
+
   /** One model session, start to finish, recorded as an episode. */
-  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; resume?: string }) {
+  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; resume?: string; turn?: Turn }) {
     const { store, opts } = this;
     return this.slot(async () => {
+      const abort = e.turn?.abort ?? new AbortController();
+      // Interrupted while it waited for a slot: it never starts.
+      if (abort.signal.aborted) throw new BrainError("interrupted before it started");
+      if (e.turn) e.turn.ran = true;
       const settings = store.settings();
       const episodeId = store.log.startEpisode({ kind: e.kind, conversationId: e.conversationId, wakeupId: e.wakeupId, model: settings.model });
-      const abort = new AbortController();
       this.aborts.add(abort);
       try {
         const result = await this.brain({
@@ -213,13 +329,20 @@ export class Assistant {
           mcp: { url: opts.mcp.url(episodeId), token: opts.mcp.token },
           mode: settings.mode,
           signal: abort.signal,
-          onActivity: (tool) => store.bus.emit({ type: "activity", conversationId: e.conversationId ?? null, tool }),
+          onActivity: (tool, detail) => {
+            if (e.turn) {
+              e.turn.doing = detail ? `${tool} (${detail})` : tool;
+              e.turn.tools++;
+            }
+            store.bus.emit({ type: "activity", conversationId: e.conversationId ?? null, tool });
+          },
         });
         store.log.endEpisode(episodeId, { session: result.sessionId, costUsd: result.costUsd });
         this.healthy();
         return { ...result, episodeId };
       } catch (err) {
-        store.log.endEpisode(episodeId, { session: (err as BrainError).sessionId, error: String((err as Error).message ?? err) });
+        const why = !abort.signal.aborted ? String((err as Error).message ?? err) : this.stopping ? "interrupted: midna stopped" : "interrupted by a message from the user";
+        store.log.endEpisode(episodeId, { session: (err as BrainError).sessionId, error: why });
         throw err;
       } finally {
         this.aborts.delete(abort);
@@ -229,11 +352,15 @@ export class Assistant {
 
   /**
    * Do what a due wakeup calls for. A wakeup that failed only because the
-   * brain can't be reached is retried later rather than lost.
+   * brain can't be reached is retried later rather than lost; one the user's
+   * message interrupted carries on soon after, in its own session.
    */
   async wakeup(w: Wakeup): Promise<"done" | "failed" | { retryAt: number }> {
     const { store } = this;
     const tz = store.settings().timezone;
+    const turn: Turn = { abort: new AbortController(), startedAt: Date.now(), ran: false, doing: null, tools: 0, reason: w.reason };
+    const paused = this.paused.get(w.id);
+    this.paused.delete(w.id);
     try {
       if (w.kind === "reminder") {
         // A reminder the user set for a time is meant to buzz at that time.
@@ -244,16 +371,34 @@ export class Assistant {
         this.maintenance(w.reason);
         return "done";
       }
-      const result = await this.episode({ kind: "wakeup", wakeupId: w.id, prompt: wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz)) });
+      this.wakeups.set(w.id, turn);
+      const run = (resume?: string) =>
+        this.episode({ kind: "wakeup", wakeupId: w.id, prompt: wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), paused ? { doing: paused.doing, transcript: !!resume } : undefined), resume, turn });
+      let result: Awaited<ReturnType<typeof run>>;
+      try {
+        result = await run(paused?.session);
+      } catch (err) {
+        if (!paused?.session || turn.abort.signal.aborted) throw err;
+        result = await run(); // its session is gone: start it over
+      }
       if (result.text) console.log(`[midna] wakeup #${w.id} (${w.reason.slice(0, 60)}): ${result.text.slice(0, 200)}`);
       return "done";
     } catch (err) {
+      if (turn.abort.signal.aborted) {
+        // Set aside for the user (or for midna stopping): it picks up from where it got to.
+        const session = (err as BrainError).sessionId ?? paused?.session;
+        this.paused.set(w.id, { ...(session ? { session } : {}), doing: turn.doing ?? paused?.doing ?? null });
+        console.log(`[midna] wakeup #${w.id} set aside${this.stopping ? " (stopping)" : " for the user's message"}`);
+        return { retryAt: Date.now() + (this.stopping ? 0 : WAKEUP_RESUME) };
+      }
       console.error(`[midna] wakeup #${w.id} failed:`, (err as Error).message);
       if (this.brainTrouble(err)) {
         this.blocked.add(w.id);
         return { retryAt: Date.now() + BRAIN_RETRY };
       }
       return "failed";
+    } finally {
+      this.wakeups.delete(w.id);
     }
   }
 
@@ -362,23 +507,63 @@ export class Assistant {
     });
   }
 
-  /** Stop every running model session. */
+  /**
+   * After a restart, answer what the user wrote that never got its reply —
+   * a turn the restart cut short (midna updating itself, say), or one that
+   * failed — if it is recent, and only once, so a turn that brings midna
+   * down can't do it again and again.
+   */
+  answerLeftovers(): boolean {
+    const { store } = this;
+    const left = store.log.unseen(MAIN).filter((m) => m.role === "user" && m.created_at > Date.now() - LEFTOVER_WINDOW);
+    const last = left.at(-1)?.id;
+    if (!last || last <= (store.state<number>("leftoversAnswered") ?? 0)) return false;
+    store.setState("leftoversAnswered", last);
+    this.note(MAIN, { by: "restart" });
+    this.kick(MAIN);
+    return true;
+  }
+
+  /** Stop every running model session; what they were answering waits for the next start. */
   async shutdown(): Promise<void> {
+    this.stopping = true;
     for (const a of this.aborts) a.abort();
-    await Promise.race([this.idle(), new Promise((r) => setTimeout(r, 5_000))]);
+    for (const t of [...this.turns.values(), ...this.wakeups.values()]) t.abort.abort();
+    const settled = (async () => {
+      await this.idle();
+      while (this.wakeups.size) await new Promise((r) => setTimeout(r, 20));
+    })();
+    await Promise.race([settled, new Promise((r) => setTimeout(r, 5_000))]);
   }
 }
 
-/**
- * What the brain reads for a turn: a timestamp, anything midna said on its
- * own since the last turn (so a reply to a notification makes sense), and
- * the user's new message(s). A fresh session also gets recent history.
- */
 /** The second ask, when a turn carrying the user's message ended without a word to them. */
 function askAgainPrompt(asked: Message[], tz: string): string {
   return `[midna] Your last turn ended without a reply to the user — perhaps a system or background-task notification arrived with their message and you answered that instead. The user is waiting. Reply to them now:\n${asked.map((m) => `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] User: ${m.text}`).join("\n")}`;
 }
 
+/** What a turn hears about work that was cut short for its messages; `resumed` says the session that did it carries on. */
+function interruptionNote(n: Interruption, resumed: boolean): string {
+  if (n.by === "restart") {
+    return `[midna] midna restarted before you had replied to this — an update or a crash may have cut your last turn short. If you were in the middle of something for it, check how far it got before doing it again.`;
+  }
+  if (n.by === "wakeup") {
+    return `[midna] To answer this, your own wakeup "${n.reason.slice(0, 200)}" was set aside${n.doing ? ` while you were in the middle of ${n.doing}` : ""}; it carries on by itself in a minute.`;
+  }
+  const done = !n.tools
+    ? "It hadn't used any tools yet."
+    : resumed
+      ? "What its tools already did is done, and it's in your transcript above."
+      : "What its tools already did is done, but that session is gone: check the state of things before redoing any of it.";
+  return `[midna] You were interrupted: the user wrote again while your previous turn was still working, ${Math.max(1, Math.round(n.ms / 1000))} s in, ${n.doing ? `in the middle of ${n.doing}` : "before it called a tool"}. ${done} Nothing it was going to say reached the user, and files you attached in it were not sent. Background jobs it started were stopped — a "stopped" task notification is that, not news. Go by what the user wrote last: carry on, change course or drop what you were doing, and reply to them.`;
+}
+
+/**
+ * What the brain reads for a turn: a timestamp, the user's new message(s),
+ * what happened to work cut short for them, anything midna said on its own
+ * since the last turn (so a reply to a notification makes sense). A fresh
+ * session also gets recent history.
+ */
 const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
 function turnPrompt(
@@ -388,6 +573,7 @@ function turnPrompt(
   now: number,
   questionText: (id: number) => string | undefined,
   files: (m: Message) => Array<Attachment & { path: string | null }>,
+  notes: string[] = [],
 ): string {
   const line = (m: Message) => {
     const q = m.reply_to ? questionText(m.reply_to) : undefined;
@@ -403,7 +589,7 @@ function turnPrompt(
   // The user's words come first, marked as theirs: Claude Code may put a background-task
   // notification ("NOT USER INPUT") in front of this prompt, and it must not swallow them.
   const user = unseen.filter((m) => m.role === "user");
-  const parts = [`[midna] A message from the user — real user input, and it needs a reply. Anything before this marked as a system or background-task notification is separate: deal with it if it matters, then answer the user.\nNow ${fmt(now, tz)}. The user wrote:\n${user.map(line).join("\n")}`];
+  const parts = [`[midna] A message from the user — real user input, and it needs a reply. Anything before this marked as a system or background-task notification is separate: deal with it if it matters, then answer the user.\nNow ${fmt(now, tz)}. The user wrote:\n${user.map(line).join("\n")}`, ...notes];
   const own = unseen.filter((m) => m.role === "midna");
   if (own.length) parts.push(`For context — since the last exchange you sent, on your own:\n${own.map(line).join("\n")}`);
   if (history.length) parts.push(`Earlier in this conversation (for continuity; already handled):\n${history.map(line).join("\n")}`);

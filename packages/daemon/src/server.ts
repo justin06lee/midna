@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
+import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
 import {
   MAX_ATTACHMENT_BYTES,
   PairRequest,
@@ -188,6 +188,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.post("/v1/messages", async (c) => {
     const msg = SendMessage.safeParse(await c.req.json().catch(() => null));
     if (!msg.success) return c.json({ error: msg.error.message }, 400);
+    if (!msg.data.text.replace(QUEUE_PREFIX, "").trim() && !msg.data.attachments?.length) return c.json({ error: "a message needs text or an attachment" }, 400);
     const unknown = msg.data.attachments?.find((id) => !store.attachments.get(id));
     if (unknown) return c.json({ error: `no attachment ${unknown} — upload it first` }, 400);
     const conversationId = assistant.receive({
