@@ -254,7 +254,7 @@ fn expand(path: &str) -> Result<PathBuf, Refusal> {
 /// Why a file operation failed, in words; a refusal from macOS's privacy rules names Full Disk Access.
 fn io_refusal(path: &Path, e: std::io::Error) -> Refusal {
     match e.kind() {
-        std::io::ErrorKind::PermissionDenied => Refusal { permission: Some("full_disk_access"), ..Refusal::new("permission", format!("macOS didn't let midna.app at {}: {e}", path.display())) },
+        std::io::ErrorKind::PermissionDenied => Refusal { permission: Some("full_disk_access"), ..Refusal::new("permission", format!("macOS didn't let midna.app into {}: {e}", path.display())) },
         std::io::ErrorKind::NotFound => failed(format!("{} doesn't exist", path.display())),
         _ => failed(format!("{}: {e}", path.display())),
     }
