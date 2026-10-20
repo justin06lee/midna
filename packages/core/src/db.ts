@@ -334,6 +334,31 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX device_commands_device ON device_commands(device_id, started_at);
   `,
+  // Device hands' approvals: what waited for the user's yes, who answered
+  // and where — the first answer wins. "Allow for 10 min" is an answer
+  // too: while it is fresh, that device and capability need no yes.
+  `
+  CREATE TABLE approvals (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    capability TEXT NOT NULL,
+    op TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    command_id TEXT NOT NULL,
+    episode_id INTEGER REFERENCES episodes(id),
+    outbox_id INTEGER REFERENCES outbox(id),
+    requested_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','allowed','denied','expired','cancelled')),
+    answer TEXT CHECK (answer IN ('allow','allow_10_min','deny')),
+    answered_by TEXT,
+    answered_via TEXT,
+    answered_at INTEGER
+  );
+  CREATE INDEX approvals_grant ON approvals(device_id, capability, answer, answered_at);
+  CREATE INDEX approvals_outbox ON approvals(outbox_id);
+  ALTER TABLE device_commands ADD COLUMN approval_id TEXT;
+  `,
 ];
 
 export function openDatabase(path: string): Database {
