@@ -39,6 +39,8 @@ export interface Connection {
   host: string;
   ssh: string | null;
   device: string;
+  /** The daemon's Ed25519 public key from pairing (PairResponse.daemonKey), for device hands to pin. Absent before 0.8. */
+  daemonKey?: string;
 }
 
 export type InstallEvent =
