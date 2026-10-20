@@ -140,6 +140,13 @@ export const PairRequest = z.object({
   code: z.string().min(1),
   deviceName: z.string().min(1),
   kind: z.enum(["desktop", "cli", "bridge", "mobile"]),
+  /**
+   * The token this client held before, when it pairs again (a re-install, a
+   * rollout re-pairing the CLI): its device is retired once the new one is
+   * paired. A wrong or revoked token is ignored. From 0.10; older daemons
+   * ignore it.
+   */
+  replaces: z.string().min(1).optional(),
 });
 export type PairRequest = z.infer<typeof PairRequest>;
 export interface PairResponse {
@@ -148,6 +155,8 @@ export interface PairResponse {
   name: string;
   /** The daemon's Ed25519 public key (base64url, 32 bytes), for a desktop to pin for device hands. From 0.8. */
   daemonKey?: string;
+  /** The device retired because the request's `replaces` token was its. From 0.10. */
+  replaced?: string;
 }
 
 export interface DeviceInfo { id: string; name: string; kind: string; created_at: number; last_seen_at: number | null }

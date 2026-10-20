@@ -209,6 +209,21 @@ describe("midnad", () => {
     expect((await client.devices()).map((d) => d.name)).toContain("laptop");
   });
 
+  test("a client pairing again names its old token, and that pairing is retired", async () => {
+    const first = await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "tablet", kind: "desktop" });
+    const again = await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "tablet", kind: "desktop", replaces: first.token });
+    expect(again.replaced).toBe(first.deviceId);
+    await expect(new MidnaClient(daemon.url, first.token).status()).rejects.toMatchObject({ status: 401 });
+    expect((await new MidnaClient(daemon.url, again.token).status()).version).toBeString();
+    const ids = (await client.devices()).map((d) => d.id);
+    expect(ids).toContain(again.deviceId);
+    expect(ids).not.toContain(first.deviceId);
+    // A token this daemon doesn't know (a reflashed host) doesn't stop the pairing.
+    const fresh = await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "tablet", kind: "desktop", replaces: "mdn_from_another_host" });
+    expect(fresh.replaced).toBeUndefined();
+    expect((await client.devices()).map((d) => d.id)).toContain(again.deviceId);
+  });
+
   test("history redraws the conversation: questions keep their options and know they were answered", async () => {
     const history = await client.history({ limit: 200 });
     const q = history.find((h) => h.outbox?.kind === "question")!;

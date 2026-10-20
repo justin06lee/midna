@@ -63,11 +63,23 @@ export class Devices {
     return { code, expiresAt };
   }
 
-  /** Spend a pairing code on a new device. Codes are single-use. */
-  pair(code: string, name: string, kind: string, now = Date.now()): { device: Device; token: string } | null {
+  /**
+   * Spend a pairing code on a new device. Codes are single-use. A client
+   * pairing again passes the token it held before (`replaces`), and that
+   * device is retired: re-installs and rollouts used to leave one stale
+   * pairing each. A wrong or revoked old token retires nothing and never
+   * stops the pairing.
+   */
+  pair(code: string, name: string, kind: string, now = Date.now(), replaces?: string): { device: Device; token: string; replaced?: string } | null {
     const normalized = code.toUpperCase().replace(/[^0-9A-Z]/g, "");
     const r = this.db.query("DELETE FROM pairing_codes WHERE code = $c AND expires_at >= $now").run({ c: normalized, now });
     if (r.changes === 0) return null;
-    return this.create(name, kind, now);
+    const old = replaces
+      ? (this.db.query("SELECT id FROM devices WHERE token_hash = $h AND revoked_at IS NULL").get({ h: hash(replaces) }) as { id: string } | null)
+      : null;
+    const paired = this.create(name, kind, now);
+    if (!old) return paired;
+    this.revoke(old.id, now);
+    return { ...paired, replaced: old.id };
   }
 }

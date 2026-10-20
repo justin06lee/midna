@@ -21,6 +21,7 @@ import {
   type BridgeSetupResult,
   type HandsStreamEvent,
   type Health,
+  type PairResponse,
   type StreamEvent,
   type Status,
 } from "@midna/protocol";
@@ -97,10 +98,11 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.post("/v1/pair", async (c) => {
     const req = PairRequest.safeParse(await c.req.json().catch(() => null));
     if (!req.success) return c.json({ error: "code, deviceName and kind are required" }, 400);
-    const paired = store.devices.pair(req.data.code, req.data.deviceName, req.data.kind);
+    const paired = store.devices.pair(req.data.code, req.data.deviceName, req.data.kind, Date.now(), req.data.replaces);
     if (!paired) return c.json({ error: "that pairing code is wrong or expired" }, 403);
-    console.log(`[midna] paired ${req.data.kind} "${req.data.deviceName}" (${paired.device.id})`);
-    return c.json({ deviceId: paired.device.id, token: paired.token, name: store.settings().name, daemonKey: deps.hands.publicKey });
+    if (paired.replaced) deps.hands.disconnect(paired.replaced);
+    console.log(`[midna] paired ${req.data.kind} "${req.data.deviceName}" (${paired.device.id})${paired.replaced ? `, retiring ${paired.replaced}` : ""}`);
+    return c.json<PairResponse>({ deviceId: paired.device.id, token: paired.token, name: store.settings().name, daemonKey: deps.hands.publicKey, replaced: paired.replaced });
   });
 
   // ── midna's own tools, for its brain sessions only ───────────────────

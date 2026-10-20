@@ -152,6 +152,24 @@ describe("schedule and outbox", () => {
     s.devices.revoke(paired!.device.id);
     expect(s.devices.authenticate(paired!.token)).toBeNull();
   });
+
+  test("pairing again with the old token retires the old device; a stale one retires nothing", () => {
+    const s = fresh();
+    const first = s.devices.pair(s.devices.pairingCode().code, "Mac (desktop)", "desktop")!;
+    const bridge = s.devices.create("Telegram bridge", "bridge");
+    const again = s.devices.pair(s.devices.pairingCode().code, "Mac (desktop)", "desktop", Date.now(), first.token)!;
+    expect(again.replaced).toBe(first.device.id);
+    expect(s.devices.authenticate(first.token)).toBeNull();
+    expect(s.devices.list().map((d) => d.id).sort()).toEqual([bridge.device.id, again.device.id].sort());
+    // The old token again (now revoked), or one that never existed: still pairs.
+    for (const stale of [first.token, "mdn_nothing"]) {
+      const p = s.devices.pair(s.devices.pairingCode().code, "Mac (desktop)", "desktop", Date.now(), stale)!;
+      expect(p.replaced).toBeUndefined();
+      expect(s.devices.authenticate(p.token)!.id).toBe(p.device.id);
+    }
+    expect(s.devices.authenticate(again.token)!.id).toBe(again.device.id);
+    expect(s.devices.authenticate(bridge.token)!.id).toBe(bridge.device.id);
+  });
 });
 
 describe("attachments", () => {
