@@ -1,6 +1,6 @@
 # Device hands: the desktop app as midna's hands
 
-*Design note, 2026-10-19. midna approved forks 3, 4 and 6 (section 11); forks 1, 2 and 5 are with Justin. Phase 0 and phase 1 are being built: the wire shapes are `packages/protocol/src/hands.ts`, the daemon's side `packages/daemon/src/hands.ts`, the app's side `clients/desktop/src-tauri/src/hands/`.*
+*Design note, 2026-10-19. midna decided forks 3, 4 and 6, and Justin forks 1, 2 and 5 on 2026-10-20 (section 11). Phases 0 to 3 are built: the wire shapes are `packages/protocol/src/hands.ts`, the daemon's side `packages/daemon/src/hands.ts`, the app's side `clients/desktop/src-tauri/src/hands/`.*
 
 midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch desktop, tenet) it needs eyes and hands there, with the OS permissions that takes. The desktop app is already installed, paired and running on those machines. This note makes it midna's hands: the app registers as a **device** that offers capabilities, the daemon exposes them to midna as MCP tools, and the app holds every OS permission, granted once.
 
@@ -13,7 +13,7 @@ midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch de
 - **Protocol:** typed commands and results. Every command is signed by the daemon's own key, pinned by the device. Each command runs at most once and is never queued for an offline device. Screenshots and big files travel as attachments, which already exist.
 - **Tools:** a fixed set of `device_*` MCP tools on midna's existing server. Each takes a device name.
 - **Ask mode and the per-capability policy are enforced in the daemon,** not by the harness. Today's harness policy lets every `mcp__midna__*` tool through, so it can't be relied on.
-- **Approvals block and wait** (proposed; fork 1 is with Justin). A gated action shows Allow/Deny in the app on that machine and as a question in chat and Telegram. The first answer wins, and no answer within 2 minutes means no.
+- **Approvals block and wait** (fork 1, Justin). A gated action shows Allow / Allow for 10 min / Deny in the app on that machine, in chat and on Telegram. The first answer wins, a Telegram yes may allow shell and input too, and no answer within 2 minutes means no.
 - **Justin's controls:**
   - each capability can be set Off, Ask or On, in the app;
   - Pause is in the window, the tray, behind a global shortcut, and in a daemon setting reachable from Telegram;
@@ -175,7 +175,7 @@ The first refusal is returned as text the brain can act on, e.g. "paused by Just
 
 **Per-capability toggles.**
 - Each capability is Off, Ask or On, set in the app on that machine. Only the device can turn on what it offers; midna can't.
-- Suggested defaults, a fork for midna: screen, notify and open On; input, script, files, clipboard and shell Ask.
+- Defaults (fork 2, Justin): every capability starts On. They live in `HANDS_POLICY.defaults`, which the app reads.
 - Each capability also lists the permissions it needs, and is reported unavailable until they're granted.
 
 **Ask mode and policy.** Operations are either *observe* (screenshot, file read/list, clipboard read) or *act* (everything else; `notify` counts as harmless).
@@ -186,12 +186,12 @@ The first refusal is returned as text the brain can act on, e.g. "paused by Just
 | Ask | approval each time | approval each time |
 | On | runs | observe runs; act needs approval |
 
-This matches today's ask-mode promise ("read anything, ask before acting"). Whether screenshots and clipboard reads should count as observe is a fork.
+This matches today's ask-mode promise ("read anything, ask before acting"). Justin settled it (fork 2): screenshots, file reads and lists, clipboard reads and notify run in ask mode; anything that changes state asks first.
 
 **Approvals.**
 - **What it is:** a pending approval names the device, the operation and a plain summary ("run `brew upgrade` on MacBook Air", "type 42 characters into Messages").
 - **Where it shows:**
-  - on that device, as a non-activating Allow / Allow for 10 min / Deny panel plus a notification with the same actions;
+  - on that device, as a non-activating Allow / Allow for 10 min / Deny panel at the top of the display, kept out of screenshots;
   - in every client, as a question: in chat, and as buttons in Telegram, so Justin can approve from his phone.
 - **How it resolves:**
   - the first answer wins, and every other prompt closes;
@@ -210,9 +210,8 @@ This matches today's ask-mode promise ("read anything, ask before acting"). Whet
 - **Justin takes over:** before each synthetic input event, the device compares the system's idle time (HIDIdleTime, readable without Input Monitoring) with its own last injection. Input it didn't inject means Justin is using the machine. The command stops with `user_active`, and input pauses for 30 s.
 
 **Files.**
-- Paths resolve through symlinks and must stay inside home.
-- Always refused: `~/.ssh`, `~/.gnupg`, `~/Library/Keychains`, and the app's own config (its token).
-- Whether to allow more of the disk than home is a fork.
+- Reach is whatever Full Disk Access allows, with no deny list (fork 5, Justin). Every read and write is in the audit log.
+- Paths are absolute or start with `~`. A refusal from macOS comes back as `permission`, naming Full Disk Access.
 
 **The audit log.**
 - **What's recorded:** the `tool()` wrapper already writes each call to `actions`. A new `device_commands` table (append-only migration) adds:
@@ -295,6 +294,7 @@ The app gets a new **"This computer"** screen next to Settings:
 
 - **Input Monitoring isn't needed:** posting events needs only Accessibility, and nothing reads keystrokes.
 - **Child processes run under the app's grants:** anything the app spawns (`osascript`, `screencapture`, the user's shell) is attributed to midna.app. Full Disk Access granted to the app therefore covers `sqlite3 ~/Library/Messages/chat.db` run through `device_shell`.
+- **The shell's profile counts too:** `device_shell` runs `zsh -lc`, which sources the profile under midna.app's grants. On this Mac `~/.zshenv` sources `~/.cargo/env`, which lives on the T7 drive. Without Full Disk Access, macOS holds that `open()` behind a "would like to access files on a removable volume" prompt, and every command times out until someone answers it. Once he chooses Don't Allow, commands run with an error line on stderr; with Full Disk Access granted, nothing prompts.
 - **Before building:** check the deep links on macOS 26, since anchors move between releases.
 - **Linux:** the same screen becomes a readiness list (section 8).
 
@@ -353,19 +353,19 @@ Each phase is its own release. Each is built and tested against a local throwawa
    - Toggles, both pauses, the indicator (tray, window, overlay), the locked and asleep states, and the audit table.
    - macOS only.
 2. **Hands.** Pointer and keyboard tools with screenshot-space coordinates and screenshot-after, stopping when Justin takes over, and approvals end to end (device panel, chat, Telegram).
-3. **Reach.** AppleScript and JXA with Automation status per app; clipboard; files under home; shell as the user, with process-group kill, output caps and long output as attachments.
+3. **Reach.** AppleScript and JXA with Automation status per app; clipboard; files wherever Full Disk Access reaches; shell as the user, with process-group kill, output caps and long output as attachments.
 4. **tenet.** The KDE Plasma Wayland backends (section 8): the ScreenCast and RemoteDesktop portals with restore tokens, the readiness screen, and the tray and overlay.
 
 ## 11. Forks
 
-midna decided forks 3, 4 and 6 on 2026-10-19; forks 1, 2 and 5 are with Justin. Phase 1 builds nothing that depends on them: it has no input, script, shell, files or clipboard, and whatever needs a yes is denied until approvals exist. `HANDS_POLICY` in `packages/protocol/src/hands.ts` is the one table his answers change.
+All six are decided: forks 3, 4 and 6 by midna on 2026-10-19, forks 1, 2 and 5 by Justin on 2026-10-20. `HANDS_POLICY` in `packages/protocol/src/hands.ts` is the one table fork 2 changed.
 
 
-1. **Approvals** (with Justin). Block and wait, approvable from the device, chat and Telegram, first answer wins (recommended). Or keep today's ask-mode pattern: deny, then ask, then retry on a later turn. Also: may remote approval (Telegram) approve shell and input on the Mac, or only someone at the machine?
-2. **Defaults and what counts as observing** (with Justin). Which capabilities start On / Ask / Off. Whether screenshots, file reads and clipboard reads run in ask mode as "reading", or need approval like acting.
+1. **Approvals. Decided: the tool call waits,** and the first answer wins: on the Mac, in chat or on Telegram. A Telegram yes may allow shell and input. The choices are Allow, Allow for 10 min and Deny; no answer within 2 minutes is no.
+2. **Defaults. Decided: every capability starts On.** In ask mode, screenshots, file reads and clipboard reads run freely; anything that changes state asks first.
 3. **Transport. Decided: SSE plus POST.** (The alternative was WebSocket: one duplex connection, but new server and client code.)
 4. **Tool shape. Decided: a fixed set of daemon-defined `device_*` tools,** for one audit and gating path and stable descriptions. (The alternative was devices advertising their own MCP tools, tunnelled through the daemon.)
-5. **File reach** (with Justin). Home only, minus the deny list (recommended), or anything Full Disk Access allows.
+5. **File reach. Decided: whatever Full Disk Access allows,** with no deny list, and the audit log kept.
 6. **Signing identity. Decided: a self-signed identity per Mac** (free; re-grant once if the key is lost). An Apple Developer ID stays possible later; switching costs one round of re-granting.
 
 tenet's display session, needed before phase 4, is settled: KDE Plasma 6 on Wayland (section 8).
