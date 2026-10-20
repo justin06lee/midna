@@ -5,7 +5,7 @@
 //! one before it and an id never seen. The shapes are packages/protocol's
 //! hands.ts; fixtures/hands.json keeps the two in step (the test below).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -77,12 +77,38 @@ pub fn verify(key: &str, signed: &str, sig: &str) -> Result<Command, String> {
 /// Why a session ended, and how long to wait before the next.
 struct Pause(u64);
 
+/// The ids of recent commands, kept across reconnects: an id runs at most once.
+#[derive(Default)]
+struct Seen {
+    ids: HashSet<String>,
+    order: VecDeque<String>,
+}
+
+impl Seen {
+    const KEEP: usize = 1000;
+
+    /// False when the id has run before.
+    fn insert(&mut self, id: &str) -> bool {
+        if !self.ids.insert(id.to_string()) {
+            return false;
+        }
+        self.order.push_back(id.to_string());
+        if self.order.len() > Self::KEEP {
+            if let Some(old) = self.order.pop_front() {
+                self.ids.remove(&old);
+            }
+        }
+        true
+    }
+}
+
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).build().expect("an HTTP client");
         let mut backoff = 1;
+        let mut seen = Seen::default();
         loop {
-            let ended = session(&app, &http).await;
+            let ended = session(&app, &http, &mut seen).await;
             // Offline now; a problem the session found stays shown until a session connects.
             let problem = app.state::<Shared>().lock().unwrap().problem.clone();
             set_connected(&app, false, problem);
@@ -146,7 +172,7 @@ fn nonce() -> String {
     B64.encode(b)
 }
 
-async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
+async fn session(app: &AppHandle, http: &reqwest::Client, seen: &mut Seen) -> Result<(), Pause> {
     let Some(conn) = connection(app) else { return Err(Pause(5)) };
     let auth = format!("Bearer {}", conn.token);
     let nonce = nonce();
@@ -193,7 +219,6 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
     let mut bytes = stream.bytes_stream();
     let mut buf = String::new();
     let mut last_seq = 0u64;
-    let mut seen: HashSet<String> = HashSet::new();
     // The commands still running, so a cancel can stop one.
     let mut running: HashMap<String, Arc<Notify>> = HashMap::new();
     let ended = 'read: loop {
@@ -213,7 +238,7 @@ async fn session(app: &AppHandle, http: &reqwest::Client) -> Result<(), Pause> {
                 Ok(StreamEvent::Command { signed, sig }) => match verify(&key, &signed, &sig) {
                     Ok(cmd) if cmd.nonce != nonce => eprintln!("hands: refused {}: signed for another connection", cmd.id),
                     Ok(cmd) if cmd.seq <= last_seq => eprintln!("hands: refused {}: seq {} isn't above {}", cmd.id, cmd.seq, last_seq),
-                    Ok(cmd) if !seen.insert(cmd.id.clone()) => eprintln!("hands: refused {}: already run", cmd.id),
+                    Ok(cmd) if !seen.insert(&cmd.id) => eprintln!("hands: refused {}: already run", cmd.id),
                     Ok(cmd) => {
                         last_seq = cmd.seq;
                         running.retain(|_, stop| Arc::strong_count(stop) > 1);
@@ -342,6 +367,18 @@ mod tests {
         assert_eq!(cmd.args["display"], "1");
         let bad = &f["events"]["tampered"];
         assert!(verify(key, bad["signed"].as_str().unwrap(), bad["sig"].as_str().unwrap()).is_err(), "a tampered command is refused");
+    }
+
+    #[test]
+    fn runs_an_id_once_and_forgets_the_oldest() {
+        let mut seen = Seen::default();
+        assert!(seen.insert("cmd_a"));
+        assert!(!seen.insert("cmd_a"), "an id seen before is refused");
+        for i in 0..Seen::KEEP {
+            seen.insert(&format!("cmd_{i}"));
+        }
+        assert!(seen.insert("cmd_a"), "past KEEP ids, the oldest is forgotten");
+        assert_eq!(seen.order.len(), Seen::KEEP);
     }
 
     #[test]
