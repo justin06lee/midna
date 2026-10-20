@@ -138,7 +138,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
 }
 
-export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder"; className?: string }) {
+export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause"; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     chat: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" />,
     today: (
@@ -162,6 +162,13 @@ export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | 
       </>
     ),
     send: <path d="M10 15.5v-11M5.5 9 10 4.5 14.5 9" />,
+    computer: (
+      <>
+        <rect x="3.5" y="4" width="13" height="9" rx="1.8" />
+        <path d="M7.5 16.5h5M10 13v3.5" />
+      </>
+    ),
+    pause: <path d="M7.5 5v10M12.5 5v10" />,
     back: <path d="M11.5 5 6.5 10l5 5" />,
     refresh: <path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9M15.5 4v3h-3" />,
     copy: (

@@ -3,10 +3,15 @@
  * `make app` does: the .app on macOS (into ~/Applications); on Linux a .deb
  * where there is dpkg, an .rpm where there is rpm, an AppImage anywhere else
  * (Arch, say). `--no-install` stops after building.
+ *
+ * On macOS the app is signed with this Mac's "midna local signing" identity
+ * (scripts/signing.ts), so the permissions it's granted survive the update;
+ * without it the build is ad hoc, and loses them.
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { SIGNING_IDENTITY, signingReady } from "./signing.ts";
 
 const here = join(import.meta.dir, "..");
 const bundleDir = join(here, "src-tauri", "target", "release", "bundle");
@@ -26,6 +31,23 @@ const built = (sub: string, ext: string) => {
   if (!f) throw new Error(`no ${ext} in ${dir}`);
   return join(dir, f);
 };
+
+/** Sign the bundle inside out — the bundled CLI, then the app — under the hardened runtime. */
+function sign(app: string): void {
+  if (!signingReady()) {
+    console.warn(`\n⚠ ad-hoc build: "${SIGNING_IDENTITY}" isn't ready on this Mac (bun run signing), so the permissions midna.app has been granted won't survive this update.\n`);
+    return;
+  }
+  const entitlements = (name: string) => join(here, "src-tauri", "entitlements", `${name}.plist`);
+  const codesign = (target: string, ent: string) =>
+    run(["codesign", "--force", "--options", "runtime", "--entitlements", entitlements(ent), "--sign", SIGNING_IDENTITY, target]);
+  codesign(join(app, "Contents", "MacOS", "midna"), "sidecar");
+  codesign(app, "app");
+  run(["codesign", "--verify", "--strict", app]);
+  console.log(`signed with "${SIGNING_IDENTITY}"`);
+}
+
+if (kind === "app") sign(built("macos", ".app"));
 
 if (process.argv.includes("--no-install")) process.exit(0);
 

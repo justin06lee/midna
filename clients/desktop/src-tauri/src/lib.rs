@@ -7,7 +7,9 @@
 //! left for Rust is what a web view can't do: run that binary, remember the
 //! connection, open a terminal for a sign-in, put the files midna sends where
 //! the user can use them, and keep a tray icon so midna can still reach you
-//! with the window closed.
+//! with the window closed. And be midna's hands on this computer (`hands`).
+
+mod hands;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -15,7 +17,6 @@ use std::process::Stdio;
 
 use tauri::image::Image;
 use tauri::ipc::{Channel, InvokeBody, Request, Response};
-use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
@@ -370,19 +371,55 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .invoke_handler(tauri::generate_handler![midna, connection_load, connection_save, connection_clear, open_terminal, save_download, show_in_folder, open_attachment, copied_files, read_copied])
+        .invoke_handler(tauri::generate_handler![
+            midna,
+            connection_load,
+            connection_save,
+            connection_clear,
+            open_terminal,
+            save_download,
+            show_in_folder,
+            open_attachment,
+            copied_files,
+            read_copied,
+            hands::hands_status,
+            hands::hands_set_offer,
+            hands::hands_set_paused,
+            hands::hands_defaults,
+            hands::permission_request,
+            hands::permission_open,
+            hands::relaunch
+        ])
         .setup(|app| {
-            let open = MenuItem::with_id(app, "open", "Open midna", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit midna", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
+            app.manage(hands::init(app.handle()));
+            app.manage(hands::conn::Poke(std::sync::Arc::new(tokio::sync::Notify::new())));
+            hands::conn::start(app.handle().clone());
+            // ⌃⌥⌘P pauses or resumes midna's hands from anywhere; a registered hotkey needs no Input Monitoring.
+            {
+                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                let pause = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER), Code::KeyP);
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |app, shortcut, e| {
+                            if *shortcut == pause && e.state() == ShortcutState::Pressed {
+                                hands::toggle_pause(app);
+                            }
+                        })
+                        .build(),
+                )?;
+                if let Err(e) = app.global_shortcut().register(pause) {
+                    eprintln!("couldn't take ⌃⌥⌘P for pausing midna's hands: {e}");
+                }
+            }
             TrayIconBuilder::with_id("midna")
                 .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
                 .icon_as_template(true)
                 .tooltip("midna")
-                .menu(&menu)
+                .menu(&hands::tray_menu(app.handle())?)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => show(app),
+                    "pause" => hands::toggle_pause(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

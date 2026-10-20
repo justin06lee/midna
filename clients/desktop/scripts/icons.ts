@@ -34,10 +34,17 @@ export const trayIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="44" heig
   ${helmet(50, 50, 1.08, "#000000")}
 </svg>`;
 
+// While midna is using this computer: the helmet, a touch smaller, with a dot at its corner.
+export const trayActiveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 100 100">
+  ${helmet(40, 47, 0.84, "#000000")}
+  <circle cx="86" cy="84" r="12" fill="#000000"/>
+</svg>`;
+
 const png = (svg: string, width: number) => new Resvg(svg, { fitTo: { mode: "width", value: width } }).render().asPng();
 writeFileSync(join(dir, "icon-source.svg"), appIcon);
 writeFileSync(join(dir, "icon-source.png"), png(appIcon, 1024));
 writeFileSync(join(dir, "tray.png"), png(trayIcon, 44));
+writeFileSync(join(dir, "tray-active.png"), png(trayActiveIcon, 44));
 // The project's own Tauri CLI — `bunx tauri` would fetch an unrelated npm package by that name.
 const r = Bun.spawnSync(["bun", "run", "tauri", "icon", join(dir, "icon-source.png"), "-o", dir], { cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" });
 if (r.exitCode !== 0) {

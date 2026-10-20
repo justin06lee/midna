@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
 import { draftKey } from "../drafts";
-import { macTitleBar, openTerminal } from "../host";
-import { Button, Icon, Loading, Mark, Spinner } from "../ui";
+import { inApp, macTitleBar, openTerminal, setHandsPaused } from "../host";
+import { useHands } from "../useHands";
+import { Button, Icon, Loading, Mark, Spinner, StateMark } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
+import { Computer } from "./Computer";
 import { Objectives } from "./Objectives";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
 
-type View = "chat" | "today" | "goals" | "settings";
+type View = "chat" | "today" | "goals" | "computer" | "settings";
 
-const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "settings"; key: string }> = [
+const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "computer" | "settings"; key: string }> = [
   { id: "chat", label: "Chat", icon: "chat", key: "1" },
   { id: "today", label: "Today", icon: "today", key: "2" },
   { id: "goals", label: "Objectives", icon: "goals", key: "3" },
+  // What midna may do on this computer: only the app can offer that.
+  ...(inApp ? [{ id: "computer" as const, label: "This computer", icon: "computer" as const, key: "4" }] : []),
   { id: "settings", label: "Settings", icon: "settings", key: "," },
 ];
 
@@ -26,6 +30,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [overviewTry, setOverviewTry] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
+  const { hands } = useHands();
 
   useEffect(() => {
     if (m.link === "unpaired") onUnpaired();
@@ -125,6 +130,17 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
             </span>
           </div>
         )}
+        {hands?.active && !hands.paused && (
+          <div className="rise mx-6 mb-2 flex items-center gap-2.5 rounded-xl border border-line-2 bg-panel px-4 py-2.5 text-[12.5px]">
+            <StateMark state="working" />
+            <span className="flex-1">
+              <span className="font-medium">midna is using this computer:</span> <span className="text-dim">{hands.active}</span>
+            </span>
+            <Button size="sm" onClick={() => void setHandsPaused(true)} icon={<Icon name="pause" className="size-3.5" />}>
+              Pause
+            </Button>
+          </div>
+        )}
         {brain?.ok === false && (
           <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
             <span className="flex-1 text-[12.5px]">
@@ -165,6 +181,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
           {view === "today" && overview && <Today overview={overview} />}
           {view === "goals" && overview && <Objectives overview={overview} onDiscuss={discuss} />}
+          {view === "computer" && <Computer />}
           {view === "settings" && (
             <Settings client={m.client} status={m.status} connection={connection} onStatus={(s) => m.setStatus(s)} onCheckBrain={checkBrain} onSignIn={signIn} onDisconnect={onDisconnect} />
           )}

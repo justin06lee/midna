@@ -5,6 +5,9 @@ import "@fontsource-variable/geist-mono";
 import "./style.css";
 import { App } from "./App";
 import { applyAppearance, loadAppearance } from "./appearance";
+import { HANDS_POLICY } from "@midna/protocol";
+import { setHandsDefaults } from "./host";
+import { Pill } from "./Pill";
 
 // Before the first paint, so the window never flashes the wrong way. The
 // browser preview can force one: ?dark=1 or ?light=1.
@@ -20,8 +23,9 @@ window.addEventListener("dragover", (e) => {
 });
 window.addEventListener("drop", (e) => e.preventDefault());
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// The same page is the pill shown over the screen while midna works it: a transparent window of its own.
+const pill = location.hash === "#pill";
+if (pill) document.documentElement.classList.add("pill");
+else void setHandsDefaults(HANDS_POLICY.defaults);
+
+createRoot(document.getElementById("root")!).render(<StrictMode>{pill ? <Pill /> : <App />}</StrictMode>);

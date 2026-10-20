@@ -157,3 +157,51 @@ export async function launchAtLogin(on?: boolean): Promise<boolean> {
   if (on === false) await a.disable();
   return a.isEnabled();
 }
+
+// ── midna's hands on this computer (desktop app only) ───────────────────
+
+export type Policy = "off" | "ask" | "on";
+export type PermissionState = "granted" | "not_granted" | "not_asked" | "not_running" | "unknown" | "not_applicable";
+export interface HandsEntry { id: string; op: string; summary: string; at: number; ms: number; outcome: string; detail?: string }
+export interface HandsStatus {
+  platform: string;
+  capabilities: Array<{ id: string; available: boolean; policy: Policy; needs: string | null }>;
+  paused: boolean;
+  state: "ready" | "paused" | "locked" | "display_asleep";
+  connected: boolean;
+  problem: string | null;
+  active: string | null;
+  permissions: Array<{ id: string; state: PermissionState }>;
+  displays: Array<{ id: string; name: string; primary: boolean; width: number; height: number; scale: number }>;
+  recent: HandsEntry[];
+}
+
+const core = () => import("@tauri-apps/api/core");
+
+export async function handsStatus(): Promise<HandsStatus | null> {
+  return inApp ? (await core()).invoke<HandsStatus>("hands_status") : null;
+}
+export async function setOffer(capability: string, policy: Policy): Promise<void> {
+  if (inApp) await (await core()).invoke("hands_set_offer", { capability, policy });
+}
+/** What an untouched toggle is: the policy table in packages/protocol, so the app keeps none of its own. */
+export async function setHandsDefaults(defaults: Record<string, Policy>): Promise<void> {
+  if (inApp) await (await core()).invoke("hands_defaults", { defaults });
+}
+export async function setHandsPaused(paused: boolean): Promise<void> {
+  if (inApp) await (await core()).invoke("hands_set_paused", { paused });
+}
+export async function requestPermission(id: string): Promise<void> {
+  if (inApp) await (await core()).invoke("permission_request", { id });
+}
+export async function openPermissionSettings(id: string): Promise<void> {
+  if (inApp) await (await core()).invoke("permission_open", { id });
+}
+export async function relaunchApp(): Promise<void> {
+  if (inApp) await (await core()).invoke("relaunch");
+}
+/** Called whenever the hands' state changes: a command starts or ends, a toggle, a pause. */
+export async function onHands(listener: () => void): Promise<() => void> {
+  if (!inApp) return () => {};
+  return (await import("@tauri-apps/api/event")).listen("hands", listener);
+}
