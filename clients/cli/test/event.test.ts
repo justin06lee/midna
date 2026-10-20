@@ -6,6 +6,9 @@ import { startDaemon, type RunningDaemon } from "@midna/daemon";
 
 /** `midna event`, exactly as ruri runs it, against a daemon with a stand-in brain. */
 
+// Each test starts the real CLI a few times, and a cold start takes a second or two.
+const SPAWNS = 30_000;
+
 const prompts: string[] = [];
 let home: string;
 let daemon: RunningDaemon;
@@ -58,7 +61,7 @@ describe("midna event", () => {
     // Its id is the one in the JSON: sending it again is a duplicate.
     const again = await midna(["event", "--source", "ruri", "--title", "umi went idle", "--json", "-"], JSON.stringify(idle));
     expect(JSON.parse(again.out)).toMatchObject({ ok: true, status: "duplicate" });
-  });
+  }, SPAWNS);
 
   test("from a file, or with no JSON at all", async () => {
     const file = join(home, "event.json");
@@ -67,7 +70,7 @@ describe("midna event", () => {
     const plain = await midna(["event", "--source", "ci", "--title", "nightly build passed"]);
     expect(plain.code).toBe(0);
     expect(plain.out).toMatch(/^midna hears it/);
-  });
+  }, SPAWNS);
 
   test("usage and bad input are refused", async () => {
     expect((await midna(["event", "--title", "no source"])).code).toBe(1);
@@ -76,5 +79,5 @@ describe("midna event", () => {
     expect(bad.code).toBe(1);
     expect(JSON.parse(bad.out)).toMatchObject({ ok: false });
     expect((await midna(["event", "--source", "ruri", "--title", "x", "--json", join(home, "missing.json")])).code).toBe(1);
-  });
+  }, SPAWNS);
 });
