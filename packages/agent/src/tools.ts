@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
-import { MAX_ATTACHMENTS_PER_MESSAGE } from "@midna/protocol";
-import { attach, liftLocalImages, type FileRef } from "./attachments.ts";
-import type { HandsHandle, HandsRequest } from "./hands.ts";
+import { MAX_ATTACHMENTS_PER_MESSAGE, type Attachment, type Op } from "@midna/protocol";
+import { attach, liftLocalImages, workspaceCopy, type FileRef } from "./attachments.ts";
+import type { HandsHandle, HandsOutcome, HandsRequest } from "./hands.ts";
 
 /**
  * midna's own tools, served over MCP so every harness gets the same set.
@@ -21,6 +21,8 @@ export interface ToolContext {
   hands?: HandsHandle;
   /** Aborted when the brain gives up on the call (its turn was interrupted): a device command in flight is cancelled. */
   signal?: AbortSignal;
+  /** midna's working directory: files a device sends are copied here for the brain to open. */
+  workspace?: string;
 }
 
 const when = z.string().describe('Local time "2026-10-02 09:30", a date "2026-10-02", ISO with offset, or relative "+2h" / "+3d"');
@@ -50,6 +52,8 @@ class Blocks {
 }
 /** Images a model can look at. */
 const VIEWABLE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/** How long the screen gets to catch up with input before the screenshot after it. */
+const SETTLE_MS = 300;
 
 export function createToolServer(ctx: ToolContext): McpServer {
   const { store } = ctx;
@@ -405,19 +409,58 @@ const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}
 
   // ── the user's computers ─────────────────────────────────────────────
   // The daemon decides whether each command may run (pause, state, permissions, the device's
-  // toggles, ask mode), whatever the harness lets through.
+  // toggles, ask mode) and asks the user when it needs a yes, whatever the harness lets through.
   const hands = ctx.hands;
   if (hands) {
     const device = z.string().optional().describe("The device's name or id, from device_list. Leave it out when only one online device can do this.");
-    const run = async (req: Pick<HandsRequest, "device" | "op" | "args">) => {
+    const display = z.string().optional().describe("A display id from device_list; the main display when left out");
+    const thenScreenshot = z.boolean().optional().describe("Take a screenshot afterwards and return it (default true); false saves a round trip");
+    const timeout = (cap: number) => z.number().int().min(1).max(cap).optional().describe(`Seconds to let it run (at most ${cap})`);
+    const run = async (req: Pick<HandsRequest, "device" | "op" | "args" | "timeoutMs">) => {
       const r = await hands.run({ ...req, episodeId: ctx.episodeId, ...(ctx.signal ? { signal: ctx.signal } : {}) });
       if (!r.ok) throw new Error(r.message);
       return r;
     };
+    type Done = Extract<HandsOutcome, { ok: true }>;
+    /** Where the brain can open a file a device sent: a copy in its workspace. */
+    const saved = (a: Attachment) => {
+      const path = ctx.workspace ? workspaceCopy(store, ctx.workspace, a) : null;
+      return `attachment ${a.id} (${a.name}, ${sizeOf(a.size)})${path ? `, saved at \`${path}\`` : ""}`;
+    };
+    /** An image a device sent, for the model to see, with a line about it. */
+    const image = (a: Attachment, about: string): Block[] => {
+      const file = store.attachments.read(a.id);
+      if (!file || !VIEWABLE.has(a.mime)) return [{ type: "text", text: `${about}: ${saved(a)}` }];
+      return [
+        { type: "image", data: Buffer.from(file.data).toString("base64"), mimeType: a.mime },
+        { type: "text", text: `${about}: ${saved(a)}` },
+      ];
+    };
+    const screenshot = (r: Done): Block[] => {
+      const png = r.attachments.find((x) => VIEWABLE.has(x.mime));
+      if (!png) throw new Error(`${r.device.name} took the screenshot but sent no image`);
+      const d = (r.data ?? {}) as { width?: number; height?: number; display?: string; cursor?: { x: number; y: number } | null };
+      const where = d.cursor ? `, pointer at ${d.cursor.x},${d.cursor.y}` : "";
+      return image(png, `${r.device.name}, display ${d.display ?? "?"}: ${d.width ?? "?"}×${d.height ?? "?"} px${where}`);
+    };
+    /** Input, then a look at what it did, unless the brain said not to. */
+    const act = async (a: { device?: string; display?: string; then_screenshot?: boolean }, op: Op, args: Record<string, unknown>, did: string, timeoutMs?: number) => {
+      const r = await run({ device: a.device, op, args, ...(timeoutMs ? { timeoutMs } : {}) });
+      const text = `${did} on ${r.device.name}`;
+      if (a.then_screenshot === false) return text;
+      await new Promise((settle) => setTimeout(settle, SETTLE_MS));
+      try {
+        return new Blocks([{ type: "text", text }, ...screenshot(await run({ device: r.device.id, op: "screenshot", args: { display: a.display } }))]);
+      } catch (err) {
+        return `${text}; no screenshot after it: ${(err as Error).message}`;
+      }
+    };
+    /** A file on this machine, a URL or an attachment, kept for a device to fetch. */
+    const upload = async (file: string) => (await attach(store, file)).id;
 
     tool(
       "device_list",
-      'The user\'s computers that offer you their hands, through the midna app on each: online or not (and when last seen), state (ready, paused, locked, display_asleep), displays, and what each lets you do. Under `can`, each capability is "on" (runs; in ask mode, only looking runs without a yes) or "ask" (needs the user\'s yes each time), with any permission it still needs; anything not listed is off, and only the user can turn it on. Look here first.',
+      'The user\'s computers that offer you their hands, through the midna app on each: online or not (and when last seen), state (ready, paused, locked, display_asleep), displays, and what each lets you do. Under `can`, each capability is "on" (runs; in ask mode, only looking runs without the user\'s yes) or "ask" (asks the user each time), with any permission it still needs; anything not listed is off, and only the user can turn it on. Look here first.',
       {},
       () => {
         const list = hands.devices();
@@ -438,27 +481,151 @@ const sentWith = (n: number) => (n ? ` with ${n} attachment${n === 1 ? "" : "s"}
     );
     tool(
       "device_screenshot",
-      "See a screen of one of the user's computers: you get the image, its size in pixels and where the pointer is. It is scaled so the long edge is at most 1568 px, unless full is true. To show it to the user, pass its attachment id to attach or message_user.",
-      {
-        device,
-        display: z.string().optional().describe("A display id from device_list; the main display when left out"),
-        full: z.boolean().optional().describe("Native resolution, for small text"),
-        wake: z.boolean().optional().describe("Wake a sleeping display to take it"),
-      },
+      "See a screen of one of the user's computers: you get the image, its size in pixels and where the pointer is. It is scaled so the long edge is at most 1568 px, unless full is true; pointer tools take coordinates in these pixels. To show it to the user, pass its attachment id to attach or message_user.",
+      { device, display, full: z.boolean().optional().describe("Native resolution, for small text"), wake: z.boolean().optional().describe("Wake a sleeping display to take it") },
+      async (a) => new Blocks(screenshot(await run({ device: a.device, op: "screenshot", args: { display: a.display, full: a.full, wake: a.wake } }))),
+    );
+
+    // Pointer and keyboard: coordinates are pixels in the latest screenshot of that display.
+    const x = z.number().describe("Pixels from the left of your latest screenshot of that display");
+    const y = z.number().describe("Pixels from the top of your latest screenshot of that display");
+    const button = z.enum(["left", "right", "middle"]).optional();
+    tool(
+      "device_click",
+      "Click on one of the user's computers, at a point in your latest screenshot of that display. count 2 double-clicks. Returns a fresh screenshot.",
+      { device, x, y, display, button, count: z.number().int().min(1).max(3).optional(), then_screenshot: thenScreenshot },
+      (a) => act(a, "click", { x: a.x, y: a.y, display: a.display, button: a.button, count: a.count }, `${a.count === 2 ? "double-" : ""}${a.button === "right" ? "right-" : ""}clicked at ${a.x},${a.y}`),
+    );
+    tool(
+      "device_move",
+      "Move the pointer on one of the user's computers (to hover), to a point in your latest screenshot of that display. Returns a fresh screenshot.",
+      { device, x, y, display, then_screenshot: thenScreenshot },
+      (a) => act(a, "move", { x: a.x, y: a.y, display: a.display }, `moved the pointer to ${a.x},${a.y}`),
+    );
+    tool(
+      "device_drag",
+      "Drag on one of the user's computers: press at the first point, move through the rest, release at the last (screenshot pixels). Returns a fresh screenshot.",
+      { device, path: z.array(z.object({ x, y })).min(2).max(50), display, button, then_screenshot: thenScreenshot },
+      (a) => act(a, "drag", { path: a.path, display: a.display, button: a.button }, `dragged from ${a.path[0]!.x},${a.path[0]!.y} to ${a.path.at(-1)!.x},${a.path.at(-1)!.y}`),
+    );
+    tool(
+      "device_scroll",
+      "Scroll on one of the user's computers by dx, dy pixels (positive dy scrolls down), at x, y when given, else where the pointer is. Returns a fresh screenshot.",
+      { device, dx: z.number().optional(), dy: z.number().optional(), x: x.optional(), y: y.optional(), display, then_screenshot: thenScreenshot },
+      (a) => act(a, "scroll", { dx: a.dx ?? 0, dy: a.dy ?? 0, x: a.x, y: a.y, display: a.display }, `scrolled ${a.dx ?? 0},${a.dy ?? 0}`),
+    );
+    tool(
+      "device_type",
+      "Type text on one of the user's computers, into whatever has focus. Mark anything private secret: it stays out of the logs. Never type a password unless the user asked for exactly that. Returns a fresh screenshot.",
+      { device, text: z.string().min(1).max(10_000), secret: z.boolean().optional(), then_screenshot: thenScreenshot },
+      (a) => act(a, "type", { text: a.text, secret: a.secret }, `typed ${a.secret ? `${a.text.length} secret characters` : `${a.text.length} characters`}`, Math.min(60_000, 5_000 * Math.ceil(a.text.length / 200))),
+    );
+    tool(
+      "device_key",
+      'Press a key or a chord on one of the user\'s computers: "return", "escape", "cmd+space", "cmd+shift+4", "ctrl+c". Returns a fresh screenshot.',
+      { device, keys: z.string().min(1).max(100), then_screenshot: thenScreenshot },
+      (a) => act(a, "key", { keys: a.keys }, `pressed ${a.keys}`),
+    );
+
+    // Reach: scripts, the shell, files and the clipboard.
+    tool(
+      "device_applescript",
+      "Run AppleScript (or JXA) on one of the user's Macs, as the user: drive Messages, Mail, Calendar, Finder, System Events and any scriptable app. Returns the script's result.",
+      { device, source: z.string().min(1).max(100_000), language: z.enum(["applescript", "jxa"]).optional(), timeout_s: timeout(300) },
       async (a) => {
-        const r = await run({ device: a.device, op: "screenshot", args: { display: a.display, full: a.full, wake: a.wake } });
-        const png = r.attachments.find((x) => VIEWABLE.has(x.mime));
-        const file = png && store.attachments.read(png.id);
-        if (!png || !file) throw new Error(`${r.device.name} took the screenshot but sent no image`);
-        const d = (r.data ?? {}) as { width?: number; height?: number; display?: string; cursor?: { x: number; y: number } | null };
-        const where = d.cursor ? `, pointer at ${d.cursor.x},${d.cursor.y}` : "";
-        const text = `${r.device.name}, display ${d.display ?? "?"}: ${d.width ?? "?"}×${d.height ?? "?"} px${where}. Attachment ${png.id} (${sizeOf(png.size)}).`;
-        return new Blocks([
-          { type: "image", data: Buffer.from(file.data).toString("base64"), mimeType: png.mime },
-          { type: "text", text },
-        ]);
+        const r = await run({ device: a.device, op: "script", args: { source: a.source, language: a.language ?? "applescript" }, ...(a.timeout_s ? { timeoutMs: a.timeout_s * 1000 } : {}) });
+        const result = ((r.data ?? {}) as { result?: string }).result ?? "";
+        return result.trim() ? `result on ${r.device.name}:\n${result}` : `ran on ${r.device.name}; no result`;
       },
     );
+    tool(
+      "device_shell",
+      "Run a shell command on one of the user's computers, as the user, in their login shell (zsh -lc on a Mac), in their home unless cwd says otherwise. Returns the exit code and the output; long output comes whole as a file.",
+      {
+        device,
+        command: z.string().min(1).max(100_000),
+        cwd: z.string().optional(),
+        env: z.record(z.string(), z.string()).optional(),
+        timeout_s: timeout(600),
+      },
+      async (a) => {
+        const r = await run({ device: a.device, op: "shell", args: { command: a.command, cwd: a.cwd, env: a.env }, ...(a.timeout_s ? { timeoutMs: a.timeout_s * 1000 } : {}) });
+        const d = (r.data ?? {}) as { exit?: number | null; stdout?: string; stderr?: string; truncated?: boolean };
+        const parts = [`${r.device.name}: ${d.exit === null ? "ended by a signal" : `exit ${d.exit ?? "?"}`}`];
+        if (d.stdout) parts.push(`stdout:\n${d.stdout}`);
+        if (d.stderr) parts.push(`stderr:\n${d.stderr}`);
+        for (const f of r.attachments) parts.push(`(${f.name} in full: ${saved(f)})`);
+        if (d.truncated && !r.attachments.length) parts.push("(output cut short)");
+        return parts.join("\n");
+      },
+    );
+    const path = z.string().min(1).describe("Absolute, or starting with ~ (the user's home)");
+    tool(
+      "device_file_read",
+      "Read a file on one of the user's computers, or a byte range of it. Text comes back as text; an image comes back for you to see; anything else, or over 64 KB, is saved in your workspace for you to open.",
+      { device, path, offset: z.number().int().min(0).optional(), length: z.number().int().positive().optional() },
+      async (a) => {
+        const r = await run({ device: a.device, op: "file_read", args: { path: a.path, offset: a.offset, length: a.length } });
+        const d = (r.data ?? {}) as { path?: string; size?: number; text?: string | null };
+        const head = `${d.path ?? a.path} on ${r.device.name} (${sizeOf(d.size ?? 0)})`;
+        if (typeof d.text === "string") return `${head}:\n${d.text}`;
+        const file = r.attachments[0];
+        if (!file) throw new Error(`${r.device.name} read ${a.path} but sent nothing`);
+        return new Blocks(image(file, head));
+      },
+    );
+    tool(
+      "device_file_list",
+      "List a folder on one of the user's computers: each entry's name, kind, size and when it changed.",
+      { device, path },
+      async (a) => {
+        const r = await run({ device: a.device, op: "file_list", args: { path: a.path } });
+        const d = (r.data ?? {}) as { path?: string; entries?: Array<{ name: string; kind: string; size: number | null; modifiedAt: number | null }>; truncated?: boolean };
+        const entries = (d.entries ?? []).map((e) => ({ name: e.kind === "dir" ? `${e.name}/` : e.name, kind: e.kind, size: e.size, changed: t(e.modifiedAt) }));
+        return { path: d.path ?? a.path, device: r.device.name, entries, ...(d.truncated ? { truncated: true } : {}) };
+      },
+    );
+    tool(
+      "device_file_write",
+      "Write a file on one of the user's computers: text, or a file you have (a path on this machine, a URL, or an attachment id). mode create (the default) won't replace an existing file; overwrite and append do.",
+      {
+        device,
+        path,
+        text: z.string().optional(),
+        file: z.string().optional().describe("A path on this machine, a URL, or an attachment id (att_…), to copy there"),
+        mode: z.enum(["create", "overwrite", "append"]).optional(),
+      },
+      async (a) => {
+        if ((a.text === undefined) === (a.file === undefined)) throw new Error("give text or file, not both");
+        const content = a.file !== undefined ? { attachmentId: await upload(a.file) } : { text: a.text };
+        const r = await run({ device: a.device, op: "file_write", args: { path: a.path, ...content, mode: a.mode ?? "create" } });
+        return `wrote ${sizeOf(((r.data ?? {}) as { bytes?: number }).bytes ?? 0)} to ${a.path} on ${r.device.name}`;
+      },
+    );
+    tool(
+      "device_clipboard_read",
+      "What's on the clipboard of one of the user's computers: its text, or an image for you to see.",
+      { device },
+      async (a) => {
+        const r = await run({ device: a.device, op: "clipboard_read", args: {} });
+        const text = ((r.data ?? {}) as { text?: string | null }).text;
+        if (typeof text === "string") return `clipboard on ${r.device.name}:\n${text}`;
+        const file = r.attachments[0];
+        return file ? new Blocks(image(file, `clipboard on ${r.device.name}`)) : `the clipboard on ${r.device.name} is empty`;
+      },
+    );
+    tool(
+      "device_clipboard_write",
+      "Put text, or an image or file you have (a path on this machine, a URL, or an attachment id), on the clipboard of one of the user's computers.",
+      { device, text: z.string().optional(), file: z.string().optional().describe("A path on this machine, a URL, or an attachment id (att_…)") },
+      async (a) => {
+        if ((a.text === undefined) === (a.file === undefined)) throw new Error("give text or file, not both");
+        const content = a.file !== undefined ? { attachmentId: await upload(a.file) } : { text: a.text };
+        const r = await run({ device: a.device, op: "clipboard_write", args: content });
+        return `set the clipboard on ${r.device.name}`;
+      },
+    );
+
     tool(
       "device_open",
       "Open a web page, an app, or a file in its default app, on one of the user's computers. Give exactly one of url, app or path.",

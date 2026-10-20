@@ -6,12 +6,14 @@ import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { ensureHome, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
-import { HandsHub, type Approver } from "./hands.ts";
+import { HandsHub } from "./hands.ts";
 import { createApp } from "./server.ts";
 import { VERSION } from "./version.ts";
 
 /** How long inbound events are kept, and so how long a resent id still counts as a duplicate. */
 const INBOUND_EVENTS_KEPT = 30 * 24 * 60 * 60_000;
+/** How long device hands' audit log keeps a command, and an approval. */
+const DEVICE_COMMANDS_KEPT = 90 * 24 * 60 * 60_000;
 
 export interface DaemonOptions {
   home?: string;
@@ -25,8 +27,8 @@ export interface DaemonOptions {
   introDelayMs?: number;
   /** How close together the user's messages make one interrupt; tests make it short. */
   coalesceMs?: number;
-  /** Device hands: who approves what needs a yes (until fork 1, nobody), and how long past its timeout a result may come; tests set both. */
-  approver?: Approver;
+  /** Device hands: how long an approval waits, and how long past its timeout a result may come; tests make both short. */
+  approvalMs?: number;
   handsGraceMs?: number;
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
@@ -80,7 +82,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const hands = new HandsHub({
     store,
     keyFile: p.handsKey,
-    ...(opts.approver ? { approver: opts.approver } : {}),
+    ...(opts.approvalMs !== undefined ? { approvalMs: opts.approvalMs } : {}),
     ...(opts.handsGraceMs !== undefined ? { graceMs: opts.handsGraceMs } : {}),
   });
 
@@ -98,6 +100,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     store,
     assistant,
     hands,
+    workspace: p.workspace,
     mcpToken,
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
     bridges: () => {
@@ -164,6 +167,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       const n = store.attachments.sweep(swept - UNSENT_ATTACHMENT_TTL_MS);
       if (n) console.log(`[midna] deleted ${n} attachment(s) never sent`);
       store.inbound.prune(swept - INBOUND_EVENTS_KEPT);
+      store.hands.prune(swept - DEVICE_COMMANDS_KEPT);
     }
     for (const w of store.schedule.claimDue()) {
       void assistant.wakeup(w).then((r) => (typeof r === "object" ? store.schedule.postpone(w.id, r.retryAt) : store.schedule.finish(w.id, r === "done", tz())));

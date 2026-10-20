@@ -323,6 +323,28 @@ describe("device hands", () => {
     expect(done).toMatchObject({ id: "cmd_1", decision: "allowed", decidedBy: "policy", outcome: "ok", endedAt: 1500, attachments: ["att_a"] });
     expect(done!.summary!.length).toBe(4096);
   });
+
+  test("the first answer wins, allow for 10 min is a grant while it's fresh, and old records are pruned", () => {
+    const s = fresh();
+    const { device } = s.devices.create("MacBook Air", "desktop");
+    const ask = (id: string, at: number) =>
+      s.hands.requestApproval({ id, deviceId: device.id, capability: "shell", op: "shell", summary: "run `ls` on MacBook Air", commandId: `cmd_${id}`, episodeId: null, outboxId: null, expiresAt: at + 120_000 }, at);
+    expect(ask("apr_1", 1000)).toMatchObject({ deviceName: "MacBook Air", state: "pending", answer: null });
+    expect(s.hands.answerApproval("apr_1", { answer: "allow_10_min", by: "Telegram bridge", via: "telegram" }, 2000)).toMatchObject({ state: "allowed", answeredAt: 2000 });
+    expect(s.hands.answerApproval("apr_1", { answer: "deny", by: "MacBook Air", via: "device" }, 2500)).toBeNull();
+    expect(s.hands.grant(device.id, "shell", 600_000, 2000 + 599_999)?.id).toBe("apr_1");
+    expect(s.hands.grant(device.id, "shell", 600_000, 2000 + 600_000)).toBeNull();
+    expect(s.hands.grant(device.id, "input", 600_000, 3000)).toBeNull();
+    ask("apr_2", 5000);
+    expect(s.hands.closeApproval("apr_2", "expired", 125_000)).toMatchObject({ state: "expired" });
+    expect(s.hands.pendingApprovals()).toEqual([]);
+    s.hands.record({ id: "cmd_old", deviceId: device.id, episodeId: null, op: "shell", args: {}, decision: "refused", reason: "offline" }, 1000);
+    s.hands.record({ id: "cmd_cut", deviceId: device.id, episodeId: null, op: "shell", args: {}, decision: "allowed" }, 1000);
+    s.hands.record({ id: "cmd_new", deviceId: device.id, episodeId: null, op: "shell", args: {}, decision: "refused", reason: "offline" }, 200_000);
+    expect(s.hands.prune(100_000)).toBe(3);
+    expect(s.hands.commands(device.id).map((c) => c.id)).toEqual(["cmd_new"]);
+    expect(s.hands.approval("apr_2")).toMatchObject({ state: "expired" });
+  });
 });
 
 describe("inbound events", () => {
