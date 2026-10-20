@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { MidnaClient, MidnaError, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MidnaClient, MidnaError, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 
 /**
@@ -180,7 +180,11 @@ export class TelegramBridge {
     const option = q && idx !== undefined ? q.options[Number(idx)] : undefined;
     if (!q || option === undefined) return void (await this.bot.answerCallback(cb.id, "That question has expired."));
     try {
-      await this.midna.send({ text: option, client: "telegram", replyTo: q.id });
+      // A device approval's button answers the approval itself; any other question's, as a reply.
+      const answer = APPROVAL_OPTIONS.find((o) => o.label === option)?.answer;
+      const approval = answer ? (await this.midna.approvals()).find((a) => a.outboxId === q.id) : undefined;
+      if (answer && approval) await this.midna.answerApproval(approval.id, { answer, client: "telegram" });
+      else await this.midna.send({ text: option, client: "telegram", replyTo: q.id });
     } catch (err) {
       // An approval's question, tapped after it was answered elsewhere or ran out of time.
       if (!(err instanceof MidnaError && err.status === 409)) throw err;
