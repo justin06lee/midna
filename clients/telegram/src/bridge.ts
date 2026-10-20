@@ -37,12 +37,16 @@ export function saveState(file: string, state: TelegramState): void {
 }
 
 const COMMANDS = [
+  { command: "queue", description: "Send without interrupting what midna is doing" },
   { command: "status", description: "What midna is doing, its mode and model" },
   { command: "pause", description: "Ask before acting (ask mode)" },
   { command: "resume", description: "Act autonomously again" },
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** /queue with nothing after it — what tapping it in the command menu sends. */
+const BARE_QUEUE = /^\/queue(?:@\w+)?$/i;
 
 export class TelegramBridge {
   private state: TelegramState;
@@ -127,6 +131,10 @@ export class TelegramBridge {
     }
     if (text.startsWith("/start")) return;
     const file = await this.receiveFile(m);
+    if (!file && BARE_QUEUE.test(text)) {
+      if (file === null) await this.bot.send(m.chat.id, "Write the message after it: /queue, then what to say. It waits until midna is done instead of interrupting.");
+      return;
+    }
     if (!text && !file) {
       // false: there was a file, and the user has been told why it didn't come through.
       if (file === null) await this.bot.send(m.chat.id, "I can only read text, photos and files here for now.");

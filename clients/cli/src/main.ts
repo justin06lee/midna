@@ -167,7 +167,7 @@ async function serve(): Promise<void> {
 async function chat(): Promise<void> {
   const c = client();
   const status = await reach(() => c.status());
-  console.log(`${status.name} on ${status.host.name} · ${status.model} · ${status.mode}. Type to talk; Ctrl-D to leave.\n`);
+  console.log(`${status.name} on ${status.host.name} · ${status.model} · ${status.mode}. Type to talk (/queue … doesn't interrupt); Ctrl-D to leave.\n`);
   const abort = new AbortController();
   void (async () => {
     for (let since = status.outboxSeq; !abort.signal.aborted; await Bun.sleep(2_000)) {
