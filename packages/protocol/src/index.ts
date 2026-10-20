@@ -96,6 +96,41 @@ export const SendMessage = z
   .refine((m) => m.text.trim() || m.attachments?.length, { message: "a message needs text or an attachment" });
 export type SendMessage = z.input<typeof SendMessage>;
 
+/** How much JSON an inbound event may carry. */
+export const MAX_EVENT_DATA_BYTES = 64 * 1024;
+/** A source gets at most one wakeup per subject (ruri: per project) in this window; the rest are merged into it. */
+export const EVENT_WINDOW_MS = 2 * 60_000;
+
+/**
+ * POST /v1/inbound: something that happened elsewhere, for midna to hear
+ * in the background — never as the user's words, and never interrupting a
+ * turn. `midna event --source <name> --title <t> --json <file|->` sends one.
+ */
+export const SendEvent = z.object({
+  /** Who it's from ("ruri", "ci", …); the rate limit is per source. */
+  source: z.string().trim().min(1).max(100),
+  /** One line on what happened. */
+  title: z.string().trim().min(1).max(1000),
+  /** The sender's id for it (default: data.id): the same id from the same source counts once. */
+  id: z.string().trim().min(1).max(200).optional(),
+  /**
+   * The event as JSON, up to MAX_EVENT_DATA_BYTES. Its kind (data.kind) is
+   * shown to midna; data.project.id, when there is one, is the subject the
+   * rate limit counts by.
+   */
+  data: z.unknown().optional(),
+});
+export type SendEvent = z.input<typeof SendEvent>;
+
+/**
+ * What became of an event: queued (a wakeup at dueAt delivers it), merged
+ * (into the subject's wakeup still waiting), or a duplicate of one already
+ * received.
+ */
+export type EventReceipt =
+  | { status: "queued" | "merged"; eventId: number; wakeupId: number; dueAt: number }
+  | { status: "duplicate"; eventId: number; wakeupId: number };
+
 export const PairRequest = z.object({
   code: z.string().min(1),
   deviceName: z.string().min(1),
@@ -238,6 +273,10 @@ export class MidnaClient {
   }
   send(msg: SendMessage): Promise<{ conversationId: string }> {
     return this.call("POST", "/v1/messages", msg);
+  }
+  /** Tell midna about something that happened elsewhere; it hears it in the background. */
+  event(e: SendEvent): Promise<EventReceipt> {
+    return this.call("POST", "/v1/inbound", e);
   }
   /** The conversation, newest `limit` lines before message `before`, oldest first. */
   history(opts: { before?: number; limit?: number; conversationId?: string } = {}): Promise<HistoryItem[]> {

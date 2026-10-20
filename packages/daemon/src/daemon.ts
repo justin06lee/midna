@@ -9,6 +9,9 @@ import { ensureHome, loadConfig, midnaHome, saveConfig, writePrivate } from "./c
 import { createApp } from "./server.ts";
 import { VERSION } from "./version.ts";
 
+/** How long inbound events are kept, and so how long a resent id still counts as a duplicate. */
+const INBOUND_EVENTS_KEPT = 30 * 24 * 60 * 60_000;
+
 export interface DaemonOptions {
   home?: string;
   port?: number;
@@ -140,11 +143,12 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   let swept = 0;
   const tick = () => {
     store.outbox.release();
-    // Hourly: uploads nobody sent, and files staged by turns that never replied.
+    // Hourly: uploads nobody sent, files staged by turns that never replied, and old events.
     if (Date.now() - swept > 60 * 60_000) {
       swept = Date.now();
       const n = store.attachments.sweep(swept - UNSENT_ATTACHMENT_TTL_MS);
       if (n) console.log(`[midna] deleted ${n} attachment(s) never sent`);
+      store.inbound.prune(swept - INBOUND_EVENTS_KEPT);
     }
     for (const w of store.schedule.claimDue()) {
       void assistant.wakeup(w).then((r) => (typeof r === "object" ? store.schedule.postpone(w.id, r.retryAt) : store.schedule.finish(w.id, r === "done", tz())));

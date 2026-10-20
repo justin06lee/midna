@@ -70,6 +70,10 @@ midna mode ask              # ask before acting; `midna mode autonomous` to undo
 midna model codex:gpt-5.6-sol
 ```
 
+A new message from any device interrupts whatever midna is doing, and the turn after picks up with what it was in the middle of. Start a message with `/queue` to have it wait for the current turn instead.
+
+**From other programs:** `midna event --source ci --title "nightly build passed"` tells midna something happened elsewhere (`--json -` adds the details). midna hears it in the background, never as you, and it interrupts nothing; see [docs/inbound-events.md](docs/inbound-events.md).
+
 **From your phone:** in the app go to Settings → Your phone, paste a bot token from @BotFather, and send the bot the `/start <code>` it shows. `midna telegram setup` does the same from a terminal. The bot answers exactly one chat, yours, and ignores everyone else. `/pause` switches to ask mode and `/resume` switches back.
 
 **Another terminal:** run `midna pair` on the host, then `midna connect <url> <code>` on the other machine. Every device pairs with its own revocable token, even on a private mesh.

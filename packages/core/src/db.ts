@@ -287,6 +287,26 @@ const MIGRATIONS: string[] = [
   ALTER TABLE attachments ADD COLUMN caption TEXT;
   ALTER TABLE attachments ADD COLUMN kind TEXT CHECK (kind IN ('image','file'));
   `,
+  // Events from other programs (ruri, a CI job, …) for midna to hear in the
+  // background. Each is delivered by a wakeup; ext_id is the sender's id, so
+  // the same event sent twice counts once; subject is what the rate limit
+  // counts by within a source (ruri: the project).
+  `
+  CREATE TABLE inbound_events (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    ext_id TEXT,
+    subject TEXT NOT NULL DEFAULT '',
+    kind TEXT,
+    title TEXT NOT NULL,
+    data TEXT,
+    wakeup_id INTEGER NOT NULL REFERENCES wakeups(id),
+    received_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX inbound_events_ext ON inbound_events(source, ext_id) WHERE ext_id IS NOT NULL;
+  CREATE INDEX inbound_events_subject ON inbound_events(source, subject);
+  CREATE INDEX inbound_events_wakeup ON inbound_events(wakeup_id);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

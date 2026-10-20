@@ -1,9 +1,9 @@
 import { MAIN, HOUR, fmt, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
-import type { Attachment, BrainHealth } from "@midna/protocol";
+import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
-import { INTRODUCTION, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, eventsTask, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -122,6 +122,33 @@ export class Assistant {
     if (!queued) this.interrupt(conv);
     this.kick(conv);
     return conv;
+  }
+
+  /**
+   * An event from another program — ruri saying a project went idle, say —
+   * for midna to hear in the background. It is delivered by a wakeup, never
+   * as user input, so it interrupts nothing. The same id counts once, and a
+   * source gets at most one wakeup per subject (data.project) in each
+   * window: what comes meanwhile is merged into the wakeup still waiting.
+   */
+  hear(e: { source: string; title: string; id?: string; data?: unknown }): EventReceipt {
+    const data = e.data as { id?: unknown; kind?: unknown; project?: { id?: unknown; path?: unknown; name?: unknown } } | null | undefined;
+    const word = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : typeof v === "number" ? String(v) : undefined);
+    const extId = e.id ?? word(data?.id);
+    const subject = word(data?.project?.id) ?? word(data?.project?.path) ?? word(data?.project?.name);
+    const kind = word(data?.kind);
+    const r = this.store.inbound.add({
+      source: e.source,
+      title: e.title,
+      windowMs: EVENT_WINDOW_MS,
+      tz: this.store.settings().timezone,
+      ...(extId ? { extId } : {}),
+      ...(subject ? { subject } : {}),
+      ...(kind ? { kind } : {}),
+      ...(e.data !== undefined ? { data: JSON.stringify(e.data) } : {}),
+    });
+    console.log(`[midna] event from ${e.source}${subject ? ` about ${subject}` : ""}: ${e.title.slice(0, 80)} — ${r.status}`);
+    return r;
   }
 
   /**
@@ -372,8 +399,17 @@ export class Assistant {
         return "done";
       }
       this.wakeups.set(w.id, turn);
+      // A wakeup that delivers events from another program says what they are.
+      const heard = store.inbound.forWakeup(w.id);
+      const task = heard.length ? eventsTask(heard.map((e) => ({ ...e, at: fmt(e.received_at, tz) }))) : undefined;
       const run = (resume?: string) =>
-        this.episode({ kind: "wakeup", wakeupId: w.id, prompt: wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), paused ? { doing: paused.doing, transcript: !!resume } : undefined), resume, turn });
+        this.episode({
+          kind: "wakeup",
+          wakeupId: w.id,
+          prompt: wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), { ...(task ? { task } : {}), ...(paused ? { resumed: { doing: paused.doing, transcript: !!resume } } : {}) }),
+          resume,
+          turn,
+        });
       let result: Awaited<ReturnType<typeof run>>;
       try {
         result = await run(paused?.session);

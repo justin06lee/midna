@@ -268,3 +268,26 @@ describe("attachments", () => {
     expect(s.attachments.staged(episode)).toEqual([]);
   });
 });
+
+describe("inbound events", () => {
+  test("one wakeup per subject per window, merged while it waits; ids dedup until pruned", () => {
+    const s = fresh();
+    const now = Date.UTC(2026, 9, 19, 12);
+    const add = (extId: string, subject: string, at: number) => s.inbound.add({ source: "ruri", title: `${subject} idle`, extId, subject, windowMs: 120_000, tz: TZ }, at);
+    const a = add("a", "umi", now);
+    expect(a).toMatchObject({ status: "queued", dueAt: now });
+    expect(add("b", "umi", now + 1_000)).toMatchObject({ status: "merged", wakeupId: a.wakeupId });
+    expect(s.inbound.forWakeup(a.wakeupId).map((e) => e.ext_id)).toEqual(["a", "b"]);
+    expect(s.schedule.get(a.wakeupId)).toMatchObject({ kind: "followup", created_by: "event:ruri", reason: 'ruri: 2 events, the latest "umi idle"' });
+    s.schedule.claimDue(now + 2_000);
+    const c = add("c", "umi", now + 3_000);
+    expect(c).toMatchObject({ status: "queued", dueAt: now + 2_000 + 120_000 });
+    expect(add("a", "umi", now + 4_000)).toEqual({ status: "duplicate", eventId: a.eventId, wakeupId: a.wakeupId });
+    // Only events whose wakeup is over are forgotten.
+    s.schedule.finish(a.wakeupId, true, TZ);
+    expect(s.inbound.prune(now + 10 * DAY)).toBe(2);
+    // Sent again after that, "a" is new: it joins the subject's wakeup still waiting.
+    expect(add("a", "umi", now + 11 * DAY)).toMatchObject({ status: "merged", wakeupId: c.wakeupId });
+    expect(s.inbound.forWakeup(c.wakeupId).map((e) => e.ext_id)).toEqual(["c", "a"]);
+  });
+});

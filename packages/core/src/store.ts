@@ -4,6 +4,7 @@ import { Attachments } from "./attachments.ts";
 import { Bus } from "./bus.ts";
 import { openDatabase } from "./db.ts";
 import { Devices } from "./devices.ts";
+import { Inbound } from "./inbound.ts";
 import { Log, MAIN } from "./log.ts";
 import { Memory } from "./memory.ts";
 import { Planning } from "./planning.ts";
@@ -42,6 +43,7 @@ export class Store {
   readonly outbox: Outbox;
   readonly devices: Devices;
   readonly attachments: Attachments;
+  readonly inbound: Inbound;
 
   constructor(readonly db: Database) {
     this.planning = new Planning(db);
@@ -51,6 +53,7 @@ export class Store {
     this.schedule = new Schedule(db);
     this.outbox = new Outbox(db, this.bus, this.attachments);
     this.devices = new Devices(db);
+    this.inbound = new Inbound(db, this.schedule);
   }
 
   static open(path: string): Store {

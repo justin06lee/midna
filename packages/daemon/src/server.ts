@@ -7,7 +7,9 @@ import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
 import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
 import {
   MAX_ATTACHMENT_BYTES,
+  MAX_EVENT_DATA_BYTES,
   PairRequest,
+  SendEvent,
   SendMessage,
   SettingsPatch,
   SERVICE,
@@ -199,6 +201,16 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       ...(msg.data.attachments?.length ? { attachments: msg.data.attachments } : {}),
     });
     return c.json({ conversationId }, 202);
+  });
+
+  // ── inbound events: what other programs tell midna, heard in the background ──
+  app.post("/v1/inbound", async (c) => {
+    const e = SendEvent.safeParse(await c.req.json().catch(() => null));
+    if (!e.success) return c.json({ error: e.error.message }, 400);
+    if (e.data.data !== undefined && new TextEncoder().encode(JSON.stringify(e.data.data)).byteLength > MAX_EVENT_DATA_BYTES) {
+      return c.json({ error: `an event's data can be at most ${MAX_EVENT_DATA_BYTES / 1024} KB of JSON` }, 413);
+    }
+    return c.json(assistant.hear(e.data), 202);
   });
 
   // ── attachments: the bytes behind images and files in the conversation ──

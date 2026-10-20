@@ -36,6 +36,8 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna serve                     run midna in the foreground
   midna chat                      talk to midna here
   midna send <text>               send one message
+  midna event --source <name> --title <text> [--json -|<file>]
+                                  tell midna something happened elsewhere; it hears it in the background
   midna status                    mode, model, what it's doing
   midna mode [autonomous|ask]     show or switch the permission mode
   midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, …
@@ -49,6 +51,7 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna service install|uninstall|restart
 
   --json on status, pair, version, doctor, devices, setup and host install prints machine-readable output.
+  On event, --json names the event's JSON (a file, or - for stdin), and the receipt prints as JSON.
 `;
 
 // ── helpers ────────────────────────────────────────────────────────────
@@ -321,6 +324,29 @@ async function hostInstall(): Promise<void> {
   if (!ok) process.exit(1);
 }
 
+/** `midna event`: something that happened elsewhere, for midna to hear in the background. */
+async function sendEvent(): Promise<void> {
+  const source = flag("--source");
+  const title = flag("--title");
+  const from = flag("--json");
+  if (!source || !title || (args.includes("--json") && !from)) die("usage: midna event --source <name> --title <text> [--json -|<file>]");
+  let data: unknown;
+  if (from) {
+    const text = from === "-" ? await Bun.stdin.text() : existsSync(from) ? readFileSync(from, "utf8") : die(`no such file: ${from}`);
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      die(`--json ${from}: not JSON (${(err as Error).message})`);
+    }
+  }
+  // The daemon takes the event's id (for dedup) and project (for the rate limit) from the JSON itself.
+  const r = await reach(() => client().event({ source, title, ...(data !== undefined ? { data } : {}) }));
+  if (json) return out({ ok: true, ...r });
+  if (r.status === "duplicate") return console.log(`already heard: event ${r.eventId}`);
+  if (r.status === "merged") return console.log(`merged with the events midna hears at ${new Date(r.dueAt).toLocaleTimeString()}`);
+  console.log(`midna hears it ${r.dueAt <= Date.now() + 1_000 ? "now" : `at ${new Date(r.dueAt).toLocaleTimeString()}`}`);
+}
+
 async function main(): Promise<void> {
   const [cmd, ...rest] = args;
   switch (cmd) {
@@ -336,6 +362,8 @@ async function main(): Promise<void> {
       await reach(() => client().send({ text, client: "cli" }));
       return console.log("sent — the reply arrives on your clients (or `midna chat`).");
     }
+    case "event":
+      return sendEvent();
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);

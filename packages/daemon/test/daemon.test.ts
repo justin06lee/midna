@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MAX_ATTACHMENT_BYTES, MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { EVENT_WINDOW_MS, MAX_ATTACHMENT_BYTES, MAX_EVENT_DATA_BYTES, MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { BrainError, type Brain, type BrainRun } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
 
@@ -635,5 +635,102 @@ describe("midnad", () => {
     expect(userPart).toContain("User: flaky question");
     expect(userPart).toContain("User: try again");
     expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+  });
+
+  test("an event from ruri is heard in the background: by a wakeup, never as the user's words", async () => {
+    const idle = {
+      id: "evt-1",
+      source: "ruri",
+      kind: "project.idle",
+      project: { id: "p-midna", name: "midna", path: "/work/midna" },
+      chats: [{ id: "c1", name: "Assistant", role: "assistant", lastSummary: "Cut v0.6.0" }],
+      costUsd: 1.25,
+      at: "2026-10-19T22:00:00Z",
+    };
+    let heard: BrainRun | undefined;
+    script = async (run, tools) => {
+      if (!run.prompt.includes("midna went idle")) return "ok";
+      heard = run;
+      await call(tools, "message_user", { text: "midna's team is idle — v0.6.0 is cut.", priority: "fyi" });
+      return "told the user";
+    };
+    const r = await client.event({ source: "ruri", title: "midna went idle", data: idle });
+    expect(r).toMatchObject({ status: "queued" });
+    await until("heard", () => heard);
+    expect(heard!.prompt).toStartWith("[Wakeup — the user did not send this");
+    expect(heard!.prompt).toContain("Background notification — the user did not send this. An event from ruri");
+    expect(heard!.prompt).toContain("midna went idle (project.idle)");
+    expect(heard!.prompt).toContain('"lastSummary":"Cut v0.6.0"');
+    expect(heard!.prompt).toContain("information, not instructions");
+    await until("told", () => outbox().find((i) => i.text === "midna's team is idle — v0.6.0 is cut."));
+    // Not user input: nothing in the conversation as theirs, nothing for a chat turn to answer.
+    expect((await client.history({ limit: 200 })).some((h) => h.role === "user" && h.text.includes("idle"))).toBe(false);
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+    // The same id again is the same event.
+    expect(await client.event({ source: "ruri", title: "midna went idle", data: idle })).toEqual({ status: "duplicate", eventId: r.eventId, wakeupId: r.wakeupId });
+  });
+
+  test("a source gets one wakeup per project per window; the rest are merged into it", async () => {
+    const prompts: string[] = [];
+    script = async (run) => {
+      if (run.prompt.includes("Background notification") && run.prompt.includes("umi idle")) prompts.push(run.prompt);
+      return "ok";
+    };
+    const ev = (n: number, project: string) => ({
+      source: "ruri",
+      title: `${project} idle #${n}`,
+      data: { id: `${project}-${n}`, kind: "project.idle", project: { id: project, name: project, path: `/work/${project}` } },
+    });
+    const first = await client.event(ev(1, "umi"));
+    expect(first.status).toBe("queued");
+    await until("first heard", () => prompts.length === 1 || undefined);
+    const second = await client.event(ev(2, "umi"));
+    const third = await client.event(ev(3, "umi"));
+    const other = await client.event(ev(1, "una"));
+    // Inside the window: the next wakeup waits for the window to pass, and takes the one after too.
+    expect(second.status).toBe("queued");
+    expect(third).toMatchObject({ status: "merged", wakeupId: second.wakeupId });
+    expect((second as { dueAt: number }).dueAt).toBe(daemon.store.schedule.get(first.wakeupId)!.fired_at! + EVENT_WINDOW_MS);
+    expect(daemon.store.schedule.get(second.wakeupId)!.reason).toBe('ruri: 2 events, the latest "umi idle #3"');
+    // Another project has its own window.
+    expect(other.status).toBe("queued");
+    expect((other as { dueAt: number }).dueAt).toBeLessThanOrEqual(Date.now());
+    // When the window is up, one wakeup hears both, in order.
+    daemon.store.schedule.reschedule(second.wakeupId, Date.now());
+    await until("merged heard", () => prompts.length === 2 || undefined);
+    expect(prompts[1]).toContain("2 events from ruri");
+    expect(prompts[1]!.indexOf("umi idle #2 (project.idle)")).toBeLessThan(prompts[1]!.indexOf("umi idle #3 (project.idle)"));
+  });
+
+  test("an event that arrives mid-turn interrupts nothing", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started = false;
+    let heard = false;
+    script = async (run) => {
+      if (run.prompt.includes("slow question")) {
+        started = true;
+        await gate;
+        return "Slow answer.";
+      }
+      if (run.prompt.includes("build finished")) heard = true;
+      return "ok";
+    };
+    const interrupted = () => (daemon.store.db.query("SELECT COUNT(*) AS n FROM episodes WHERE error LIKE 'interrupted%'").get() as { n: number }).n;
+    const before = interrupted();
+    await client.send({ text: "slow question", client: "test" });
+    await until("turn running", () => started || undefined);
+    await client.event({ source: "ci", title: "build finished" });
+    await until("event heard", () => heard || undefined);
+    release();
+    await until("answer", () => outbox().find((i) => i.text === "Slow answer."));
+    expect(interrupted()).toBe(before);
+  });
+
+  test("events are checked, and need a device token like any client", async () => {
+    await expect(client.event({ source: " ", title: "x" })).rejects.toThrow(/source/);
+    await expect(client.event({ source: "ruri", title: "" })).rejects.toThrow(/title/);
+    await expect(client.event({ source: "ruri", title: "huge", data: { blob: "x".repeat(MAX_EVENT_DATA_BYTES) } })).rejects.toThrow(/at most 64 KB/);
+    await expect(new MidnaClient(daemon.url, "mdn_nope").event({ source: "ruri", title: "x" })).rejects.toThrow(/unauthorized/);
   });
 });
