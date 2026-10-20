@@ -1,0 +1,106 @@
+{
+  "note": "Test vectors for device hands. The key is test-only.",
+  "seedHex": "0707070707070707070707070707070707070707070707070707070707070707",
+  "daemonKey": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+  "fingerprint": "fe81 2c12 f3ab 4ce6 ac5d b69a c352 f906",
+  "hello": {
+    "protocol": 1,
+    "app": {
+      "version": "0.8.0"
+    },
+    "os": {
+      "family": "macos",
+      "version": "26.0",
+      "arch": "arm64",
+      "hostname": "Justins-MacBook-Air",
+      "session": "quartz"
+    },
+    "displays": [
+      {
+        "id": "1",
+        "name": "Built-in Retina Display",
+        "primary": true,
+        "x": 0,
+        "y": 0,
+        "width": 1470,
+        "height": 956,
+        "scale": 2
+      }
+    ],
+    "offers": {
+      "screen": "on",
+      "open": "on",
+      "notify": "on",
+      "input": "ask"
+    },
+    "permissions": {
+      "screen_recording": "granted",
+      "accessibility": "not_asked",
+      "notifications": "granted"
+    },
+    "state": "ready",
+    "nonce": "n0nce-7f3a9c2e5b1d4f60"
+  },
+  "command": {
+    "id": "cmd_fixture1",
+    "nonce": "n0nce-7f3a9c2e5b1d4f60",
+    "seq": 1,
+    "op": "screenshot",
+    "args": {
+      "display": "1"
+    },
+    "timeoutMs": 10000,
+    "episodeId": 42,
+    "issuedAt": 1792447200000
+  },
+  "events": {
+    "command": {
+      "type": "command",
+      "signed": "{\"args\":{\"display\":\"1\"},\"episodeId\":42,\"id\":\"cmd_fixture1\",\"issuedAt\":1792447200000,\"nonce\":\"n0nce-7f3a9c2e5b1d4f60\",\"op\":\"screenshot\",\"seq\":1,\"timeoutMs\":10000}",
+      "sig": "9dC9GSEd9bG3ldrCMHJrsy02fs_pOargjqpY5HKxAIfJzcZo5RvbmqdVt9N44PilGw25ng4RKM5ufkSdAhS-Ag"
+    },
+    "tampered": {
+      "type": "command",
+      "signed": "{\"args\":{\"display\":\"2\"},\"episodeId\":42,\"id\":\"cmd_fixture1\",\"issuedAt\":1792447200000,\"nonce\":\"n0nce-7f3a9c2e5b1d4f60\",\"op\":\"screenshot\",\"seq\":1,\"timeoutMs\":10000}",
+      "sig": "9dC9GSEd9bG3ldrCMHJrsy02fs_pOargjqpY5HKxAIfJzcZo5RvbmqdVt9N44PilGw25ng4RKM5ufkSdAhS-Ag"
+    },
+    "cancel": {
+      "type": "cancel",
+      "id": "cmd_fixture1"
+    },
+    "bye": {
+      "type": "bye",
+      "reason": "replaced"
+    }
+  },
+  "results": [
+    {
+      "id": "cmd_fixture1",
+      "ok": true,
+      "data": {
+        "width": 1470,
+        "height": 956,
+        "display": "1",
+        "scale": 2,
+        "cursor": {
+          "x": 700,
+          "y": 400
+        }
+      },
+      "attachments": [
+        "att_fixturepng"
+      ],
+      "ms": 412
+    },
+    {
+      "id": "cmd_fixture2",
+      "ok": false,
+      "ms": 3,
+      "error": {
+        "code": "permission",
+        "message": "Screen Recording isn't granted",
+        "permission": "screen_recording"
+      }
+    }
+  ]
+}

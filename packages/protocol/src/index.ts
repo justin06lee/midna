@@ -7,6 +7,9 @@
  */
 import { z } from "zod";
 
+export * from "./hands.ts";
+import type { DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
+
 export const DEFAULT_PORT = 7717;
 export const SERVICE = "midna";
 
@@ -137,7 +140,13 @@ export const PairRequest = z.object({
   kind: z.enum(["desktop", "cli", "bridge", "mobile"]),
 });
 export type PairRequest = z.infer<typeof PairRequest>;
-export interface PairResponse { deviceId: string; token: string; name: string }
+export interface PairResponse {
+  deviceId: string;
+  token: string;
+  name: string;
+  /** The daemon's Ed25519 public key (base64url, 32 bytes), for a desktop to pin for device hands. From 0.8. */
+  daemonKey?: string;
+}
 
 export interface DeviceInfo { id: string; name: string; kind: string; created_at: number; last_seen_at: number | null }
 
@@ -200,6 +209,8 @@ export interface Status {
   host: { name: string; platform: string };
   /** Whether midna can think: null until it has tried. */
   brain: BrainHealth;
+  /** Device hands, all paused or not. From 0.8. */
+  hands?: "on" | "paused";
 }
 
 export interface BrainHealth {
@@ -216,6 +227,8 @@ export const SettingsPatch = z.object({
   model: z.string().min(1).optional(),
   timezone: z.string().min(1).optional(),
   quietHours: z.object({ start: z.string(), end: z.string() }).nullable().optional(),
+  /** "paused" stops every device's hands at once, whatever each app says. */
+  hands: z.enum(["on", "paused"]).optional(),
 });
 export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
@@ -273,6 +286,24 @@ export class MidnaClient {
   }
   send(msg: SendMessage): Promise<{ conversationId: string }> {
     return this.call("POST", "/v1/messages", msg);
+  }
+  /** Every paired device that has said hello to hands, online or not. */
+  handsDevices(): Promise<HandsDevice[]> {
+    return this.call("GET", "/v1/hands/devices");
+  }
+  /** What midna had a device do, newest first. */
+  deviceCommands(deviceId: string, limit = 200): Promise<DeviceCommandRecord[]> {
+    return this.call("GET", `/v1/devices/${encodeURIComponent(deviceId)}/commands?limit=${limit}`);
+  }
+  /** The device side of hands (the desktop app does this in Rust): start a session. */
+  handsHello(hello: HandsHello): Promise<HandsWelcome> {
+    return this.call("POST", "/v1/hands/hello", hello);
+  }
+  handsState(update: HandsStateUpdate): Promise<{ ok: true }> {
+    return this.call("POST", "/v1/hands/state", update);
+  }
+  handsResult(result: HandsResult): Promise<{ ok: true }> {
+    return this.call("POST", `/v1/hands/results/${encodeURIComponent(result.id)}`, result);
   }
   /** Tell midna about something that happened elsewhere; it hears it in the background. */
   event(e: SendEvent): Promise<EventReceipt> {
