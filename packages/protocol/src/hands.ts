@@ -203,7 +203,8 @@ export type HandsStreamEvent =
   /** Something to be done on this machine waits for a yes (state "pending"), or no longer does: show the panel, or close it. */
   | { type: "approval"; approval: Approval };
 
-export const HandsErrorCode = z.enum(["off", "paused", "locked", "permission", "user_active", "timeout", "cancelled", "unsupported", "bad_args", "failed"]);
+/** "asleep": the display is asleep and the command didn't ask to wake it. */
+export const HandsErrorCode = z.enum(["off", "paused", "locked", "asleep", "permission", "user_active", "timeout", "cancelled", "unsupported", "bad_args", "failed"]);
 export type HandsErrorCode = z.infer<typeof HandsErrorCode>;
 
 /** Device → daemon: POST /v1/hands/results/:id, exactly once per command. */
