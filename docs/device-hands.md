@@ -1,6 +1,6 @@
 # Device hands: the desktop app as midna's hands
 
-*Design note, 2026-10-19. Proposal for midna's approval; nothing here is built yet.*
+*Design note, 2026-10-19. midna approved forks 3, 4 and 6 (section 11); forks 1, 2 and 5 are with Justin. Phase 0 and phase 1 are being built: the wire shapes are `packages/protocol/src/hands.ts`, the daemon's side `packages/daemon/src/hands.ts`, the app's side `clients/desktop/src-tauri/src/hands/`.*
 
 midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch desktop, tenet) it needs eyes and hands there, with the OS permissions that takes. The desktop app is already installed, paired and running on those machines. This note makes it midna's hands: the app registers as a **device** that offers capabilities, the daemon exposes them to midna as MCP tools, and the app holds every OS permission, granted once.
 
@@ -13,7 +13,7 @@ midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch de
 - **Protocol:** typed commands and results. Every command is signed by the daemon's own key, pinned by the device. Each command runs at most once and is never queued for an offline device. Screenshots and big files travel as attachments, which already exist.
 - **Tools:** a fixed set of `device_*` MCP tools on midna's existing server. Each takes a device name.
 - **Ask mode and the per-capability policy are enforced in the daemon,** not by the harness. Today's harness policy lets every `mcp__midna__*` tool through, so it can't be relied on.
-- **Approvals block and wait.** A gated action shows Allow/Deny in the app on that machine and as a question in chat and Telegram. The first answer wins, and no answer within 2 minutes means no.
+- **Approvals block and wait** (proposed; fork 1 is with Justin). A gated action shows Allow/Deny in the app on that machine and as a question in chat and Telegram. The first answer wins, and no answer within 2 minutes means no.
 - **Justin's controls:**
   - each capability can be set Off, Ask or On, in the app;
   - Pause is in the window, the tray, behind a global shortcut, and in a daemon setting reachable from Telegram;
@@ -242,37 +242,30 @@ identifier "sh.midna.desktop" and certificate root = H"<sha1 of our cert>"
 
 Every build signed with the same certificate satisfies it, so grants survive updates and reinstalls into `~/Applications`. A self-signed certificate is enough for this; it doesn't need Apple's chain.
 
-**Create the identity once per Mac.** `clients/desktop/scripts/codesign-setup.ts` would wrap these commands:
+**Create the identity once per Mac:** `bun run signing` in `clients/desktop` (`scripts/signing.ts`). It does nothing if the identity exists. Otherwise it:
+- makes a 10-year self-signed code-signing certificate with `/usr/bin/openssl req -x509` (CN "midna local signing", `extendedKeyUsage=codeSigning`);
+- packs it as PKCS#12 (`-legacy` only where OpenSSL 3 needs it);
+- imports it into the login keychain with `security import … -T /usr/bin/codesign`.
 
-```sh
-NAME="midna local signing"
-/usr/bin/openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
-  -keyout midna-signing.key -out midna-signing.crt -subj "/CN=$NAME" \
-  -addext "basicConstraints=critical,CA:false" \
-  -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning"
-/usr/bin/openssl pkcs12 -export -inkey midna-signing.key -in midna-signing.crt \
-  -name "$NAME" -out midna-signing.p12 -passout pass:midna     # Homebrew OpenSSL 3: add -legacy
-security import midna-signing.p12 -k ~/Library/Keychains/login.keychain-db -P midna -T /usr/bin/codesign
-security add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db midna-signing.crt
-security find-identity -v -p codesigning       # must list "midna local signing"
-```
+What building it showed:
+- **Trust isn't needed.** The certificate stays untrusted (no `add-trusted-cert`, so no password for that). `security find-identity -v` leaves it out as "not valid", but codesign signs with it all the same, and TCC matches the certificate, not its trust. `hasSigningIdentity()` therefore lists identities without `-v`.
+- **`-T /usr/bin/codesign` isn't enough on current macOS.** The key's partition list holds only `apple-tool:`, and codesign is an `apple:` binary, so every build stops at a keychain dialog. One command fixes it for good, and needs the login password once: `security set-key-partition-list -S apple-tool:,apple: -s -t private -l "midna local signing" ~/Library/Keychains/login.keychain-db`. In a terminal, `bun run signing` runs it; otherwise it prints it. `signingReady()` reads the key's partition list from `security dump-keychain -a` and is true only once `apple:` is there.
+- **Never run codesign with the identity before that:** the dialog appears on Justin's screen, mid-build.
+- **The key:** never commit it. Back it up with `security export -t identities -f pkcs12`. If it's lost, a new identity means granting each permission once more.
 
-- **`-T /usr/bin/codesign`:** lets codesign use the key without a keychain prompt on every build.
-- **`add-trusted-cert`:** asks for Justin's password once.
-- **The key:** never commit it. Keep the `.p12` in his password manager. If it's lost, a new identity means re-granting once.
+**How `app.ts` signs.** After `tauri build` (and before `--no-install` exits), it signs the bundle inside out, if `signingReady()`:
+- the bundled `midna` CLI (`Contents/MacOS/midna`), with `entitlements/sidecar.plist`: `com.apple.security.cs.allow-jit` only. Bun's JIT needs it under the hardened runtime, and nothing else does;
+- then the app, with `entitlements/app.plist`: `com.apple.security.automation.apple-events`, which the hardened runtime needs before the app may send Apple Events;
+- both with `--options runtime`, then `codesign --verify --strict`.
+Otherwise it builds ad hoc as before, and warns that permissions won't survive this build.
 
-**How `app.ts` signs.**
-- **Choosing the identity:**
-  - if `security find-identity -v -p codesigning` lists the identity, `app.ts` runs `tauri build` with `APPLE_SIGNING_IDENTITY="midna local signing"`;
-  - if not, it builds ad hoc as today and warns loudly that permissions won't survive this build.
-- **What the bundler signs:** the app and its `midna` sidecar, with hardened runtime on.
-- **New files:**
-  - `src-tauri/entitlements.plist` with `com.apple.security.automation.apple-events`, which hardened runtime needs to send Apple Events;
-  - `src-tauri/Info.plist`, which Tauri merges into the bundle, carrying the usage strings: `NSAppleEventsUsageDescription`, `NSLocalNetworkUsageDescription`, and the Desktop, Documents and Downloads folder strings. Without a usage string, macOS refuses those requests silently.
-- **Check after a build:** `codesign -d -r- ~/Applications/midna.app` must show the identifier `sh.midna.desktop` and the certificate root.
-- **Once, when switching from ad hoc:** `tccutil reset All sh.midna.desktop` clears the stale grants, then Justin grants each permission once.
-- **Exit test for this phase:** grant the permissions, build twice, and confirm every grant still works.
+Other files:
+- `src-tauri/Info.plist`, merged into the bundle, carries `NSAppleEventsUsageDescription`. More usage strings (Local Network; the Desktop, Documents and Downloads folders) come with the capabilities that need them. Without a usage string, macOS refuses the request silently.
+- `tauri.conf.json` turns on `macOSPrivateApi`, for the pill's transparent window.
+
+**After a build:** `codesign -d -r- ~/Applications/midna.app` must show the identifier `sh.midna.desktop` and the certificate.
+**Once, when switching from ad hoc:** `tccutil reset All sh.midna.desktop` clears the stale grants (that id only), then Justin grants each permission once, from "This computer".
+**Exit test for phase 0:** grant the permissions, rebuild and reinstall twice, and confirm every grant still works.
 
 **Not covered:** a self-signed app isn't trusted on other Macs, and can't be notarized. Both are fine for Justin's own machines; Developer ID is the fork if that changes.
 
@@ -316,22 +309,24 @@ midna's control must be visible even when the window is hidden, which is most of
 
 ## 8. Linux: tenet
 
-The protocol, tools, policy, approvals and audit are OS-agnostic. Only the backends differ. In Rust, the capability layer is a set of traits, `Screen`, `Input`, `Script`, `Shell`, `Files`, `Clipboard`, `Launcher`, `Notifier` and `Session` (lock state, idle time), with a backend per OS and session. The device advertises only what its backends can do.
+tenet runs **KDE Plasma 6 on Wayland** (kwin_wayland, with Xwayland for X11 apps). So its backends go through the XDG desktop portals, with KWin's own D-Bus interfaces where a portal falls short. Raw X11 is out: under Wayland, XGetImage and XTest through Xwayland reach only X11 windows, not the desktop.
 
-| Capability | X11 | Wayland: GNOME / KDE | Wayland: wlroots (Hyprland, sway) |
-|---|---|---|---|
-| screen | XGetImage (e.g. the `xcap` crate) | ScreenCast portal + PipeWire, `persist_mode = 2`, so one consent is kept as a restore token | wlr-screencopy (`grim`) |
-| input | XTest | RemoteDesktop portal + libei (GNOME 46+, KDE 6.1+), with a restore token | virtual-pointer / virtual-keyboard protocols; `ydotool` (uinput) as a fallback |
-| script | not offered (D-Bus scripting could come later) | same | same |
-| shell, files | the same code as macOS | same | same |
-| clipboard | the clipboard plugin (arboard) | arboard with Wayland data-control | same |
-| open, notify | `xdg-open`, org.freedesktop.Notifications | same | same |
-| lock and idle | logind `LockedHint`, ScreenSaver idle time | same | same |
+The protocol, tools, policy, approvals and audit are OS-agnostic; only the backends differ. In Rust, the capability layer is a set of traits: `Screen`, `Input`, `Script`, `Shell`, `Files`, `Clipboard`, `Launcher`, `Notifier` and `Session` (lock state, idle time). There is one backend per OS and session, and the device advertises only what its backends can do. The hello says `os.session: "wayland"` and `os.desktop: "KDE"`.
 
-- **No TCC.** The Permissions screen becomes a readiness list: session type, portals present, restore tokens held, `/dev/uinput` writable where `ydotool` is used, and a tray (StatusNotifierItem) available.
-- **Overlay:** a layer-shell surface on wlroots and KDE; elsewhere a persistent notification with a Pause action.
-- **No signing:** the AppImage that `app.ts` already builds is enough.
-- **The open question:** whether tenet runs X11 or Wayland, and which compositor. That decides which column is built first.
+| Capability | tenet (KDE Plasma 6, Wayland) | Notes |
+|---|---|---|
+| screen | **ScreenCast portal** (`org.freedesktop.portal.ScreenCast`) with PipeWire: `SelectSources` with `persist_mode = 2`, so the first consent is kept as a **restore token** and later sessions start without asking. Each screenshot reads one frame from the stream (the `ashpd` and `pipewire` crates). | The **Screenshot portal** is simpler, but on KDE it shows a dialog every time unless permission is pre-granted through the permission store, so it's a fallback only. **KWin's `org.kde.KWin.ScreenShot2`** gives silent full-screen grabs, but KWin allows it only to apps whose `.desktop` file lists `X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2`. That fits an installed package; it is the alternative if the PipeWire path is too heavy for one frame. |
+| input | **RemoteDesktop portal** (`org.freedesktop.portal.RemoteDesktop`), with pointer and keyboard selected, `persist_mode = 2` and a restore token. Events go through `NotifyPointerMotionAbsolute` (on the ScreenCast stream's node, so coordinates are screenshot pixels), `NotifyPointerButton`, `NotifyPointerAxis` and `NotifyKeyboardKeysym`, or through libei via `ConnectToEIS` (KDE 6.1+). | The portal asks once on KDE, then the restore token reuses the grant. `ydotool`/uinput is a fallback only: it needs a root daemon and bypasses the compositor. |
+| script | not offered (D-Bus scripting of KDE apps could come later) | |
+| shell, files | the same code as macOS | |
+| clipboard | arboard with Wayland data-control (`ext-data-control`/`wlr-data-control`, both supported by KWin) | |
+| open, notify | `xdg-open`; `org.freedesktop.Notifications` (Plasma shows these natively) | |
+| lock and idle | logind `LockedHint`; `org.freedesktop.ScreenSaver.GetActive`; idle from `ext-idle-notify-v1` | |
+
+- **No TCC.** The Permissions screen becomes a readiness list: session type (Wayland, KDE), `xdg-desktop-portal` and `xdg-desktop-portal-kde` running, ScreenCast and RemoteDesktop versions, restore tokens held (with a Forget button), and a tray (StatusNotifierItem, native on Plasma).
+- **Consent:** the first screenshot and the first input each show KDE's portal dialog once, at the machine. The "This computer" screen gets an **Allow screen** and an **Allow input** button that start a session on purpose, so Justin can answer that dialog before midna first needs it. Restore tokens live in the app's config folder. A revoked or expired token turns the capability's permission back to `not_asked`.
+- **Overlay:** a layer-shell surface (`wlr-layer-shell`, which KWin supports) at the top centre. It shows in screenshots unless the frame is taken just before it's mapped. KWin offers no capture exclusion, so the app hides it for the moment of capture, as section 7 allows.
+- **No signing:** the AppImage that `app.ts` already builds is enough. A `.desktop` file is installed with it for the portals' app id, and for KWin's restricted interfaces if those are used.
 
 ## 9. Where the code goes
 
@@ -341,7 +336,7 @@ The protocol, tools, policy, approvals and audit are OS-agnostic. Only the backe
 | Core | Append-only migrations: a hands snapshot per device (last hello and pinned-key fingerprint), `device_commands`, `approvals`; the `hands` setting |
 | Daemon | `HandsHub`: sessions, signing, dispatch, timeouts, cancel, policy and mode gate, approvals. Routes `/v1/hands/*` and `/v1/approvals/*`. The daemon key in `MIDNA_HOME` |
 | Assistant | The `device_*` tools through `ToolContext.hands`; the prompt section; returning images from tools; `attach` taking `att_…` ids; the MCP tool timeout |
-| Clients: desktop | The Rust `hands` module (connection, executor, backends, permissions, pause, overlay, local activity log); the "This computer" screen and tray menu; `codesign-setup.ts`; signing in `app.ts`; `entitlements.plist`, `Info.plist` |
+| Clients: desktop | The Rust `hands` module (connection, executor, backends, permissions, pause, overlay, local activity log); the "This computer" screen and tray menu; `scripts/signing.ts`; signing in `app.ts`; `entitlements/app.plist` and `entitlements/sidecar.plist`, `Info.plist` |
 | Clients: Telegram | Approval buttons |
 
 ## 10. Phasing
@@ -356,15 +351,18 @@ Each phase is its own release. Each is built and tested against a local throwawa
    - macOS only.
 2. **Hands.** Pointer and keyboard tools with screenshot-space coordinates and screenshot-after, stopping when Justin takes over, and approvals end to end (device panel, chat, Telegram).
 3. **Reach.** AppleScript and JXA with Automation status per app; clipboard; files under home; shell as the user, with process-group kill, output caps and long output as attachments.
-4. **tenet.** The Linux backends for its session, the readiness screen, and the tray and overlay.
+4. **tenet.** The KDE Plasma Wayland backends (section 8): the ScreenCast and RemoteDesktop portals with restore tokens, the readiness screen, and the tray and overlay.
 
-## 11. Forks that need midna's call
+## 11. Forks
 
-1. **Approvals.** Block and wait, approvable from the device, chat and Telegram, first answer wins (recommended). Or keep today's ask-mode pattern: deny, then ask, then retry on a later turn. Also: may remote approval (Telegram) approve shell and input on the Mac, or only someone at the machine?
-2. **Defaults and what counts as observing.** Which capabilities start On / Ask / Off. Whether screenshots, file reads and clipboard reads run in ask mode as "reading", or need approval like acting.
-3. **Transport.** SSE plus POST (recommended: reuses what works today) or WebSocket (one duplex connection, new server and client code).
-4. **Tool shape.** A fixed set of daemon-defined `device_*` tools (recommended: one audit and gating path, stable descriptions). Or devices advertise their own MCP tools, tunnelled through the daemon (more flexible, much harder to gate and audit).
-5. **File reach.** Home only, minus the deny list (recommended), or anything Full Disk Access allows.
-6. **Signing identity.** A self-signed identity per Mac now (free, re-grant once if the key is lost). Or an Apple Developer ID now (paid; notarized, works on any Mac). Switching later costs one round of re-granting.
+midna decided forks 3, 4 and 6 on 2026-10-19; forks 1, 2 and 5 are with Justin. Phase 1 builds nothing that depends on them: it has no input, script, shell, files or clipboard, and whatever needs a yes is denied until approvals exist. `HANDS_POLICY` in `packages/protocol/src/hands.ts` is the one table his answers change.
 
-Not a fork but needed before phase 4: tenet's display session (X11 or Wayland, and the compositor).
+
+1. **Approvals** (with Justin). Block and wait, approvable from the device, chat and Telegram, first answer wins (recommended). Or keep today's ask-mode pattern: deny, then ask, then retry on a later turn. Also: may remote approval (Telegram) approve shell and input on the Mac, or only someone at the machine?
+2. **Defaults and what counts as observing** (with Justin). Which capabilities start On / Ask / Off. Whether screenshots, file reads and clipboard reads run in ask mode as "reading", or need approval like acting.
+3. **Transport. Decided: SSE plus POST.** (The alternative was WebSocket: one duplex connection, but new server and client code.)
+4. **Tool shape. Decided: a fixed set of daemon-defined `device_*` tools,** for one audit and gating path and stable descriptions. (The alternative was devices advertising their own MCP tools, tunnelled through the daemon.)
+5. **File reach** (with Justin). Home only, minus the deny list (recommended), or anything Full Disk Access allows.
+6. **Signing identity. Decided: a self-signed identity per Mac** (free; re-grant once if the key is lost). An Apple Developer ID stays possible later; switching costs one round of re-granting.
+
+tenet's display session, needed before phase 4, is settled: KDE Plasma 6 on Wayland (section 8).
