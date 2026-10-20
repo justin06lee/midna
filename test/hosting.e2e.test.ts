@@ -55,15 +55,27 @@ test("install on this machine: binary, start, pair, talk", async () => {
   expect(status.timezone).toBe("America/Los_Angeles");
   expect((await midna.devices()).map((d) => d.name)).toContain("test");
 
-  // A second run finds it running and current, and only pairs again.
+  // A second run finds it running and current, and only pairs again — retiring the pairing it replaces.
+  const here = { id: "local", name: "here", via: "local", address: "127.0.0.1", sshTarget: null, online: true, self: true, midna: { running: true, version: status.version } } as const;
   const again: InstallEvent[] = [];
   expect(
     await install(
-      { id: "local", name: "here", via: "local", address: "127.0.0.1", sshTarget: null, online: true, self: true, midna: { running: true, version: status.version } },
-      { model: "claude:opus", timezone: "UTC", mode: "ask", port, home, bin, noService: true, kits: [kits] },
+      here,
+      { model: "claude:opus", timezone: "UTC", mode: "ask", port, home, bin, noService: true, kits: [kits], kind: "cli", deviceName: "test cli", replaces: { url: done.connection.url, token: done.connection.token } },
       (e) => again.push(e),
     ),
   ).toBe(true);
   expect(again.filter((e) => e.type === "step" && e.status === "skipped").map((e) => (e as { id: string }).id)).toEqual(["binary", "brain", "start"]);
-  expect((await midna.status()).model).toBe("claude:sonnet"); // an existing install keeps its settings
+  expect(again.find((e) => e.type === "step" && e.id === "pair" && e.status === "done")).toMatchObject({ detail: "the pairing it replaces is retired" });
+  await expect(midna.status()).rejects.toThrow();
+  const second = again.find((e): e is Extract<InstallEvent, { type: "done" }> => e.type === "done")!.connection;
+  const midna2 = new MidnaClient(second.url, second.token);
+  expect((await midna2.status()).model).toBe("claude:sonnet"); // an existing install keeps its settings
+  const paired = async () => (await midna2.devices()).filter((d) => d.kind !== "host");
+  expect((await paired()).map((d) => `${d.name}:${d.kind}`)).toEqual(["test cli:cli"]);
+
+  // A connection saved for another host is never sent here: nothing is retired.
+  const third: InstallEvent[] = [];
+  expect(await install(here, { model: "claude:opus", timezone: "UTC", mode: "ask", port, home, bin, noService: true, kits: [kits], deviceName: "test 3", replaces: { url: "http://127.0.0.1:1", token: second.token } }, (e) => third.push(e))).toBe(true);
+  expect((await paired()).map((d) => d.name).sort()).toEqual(["test 3", "test cli"]);
 }, 120_000);

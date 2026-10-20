@@ -28,7 +28,7 @@ import {
 } from "@midna/daemon";
 import { TelegramBridge, setupTelegram } from "@midna/telegram";
 import { discover } from "./discover.ts";
-import { STEPS, defaultKits, install, type InstallEvent } from "./install.ts";
+import { STEPS, defaultKits, install, sameHost, type InstallEvent } from "./install.ts";
 
 const HELP = `midna ${VERSION} — a proactive personal assistant
 
@@ -82,6 +82,19 @@ function client(): MidnaClient {
   }
   die("midna isn't set up on this machine. Run `midna setup` here, or `midna connect <url> <code>` to reach one elsewhere.");
 }
+
+/** A saved connection, if `text` holds one. */
+function connectionIn(text: string | undefined): ClientConfig | undefined {
+  try {
+    const c = JSON.parse(text ?? "") as Partial<ClientConfig>;
+    return c.url && c.token ? { url: c.url, token: c.token } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The connection `connect` or `host install` saved here. */
+const savedClient = () => (existsSync(clientFile()) ? connectionIn(readFileSync(clientFile(), "utf8")) : undefined);
 
 function die(msg: string): never {
   if (json) out({ ok: false, error: msg });
@@ -294,6 +307,10 @@ async function hostInstall(): Promise<void> {
   if (!device) die(`no machine called "${target}" — \`midna devices\` lists the ones this computer can see`);
   if (!device.online) die(`${device.name} is offline`);
   const current = hostSettings();
+  // Without --json the CLI pairs for itself and keeps the token in client.json.
+  // With it, the caller (the desktop app) keeps the connection, and hands over
+  // the one it held before in MIDNA_REPLACES, out of argv.
+  const replaces = connectionIn(process.env.MIDNA_REPLACES) ?? (json ? undefined : savedClient());
   const emit = (e: InstallEvent) => {
     if (json) return out(e);
     if (e.type === "step") console.log(`${e.status === "done" ? "✓" : e.status === "failed" ? "✗" : e.status === "skipped" ? "–" : "…"} ${e.title}${e.detail ? ` — ${e.detail}` : ""}`);
@@ -314,6 +331,8 @@ async function hostInstall(): Promise<void> {
       ...(flag("--home") ? { home: flag("--home")! } : {}),
       ...(flag("--bin") ? { bin: flag("--bin")! } : {}),
       ...(flag("--device-name") ? { deviceName: flag("--device-name")! } : {}),
+      kind: json ? "desktop" : "cli",
+      ...(replaces ? { replaces } : {}),
       noService: args.includes("--no-service"),
       noIntro: args.includes("--no-intro"),
       skipBrainCheck: args.includes("--skip-brain-check"),
@@ -402,7 +421,8 @@ async function main(): Promise<void> {
       if (!url || !code) die("usage: midna connect <url> <code>   e.g. midna connect http://10.77.0.1:7717 ABCD2345");
       const c = new MidnaClient(url);
       const health = await reach(() => c.health());
-      const paired = await reach(() => c.pair({ code, deviceName: `${hostname()} (cli)`, kind: "cli" }));
+      const before = savedClient();
+      const paired = await reach(() => c.pair({ code, deviceName: `${hostname().replace(/\.local$/, "")} (cli)`, kind: "cli", ...(before && sameHost(before.url, url) ? { replaces: before.token } : {}) }));
       ensureHome();
       writePrivate(clientFile(), JSON.stringify({ url, token: paired.token } satisfies ClientConfig, null, 2) + "\n");
       return console.log(`Connected to ${health.name} at ${url}. Try \`midna chat\`.`);

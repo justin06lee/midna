@@ -63,6 +63,12 @@ async fn midna(app: AppHandle, args: Vec<String>, on_line: Channel<String>) -> R
             cmd.env("MIDNA_KITS", kits);
         }
     }
+    // Setting up again: the pairing it replaces goes along, in the environment rather than argv.
+    if args.starts_with(&["host".to_string(), "install".to_string()]) {
+        if let Some(r) = replaces(&app) {
+            cmd.env("MIDNA_REPLACES", r);
+        }
+    }
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start midna: {e}"))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
     let mut stderr = child.stderr.take().ok_or("no stderr")?;
@@ -112,15 +118,30 @@ fn connection_save(app: AppHandle, value: serde_json::Value) -> Result<(), Strin
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     }
-    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    // Paired anew: the host retired the earlier pairing if it was its own.
+    let _ = std::fs::remove_file(previous_connection_file(&app)?);
+    Ok(())
+}
+
+/// The connection this app held before "Use another machine": kept until the
+/// next one is saved, so setting up again can retire its pairing.
+fn previous_connection_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(connection_file(app)?.with_file_name("connection.previous.json"))
 }
 
 #[tauri::command]
 fn connection_clear(app: AppHandle) -> Result<(), String> {
-    match std::fs::remove_file(connection_file(&app)?) {
+    match std::fs::rename(connection_file(&app)?, previous_connection_file(&app)?) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
         _ => Ok(()),
     }
+}
+
+/// The previous connection's url and token, as `midna host install` takes them in MIDNA_REPLACES.
+fn replaces(app: &AppHandle) -> Option<String> {
+    let c: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(previous_connection_file(app).ok()?).ok()?).ok()?;
+    Some(serde_json::json!({ "url": c.get("url")?.as_str()?, "token": c.get("token")?.as_str()? }).to_string())
 }
 
 fn shell_quote(arg: &str) -> String {

@@ -35,6 +35,23 @@ export interface InstallOptions {
   skipBrainCheck?: boolean;
   /** This computer's name, as the host will list it. */
   deviceName?: string;
+  /** Who the pairing is for: the desktop app (the default) or the CLI. */
+  kind?: "desktop" | "cli";
+  /**
+   * The connection this computer held before, when it pairs again: the host
+   * retires that pairing once the new one is made. Its token goes only to
+   * the host it came from, never to another.
+   */
+  replaces?: { url: string; token: string };
+}
+
+/** Whether two midna URLs are the same host and port. */
+export function sameHost(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
 }
 
 // ── transports ───────────────────────────────────────────────────────────
@@ -305,8 +322,10 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
         `midna is running on ${device.name} but this computer can't reach ${url}.`,
         device.via === "makima" ? "makima publishes it within a few seconds; check `makima status` there." : "Check the firewall on that machine.",
       );
-    const paired = await client.pair({ code, deviceName: opts.deviceName ?? `${hostname().replace(/\.local$/, "")} (desktop)`, kind: "desktop" });
-    step("pair", "done");
+    const kind = opts.kind ?? "desktop";
+    const replaces = opts.replaces && sameHost(opts.replaces.url, url) ? opts.replaces.token : undefined;
+    const paired = await client.pair({ code, deviceName: opts.deviceName ?? `${hostname().replace(/\.local$/, "")} (${kind})`, kind, ...(replaces ? { replaces } : {}) });
+    step("pair", "done", paired.replaced ? "the pairing it replaces is retired" : undefined);
     emit({ type: "done", connection: { url, token: paired.token, name: paired.name, host: device.name, ssh: device.self ? null : (device.sshTarget ?? device.address), device: paired.deviceId, ...(paired.daemonKey ? { daemonKey: paired.daemonKey } : {}) } });
     return true;
   } catch (err) {
