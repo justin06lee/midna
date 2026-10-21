@@ -14,7 +14,9 @@
     "dev": "bun clients/cli/src/main.ts serve",
     "build": "bun scripts/build.ts",
     "smoke": "bun scripts/smoke.ts",
-    "build:all": "bun scripts/build.ts --all"
+    "build:all": "bun scripts/build.ts --all",
+    "signing": "bun run --cwd clients/desktop signing",
+    "app:build": "bun run --cwd clients/desktop app:build"
   },
   "devDependencies": {
     "@types/bun": "latest",
