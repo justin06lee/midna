@@ -217,6 +217,26 @@ esac
     }
   });
 
+  test("a job outlasting the start grace under systemd (whose stand-in rewrites $$) is not failed, and its wakeup comes only at its real end", async () => {
+    const { restore } = fakeSystemd();
+    try {
+      // A grace of 100 ms stands for the 30 s that every longer job on the Jetson outlived.
+      const { r, store, ended } = runner({ launcher: "systemd", startGraceMs: 100 });
+      const job = await start(r, "sleep 1.5; echo finished", { whenDone: "tell the user it finished" });
+      expect(job.pid).toBeGreaterThan(1);
+      await Bun.sleep(800);
+      expect(store.jobs.get(job.id)).toMatchObject({ status: "running", wakeup_id: null });
+      expect(ended).toEqual([]);
+      const done = await until("the job's end", () => ended[0]);
+      expect(done).toMatchObject({ id: job.id, status: "done", exit_code: 0, reason: null, when_done: "tell the user it finished" });
+      expect(done.ended_at! - done.started_at).toBeGreaterThanOrEqual(1_400);
+      expect(store.jobs.forWakeup(done.wakeup_id!)!.id).toBe(job.id);
+      r.shutdown();
+    } finally {
+      restore();
+    }
+  }, 10_000);
+
   test("a pid file that's missing or garbage while the unit runs: still running, no failure, and the real end still comes", async () => {
     const { restore } = fakeSystemd();
     process.env.NO_MAINPID = "1";
