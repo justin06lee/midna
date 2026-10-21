@@ -59,7 +59,7 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
         <View style={s.head}>
           <Text style={[s.title, { color: t.ink }]}>{previous ? "Pair again" : "Pair with midna"}</Text>
           <Text style={[s.lede, { color: t.dim }]}>
-            This phone reaches midna over your tailnet. On the machine midna lives on, run <Text style={s.code}>midna pair</Text> for a code.
+            This phone reaches midna over your tailnet. For a code, run <Text style={s.code}>midna pair</Text> on midna's machine or your Mac.
           </Text>
         </View>
         <Field

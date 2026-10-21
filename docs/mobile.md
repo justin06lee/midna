@@ -1,48 +1,90 @@
 # midna on the iPhone
 
-*Design note, 2026-10-20. Justin chose an Expo (React Native) + TypeScript app at `clients/mobile`. Nothing is built yet. How the phone reaches midna away from home is his call: section 3 lays out the options without picking one.*
+*v1 is built at `clients/mobile`: an Expo (SDK 58) + TypeScript app, iOS only, sideloaded with a free Apple account. Justin's answers of 2026-10-20 are below. The options weighed before them (makima on the phone, a relay, Telegram only) are in this file's history at 6150bfd.*
 
-**v1:** chat with midna; push-style notifications for its messages; ask_user answer buttons; attachments in and out; an approvals screen. Distribution is free sideloading (no paid Apple developer account).
+## 1. Decisions (Justin, 2026-10-20)
 
-## 1. What the app reuses
+- **Reachability is Tailscale.** The phone runs Tailscale and reaches midna over the tailnet, at an address typed into the app: `http://midna:7717` (MagicDNS) or a 100.x IP.
+  - The daemon listens on the tailnet's address too, via a `listen` entry naming `tailscale0` (065fa4b).
+  - It's plain HTTP inside the tailnet, and the token auth stays.
+  - App Transport Security allows exactly that: unqualified names and IPs (`NSAllowsLocalNetworking`), `*.ts.net`, and 100.64.0.0/10.
+  - makima is not involved.
+- **Notifications are Telegram's** for now. The app has no push; revisit with the paid ($99) account.
+- **Face ID before any approval** is answered from the phone: Face ID only, with no passcode fallback, so a phone picked up unlocked can't say yes. This guards the phone, not midna's side: any paired token can still answer through `/v1/approvals` (the forgery item already with Justin).
+- **Reinstalling every 7 days** (free provisioning) is accepted.
 
-- **@midna/protocol, as is.** It depends only on zod: every wire type, `Approval`, `APPROVAL_OPTIONS` and `MidnaClient`.
-- **One gap: streaming.** `MidnaClient.events()` reads the response body with `getReader()`, which React Native's own `fetch` lacks. `expo/fetch` streams. Either install it as the global `fetch`, or give `MidnaClient` an optional `fetch` (a small change in the protocol layer).
-- **Pairing:** kind `mobile` is already in `PairRequest`. The phone takes a URL and a code from `midna pair`, keeps its token in the iOS Keychain (`expo-secure-store`), and sends `replaces` with the old token when it pairs again with the same host, as the CLI does. It answers approvals with `client: "mobile"`.
-- **Drafts persist,** like every other text field: across restarts and failed sends.
+## 2. What v1 does
 
-## 2. What free sideloading allows
+- **Pairing:** an address, a code from `midna pair` on the host, and a name for the phone; kind `mobile`.
+  - The token is kept in the Keychain, readable only while the phone is unlocked and never synced off it.
+  - "Pair again" keeps the old pairing aside until the new one works, and names it as `replaces` only to the same host, so the host retires it.
+  - "Unpair" revokes the phone's own device.
+- **Chat:** history plus the live stream, through `expo/fetch`, which can stream a response body: `new MidnaClient(url, token, { fetch })`, c84a710.
+  - iOS suspends the app in the background. Coming back to the foreground reconnects at once and refetches the latest history, so what was said meanwhile, on any client, appears.
+- **ask_user** options are buttons.
+- **An approval's question in chat never answers by sending its label,** which would skip Face ID. Its buttons, in chat and on the Approvals screen, ask for Face ID and then answer the approval with `client: "mobile"`.
+- **Attachments, both ways:**
+  - Photos and videos (HEIC converted to JPEG) and files go up before the message, up to 20 per message.
+  - midna's images are drawn inline and open full screen; its files open in Quick Look or the share sheet.
+- **Drafts:** the composer's text, and the files already uploaded for it, are kept in SQLite (`expo-sqlite/kv-store`), written synchronously as they're typed, under the desktop's keys (`midna.draft:<url>#<device>`, plus `:files`).
+  - They go only once the message is sent, so they survive tab switches, the app being killed, and a failed send.
+  - The pairing form's address and name are drafts too. The code is a secret, so it's kept in memory only.
 
-- **No push.** A Personal Team can't enable the Push Notifications capability (APNs), so midna can't wake the app with a remote notification. It can't enable Network Extension either, so the app can't carry its own VPN.
-- **7 days.** A free profile expires after a week. The app stops launching until it's rebuilt and reinstalled from Xcode on the Mac. At most 3 sideloaded apps per phone, and 10 new app ids a week.
-- **A dev build, not Expo Go.** Expo Go has no remote push from SDK 53, the App Store's Expo Go stops at SDK 54, and it loads its JavaScript from a dev server. A development build (`expo prebuild`, signed in Xcode with the Personal Team) runs our own code. A Release build carries its JavaScript and needs no Metro.
-- **What "push-style" can mean without APNs:**
-  - **Telegram,** as today: its app has push, and midna already delivers there, buttons and attachments included;
-  - **ntfy:** the App Store ntfy app has push. midna publishes to a topic, and a tap opens `midna://`. Content passes through ntfy.sh unless midna runs its own ntfy server, which then sends only a wake-up through ntfy.sh;
-  - **local notifications** while the app is open or recently backgrounded, plus background refresh, which iOS runs when it likes (minutes to hours, never after a force-quit). Not real-time.
+## 3. Annotations, later: the shape, agreed with the protocol's owner
 
-  So v1's notifications are either Telegram or ntfy, until there's a paid account.
+Drawing on a screenshot, marking a video frame, highlighting a time range. These come later, as marks on an attachment, without a breaking change.
 
-## 3. Reaching midna away from home
+```ts
+/** On SendMessage (and later OutboxItem and HistoryItem); a daemon before it drops the field. */
+annotations?: Annotation[]; // at most 50 per message
 
-midna's daemon listens on `127.0.0.1` only. makima's auto-serve publishes it to mesh peers at `10.77.0.1:7717`. A phone that isn't a makima peer can't reach it, at home or away.
+interface Annotation {
+  /** Any attachment the daemon holds — not only this message's: marking up midna's own screenshot is the main case. */
+  attachmentId: string;
+  anchor:
+    | { kind: "region"; x: number; y: number; w: number; h: number; at?: number } // a box; at: a video's frame
+    | { kind: "path"; points: Array<[number, number]>; at?: number } // a drawn stroke, at most 2,000 points
+    | { kind: "frame"; at: number } // one video frame
+    | { kind: "range"; from: number; to: number }; // a stretch of video or audio
+  note?: string;
+  color?: string; // "#rrggbb"
+  /** The id of this message's burned-in copy, which clients that redraw the marks hide. */
+  renderedAs?: string;
+}
+```
 
-| | (a) makima on the phone | (b) a relay | (c) Telegram when away |
-|---|---|---|---|
-| **What has to exist** | There is no makima iOS client. A native one needs Network Extension: a paid account and a Go-to-iOS port. The data plane is stock WireGuard, so the App Store WireGuard app could be a peer, but only with a makima change. The Jetson runs managed mode: magicsock drops packets from peers the netmap didn't claim, and `peer add` is refused on managed nodes. makima would have to accept a static "foreign" peer and export its config (as a QR code). The phone also needs to reach UDP 51820 at home: a router port-forward, or the Jetson's global IPv6 allowed through the router's firewall. makima's relay can't carry a stock client. | A public HTTPS endpoint that forwards to `10.77.0.1:7717`: a VPS that is a makima node running a reverse proxy, or a tunnel service. Variant: an onion address (Tor already runs on the Jetson for makima), which opens no port but needs Orbot on the phone and is slow. makima has no funnel feature, and its relay only forwards WireGuard frames between members. | Nothing new. The bridge already carries chat, ask_user buttons, approvals and attachments, with Telegram's own push. The app works at home only, and only if the daemon also listens on the LAN (`--listen`), in plain HTTP. |
-| **Security** | Nothing faces the internet beyond one WireGuard port, which answers only known keys. The phone's key becomes a mesh credential: revoke it on loss. | A new internet-facing surface: the API, `/v1/pair` with its short codes, and every token usable from anywhere. Needs TLS, rate limits, and probably keeping `/v1/pair` off the relay. | Telegram sees the conversation, as it does today. A plain-HTTP LAN listener exposes the token on the home Wi-Fi. |
-| **Cellular / asleep** | The phone dials out, so carrier NAT is fine. The WireGuard app's on-demand rules reconnect on network changes, and an idle tunnel costs little. Without a public endpoint, nothing works on cellular. | Works anywhere HTTPS does. | Away, only Telegram. |
-| **Effort** | makima side: medium (Justin's project). App side: none. | Medium: hosting, TLS, hardening. App side: only a URL. | Small: the app plus a LAN listen. |
-| **Architecture Justin owns** | makima (managed mode, foreign peers), the home router. | The API boundary: midna's API goes public; who may pair and approve from outside. | Little: a LAN listen. Telegram stays the away path. |
+- **Units:** coordinates are 0..1 of the image as displayed, after rotation. `at`, `from` and `to` are milliseconds.
+- **Attachments never change.** The app also uploads a flattened copy with the marks drawn in (linked by `renderedAs`), so the brain, Telegram and an older daemon see them.
+- **Notes, frames and ranges reach the brain as text** with the message ("marked 0:42–0:51: 'here it freezes'"); it can cut a frame or clip from those times.
+- **Building it** needs a migration (an annotations column on messages and outbox items), and history must carry the annotations so clients can redraw them.
+- **On the phone,** `Line.attachments` stays as it is; marks attach beside it, keyed by attachment id.
 
-**In every option,** iOS suspends the app in the background. Its event stream stops, and it catches up from `events(since)` when opened. Notifications therefore come from outside the app (section 2). **Approvals:** any paired client's token can answer one (that's how Telegram does it), and midna's own brain can reach some of those tokens. The fixes are proposed and await Justin. A phone token is one more such token, and under (b) a stolen one works from anywhere. The app could require Face ID before it answers; that needs no paid capability.
+## 4. Free sideloading: what it allows
 
-## 4. Questions only Justin can answer
+- **No APNs push, and no Network Extension.**
+- **A dev build, not Expo Go:** `expo prebuild`, signed in Xcode with the Personal Team. A Release build carries its own JavaScript.
+- **The profile expires after 7 days;** the app then stops launching until it's reinstalled from the Mac.
+- **Limits:** 3 sideloaded apps per phone, and 10 new app ids a week.
 
-1. **Reachability:** (a), (b) or (c)? Or (c) now and (a) or (b) later.
-2. **If (a):** will makima accept foreign WireGuard peers in managed mode, with a config or QR export? Will the home router forward UDP 51820, or allow it over IPv6? Or wait for a paid account and a native makima client?
-3. **If (b):** where does it run (a VPS on the mesh, a tunnel service, an onion address)? May midna's API face the internet at all, and may approvals be answered through it?
-4. **Notifications without APNs:** Telegram stays the push channel, or ntfy (ntfy.sh sees the content, or only wake-ups if self-hosted)? Or a paid account later?
-5. **Approvals:** may the phone approve shell and input on the Mac, as Telegram may (fork 1)? With Face ID on the phone?
-6. **Re-signing:** is reinstalling from Xcode every 7 days acceptable?
-7. **Home access:** may the daemon also listen on the LAN, in plain HTTP, for (c)?
+## 5. Onto Justin's iPhone
+
+1. **On the Mac:**
+   - Accept Xcode's licence once (`sudo xcodebuild -license accept`).
+   - Add the Apple ID in Xcode → Settings → Accounts; this creates the Personal Team.
+2. **Generate the native project:** `cd clients/mobile && bunx expo prebuild -p ios`. Open `ios/midna.xcworkspace`.
+3. **Set signing:**
+   - Under Signing & Capabilities, pick the Personal Team.
+   - If Xcode says the id is taken, change the bundle id from `sh.midna.mobile` to something unique to him, e.g. `dev.justin06lee.midna`.
+4. **Get the phone ready:**
+   - Connect it by cable and trust the Mac.
+   - Turn on Settings → Privacy & Security → Developer Mode (it restarts).
+5. **Build and run:**
+   - Choose the iPhone as the destination.
+   - Set Product → Scheme → Edit Scheme → Run → Build Configuration to Release, so the JavaScript is bundled and no Metro is needed.
+   - Run.
+   - Or, in one command: `bunx expo run:ios --device --configuration Release`.
+6. **Trust the developer on the phone:** Settings → General → VPN & Device Management → his Apple ID → Trust.
+7. **Pair:**
+   - Open midna and pair with `http://midna:7717` and a code from `midna pair`, run on the host or on the Mac (its CLI is paired).
+   - Tailscale must be on, and the daemon's `listen` must include `tailscale0`.
+8. **Every 7 days,** repeat step 5. The pairing and the drafts survive a reinstall over the same app id.
