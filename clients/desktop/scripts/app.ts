@@ -6,15 +6,14 @@
  *
  * On macOS the app is signed with this Mac's "midna dev" identity
  * (scripts/signing.ts), so the permissions it's granted survive the update;
- * without it the build is ad hoc, and loses them.
+ * without it the build is ad hoc, and loses them. An ad-hoc build is only
+ * installed where nothing is lost by it (guard.ts).
  */
-import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SIGNING_IDENTITY, signingReady } from "./signing.ts";
-
-/** tauri.conf.json's identifier, which every signed build keeps. */
-const BUNDLE_ID = "sh.midna.desktop";
+import { BUNDLE_ID, refuseInstall, signer, type Signer } from "./guard.ts";
+import { SIGNING_IDENTITY, hasSigningIdentity, signingReady } from "./signing.ts";
 
 const here = join(import.meta.dir, "..");
 const bundleDir = join(here, "src-tauri", "target", "release", "bundle");
@@ -25,6 +24,23 @@ const run = (argv: string[], cwd = here) => {
 };
 
 const kind = process.platform === "darwin" ? "app" : has("dpkg") ? "deb" : has("rpm") ? "rpm" : "appimage";
+const install = !process.argv.includes("--no-install");
+const dest = join(homedir(), "Applications", "midna.app");
+
+/** Stop before an ad-hoc build replaces a midna.app whose permissions it would lose. */
+function guard(bundleId: string, build: Signer): void {
+  const refusal = refuseInstall({ bundleId, build, identity: hasSigningIdentity(), installed: signer(dest), allowAdHoc: process.env.MIDNA_ALLOW_ADHOC === "1" });
+  if (!refusal) return;
+  console.error(`\n${refusal}\n`);
+  process.exit(1);
+}
+
+// Before building: it would be signed only if codesign can use the identity now.
+if (kind === "app" && install) {
+  const conf = JSON.parse(readFileSync(join(here, "src-tauri", "tauri.conf.json"), "utf8")) as { identifier: string };
+  guard(conf.identifier, signingReady() ? "midna dev" : "adhoc");
+}
+
 run(["bun", "scripts/sidecar.ts"]);
 run(["bun", "run", "tauri", "build", "--bundles", kind]);
 
@@ -55,11 +71,12 @@ function sign(app: string): void {
 
 if (kind === "app") sign(built("macos", ".app"));
 
-if (process.argv.includes("--no-install")) process.exit(0);
+if (!install) process.exit(0);
 
 if (kind === "app") {
   const app = built("macos", ".app");
-  const dest = join(homedir(), "Applications", "midna.app");
+  // And as built: the bundle's own id and signature.
+  guard(Bun.spawnSync(["/usr/bin/defaults", "read", join(app, "Contents", "Info.plist"), "CFBundleIdentifier"]).stdout.toString().trim(), signer(app));
   mkdirSync(join(homedir(), "Applications"), { recursive: true });
   rmSync(dest, { recursive: true, force: true });
   cpSync(app, dest, { recursive: true });
