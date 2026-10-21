@@ -5,7 +5,7 @@ export { Devices, type Device } from "./devices.ts";
 export { Hands, SUMMARY_MAX, type HandsRecord, type HandsSnapshot } from "./hands.ts";
 export { Inbound, type InboundEvent } from "./inbound.ts";
 export { Jobs, LOG_TAIL_BYTES, logTail, type Job, type JobStatus } from "./jobs.ts";
-export { Log, MAIN, type Conversation, type Message } from "./log.ts";
+export { Log, MAIN, replyRef, type Conversation, type Message } from "./log.ts";
 export { Memory, FACT_KINDS, ARCHIVE_BELOW, strength, type Fact, type FactKind, type LinkEntity, type ScoredFact } from "./memory.ts";
 export {
   Planning,

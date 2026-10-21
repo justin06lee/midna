@@ -21,6 +21,7 @@ import {
   type BridgeSetupResult,
   type HandsStreamEvent,
   type Health,
+  type MessageReceipt,
   type PairResponse,
   type StreamEvent,
   type Status,
@@ -219,14 +220,15 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     if (!msg.data.text.replace(QUEUE_PREFIX, "").trim() && !msg.data.attachments?.length) return c.json({ error: "a message needs text or an attachment" }, 400);
     const unknown = msg.data.attachments?.find((id) => !store.attachments.get(id));
     if (unknown) return c.json({ error: `no attachment ${unknown} — upload it first` }, 400);
-    const conversationId = assistant.receive({
+    const receipt = assistant.receive({
       text: msg.data.text,
       client: msg.data.client,
       ...(msg.data.conversationId ? { conversationId: msg.data.conversationId } : {}),
       ...(msg.data.replyTo ? { replyTo: msg.data.replyTo } : {}),
       ...(msg.data.attachments?.length ? { attachments: msg.data.attachments } : {}),
+      ...(msg.data.inReplyTo ? { inReplyTo: msg.data.inReplyTo } : {}),
     });
-    return c.json({ conversationId }, 202);
+    return c.json<MessageReceipt>(receipt, 202);
   });
 
   // ── inbound events: what other programs tell midna, heard in the background ──

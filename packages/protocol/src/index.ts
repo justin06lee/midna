@@ -80,11 +80,53 @@ export type OutboxItem = z.infer<typeof OutboxItem>;
 /** Live events on GET /v1/events. Only `outbox` events carry a replay id. */
 export type StreamEvent =
   | { type: "outbox"; item: OutboxItem }
-  | { type: "user_message"; id: number; conversationId: string; text: string; client: string; createdAt: number; replyTo: number | null; attachments: Attachment[] }
+  | { type: "user_message"; id: number; conversationId: string; text: string; client: string; createdAt: number; replyTo: number | null; attachments: Attachment[]; inReplyTo?: ReplyRef | null }
   | { type: "status"; conversationId: string | null; state: "thinking" | "idle" }
   | { type: "activity"; conversationId: string | null; tool: string }
   /** Device hands: something waits for the user's yes (state "pending"), or was answered, expired or dropped. 0.9+. */
   | { type: "approval"; approval: Approval };
+
+/** What a client knows of a line it replies to but can't name (sent before it kept ids): who, when, its text and files. */
+export const ReplyFallback = z.object({
+  from: z.enum(["user", "midna"]),
+  at: z.number().optional(),
+  text: z.string().max(8_000),
+  /** The names of files that went with it. */
+  files: z.array(z.string().max(300)).max(20).optional(),
+});
+export type ReplyFallback = z.infer<typeof ReplyFallback>;
+
+/**
+ * A native reply (Telegram's "reply") to an earlier line: which one, and the
+ * part of it the user highlighted. Separate from `replyTo`, which answers a
+ * question. An id that doesn't resolve leaves the fallback, or no link; it
+ * never fails the message. 0.10.1+.
+ */
+export const InReplyTo = z
+  .object({
+    /** The line's message id (HistoryItem.id, user_message.id, or the send response's messageId). */
+    messageId: z.number().int().positive().optional(),
+    /** Or, for one of midna's lines, its outbox id: what a client that delivered it knows. */
+    outboxId: z.number().int().positive().optional(),
+    /** The part of it the user highlighted, when they did. */
+    quote: z.string().max(2_000).optional(),
+    fallback: ReplyFallback.optional(),
+  })
+  .refine((r) => r.messageId !== undefined || r.outboxId !== undefined || r.fallback !== undefined, { message: "inReplyTo needs a messageId, an outboxId or a fallback" });
+export type InReplyTo = z.input<typeof InReplyTo>;
+
+/** A user line's native reply as kept: the line it points at (null when only the fallback was known), the highlighted part, and the fallback. */
+export interface ReplyRef {
+  messageId: number | null;
+  quote: string | null;
+  fallback: ReplyFallback | null;
+}
+
+/** POST /v1/messages: where the message went, and its id (from 0.10.1) for a client to map its own ids to. */
+export interface MessageReceipt {
+  conversationId: string;
+  messageId?: number;
+}
 
 export const SendMessage = z
   .object({
@@ -95,6 +137,8 @@ export const SendMessage = z
     client: z.string().default("unknown"),
     /** The outbox question this answers, when it answers one. */
     replyTo: z.number().optional(),
+    /** A native reply to an earlier line. */
+    inReplyTo: InReplyTo.optional(),
     /** Ids of attachments uploaded first with MidnaClient.upload, in the order to show them. */
     attachments: z.array(z.string()).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   })
@@ -172,6 +216,8 @@ export interface HistoryItem {
   createdAt: number;
   /** The question this user message answered. */
   replyTo: number | null;
+  /** The earlier line a user message is a native reply to. From 0.10.1; older hosts leave it out. */
+  inReplyTo?: ReplyRef | null;
   /** How a midna line was delivered — kind, priority, and a question's options. */
   outbox: { id: number; seq: number | null; kind: OutboxItem["kind"]; priority: Priority; options: string[] | null; answered: boolean } | null;
   /** Images and files that went with the line. */
@@ -307,7 +353,7 @@ export class MidnaClient {
   updateSettings(patch: SettingsPatch): Promise<Status> {
     return this.call("PATCH", "/v1/settings", patch);
   }
-  send(msg: SendMessage): Promise<{ conversationId: string }> {
+  send(msg: SendMessage): Promise<MessageReceipt> {
     return this.call("POST", "/v1/messages", msg);
   }
   /** Every paired device that has said hello to hands, online or not. */

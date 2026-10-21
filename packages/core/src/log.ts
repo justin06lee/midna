@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { HistoryItem } from "@midna/protocol";
+import type { HistoryItem, ReplyFallback, ReplyRef } from "@midna/protocol";
 import type { Attachments } from "./attachments.ts";
 import { ftsQuery } from "./planning.ts";
 
@@ -25,6 +25,12 @@ export interface Message {
   seen_by_brain: number;
   outbox_id: number | null;
   reply_to: number | null;
+  /** The earlier line this user message is a native reply to. */
+  in_reply_to: number | null;
+  /** The part of that line the user highlighted. */
+  reply_quote: string | null;
+  /** What the client knew of a line it couldn't name: ReplyFallback as JSON. */
+  reply_fallback: string | null;
   created_at: number;
 }
 
@@ -37,6 +43,9 @@ interface HistoryRow {
   client: string | null;
   created_at: number;
   reply_to: number | null;
+  in_reply_to: number | null;
+  reply_quote: string | null;
+  reply_fallback: string | null;
   o_id: number | null;
   o_seq: number | null;
   o_kind: "message" | "notification" | "question";
@@ -68,17 +77,54 @@ export class Log {
    * from a wakeup is news to the chat brain too.
    */
   addMessage(
-    m: { conversationId: string; role: Message["role"]; text: string; client?: string; seen: boolean; outboxId?: number; replyTo?: number },
+    m: {
+      conversationId: string;
+      role: Message["role"];
+      text: string;
+      client?: string;
+      seen: boolean;
+      outboxId?: number;
+      replyTo?: number;
+      inReplyTo?: { messageId: number | null; quote: string | null; fallback: ReplyFallback | null } | null;
+    },
     now = Date.now(),
   ): Message {
     this.conversation(m.conversationId, now);
     this.db.query("UPDATE conversations SET last_active_at = $now WHERE id = $id").run({ now, id: m.conversationId });
+    const r = m.inReplyTo;
     return this.db
       .query(
-        `INSERT INTO messages (conversation_id, role, text, client, seen_by_brain, outbox_id, reply_to, created_at)
-         VALUES ($c, $role, $text, $client, $seen, $o, $r, $now) RETURNING *`,
+        `INSERT INTO messages (conversation_id, role, text, client, seen_by_brain, outbox_id, reply_to, in_reply_to, reply_quote, reply_fallback, created_at)
+         VALUES ($c, $role, $text, $client, $seen, $o, $r, $ir, $q, $fb, $now) RETURNING *`,
       )
-      .get({ c: m.conversationId, role: m.role, text: m.text, client: m.client ?? null, seen: m.seen ? 1 : 0, o: m.outboxId ?? null, r: m.replyTo ?? null, now }) as Message;
+      .get({
+        c: m.conversationId,
+        role: m.role,
+        text: m.text,
+        client: m.client ?? null,
+        seen: m.seen ? 1 : 0,
+        o: m.outboxId ?? null,
+        r: m.replyTo ?? null,
+        ir: r?.messageId ?? null,
+        q: r?.quote ?? null,
+        fb: r?.fallback ? JSON.stringify(r.fallback) : null,
+        now,
+      }) as Message;
+  }
+
+  get(id: number): Message | null {
+    return this.db.query("SELECT * FROM messages WHERE id = $id").get({ id }) as Message | null;
+  }
+
+  /** The line a native reply points at, by its message id or (one of midna's) its outbox id, in this conversation only. */
+  resolveReply(conversationId: string, ref: { messageId?: number; outboxId?: number }): number | null {
+    const row =
+      ref.messageId !== undefined
+        ? this.db.query("SELECT id FROM messages WHERE id = $id AND conversation_id = $c").get({ id: ref.messageId, c: conversationId })
+        : ref.outboxId !== undefined
+          ? this.db.query("SELECT id FROM messages WHERE outbox_id = $o AND conversation_id = $c ORDER BY id LIMIT 1").get({ o: ref.outboxId, c: conversationId })
+          : null;
+    return (row as { id: number } | null)?.id ?? null;
   }
 
   unseen(conversationId: string): Message[] {
@@ -107,7 +153,7 @@ export class Log {
   history(conversationId: string, opts: { before?: number; limit?: number } = {}): HistoryItem[] {
     const rows = this.db
       .query(
-        `SELECT m.id, m.role, m.text, m.client, m.created_at, m.reply_to,
+        `SELECT m.id, m.role, m.text, m.client, m.created_at, m.reply_to, m.in_reply_to, m.reply_quote, m.reply_fallback,
                 o.id AS o_id, o.seq AS o_seq, o.kind AS o_kind, o.priority AS o_priority, o.options AS o_options,
                 o.text AS o_text, o.answered_at AS o_answered
          FROM messages m LEFT JOIN outbox o ON o.id = m.outbox_id
@@ -124,6 +170,7 @@ export class Log {
       client: r.client,
       createdAt: r.created_at,
       replyTo: r.reply_to,
+      inReplyTo: replyRef(r),
       outbox: r.o_id
         ? { id: r.o_id, seq: r.o_seq, kind: r.o_kind, priority: r.o_priority, options: r.o_options ? JSON.parse(r.o_options) : null, answered: r.o_answered != null }
         : null,
@@ -181,4 +228,10 @@ export class Log {
   spend(since: number): number {
     return (this.db.query("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM episodes WHERE started_at >= $s").get({ s: since }) as { c: number }).c;
   }
+}
+
+/** A message's native reply, as clients get it; null when it isn't one. */
+export function replyRef(m: { in_reply_to: number | null; reply_quote: string | null; reply_fallback: string | null }): ReplyRef | null {
+  if (m.in_reply_to === null && m.reply_fallback === null) return null;
+  return { messageId: m.in_reply_to, quote: m.reply_quote, fallback: m.reply_fallback ? (JSON.parse(m.reply_fallback) as ReplyFallback) : null };
 }

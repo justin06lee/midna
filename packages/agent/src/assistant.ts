@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { MAIN, HOUR, fmt, logTail, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
-import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt } from "@midna/protocol";
+import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt, type InReplyTo, type ReplyFallback, type ReplyRef } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
-import { INTRODUCTION, eventsTask, jobTask, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, eventsTask, jobTask, replyNote, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -113,19 +113,52 @@ export class Assistant {
    * in progress in its conversation, and any wakeup — to be answered at
    * once; one that starts with /queue waits for the turn in progress.
    */
-  receive(m: { text: string; client: string; conversationId?: string; replyTo?: number; attachments?: string[] }): string {
+  receive(m: { text: string; client: string; conversationId?: string; replyTo?: number; attachments?: string[]; inReplyTo?: InReplyTo }): { conversationId: string; messageId: number } {
     const conv = m.conversationId ?? MAIN;
     const queued = QUEUE_PREFIX.test(m.text);
     const text = queued ? m.text.replace(QUEUE_PREFIX, "") : m.text;
     const question = m.replyTo ? this.store.outbox.get(m.replyTo) : null;
     if (question) this.store.outbox.answered(question.id);
-    const msg = this.store.log.addMessage({ conversationId: conv, role: "user", text, client: m.client, seen: false, ...(question ? { replyTo: question.id } : {}) });
+    const inReplyTo = m.inReplyTo ? this.replyRef(conv, m.inReplyTo) : null;
+    const msg = this.store.log.addMessage({ conversationId: conv, role: "user", text, client: m.client, seen: false, ...(question ? { replyTo: question.id } : {}), inReplyTo });
     const attachments = m.attachments?.length ? this.store.attachments.link(m.attachments, { messageId: msg.id }) : [];
-    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments });
+    this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments, inReplyTo });
     this.lastUserAt.set(conv, Date.now());
     if (!queued) this.interrupt(conv);
     this.kick(conv);
-    return conv;
+    return { conversationId: conv, messageId: msg.id };
+  }
+
+  /** A native reply as kept: the line it names in this conversation, else what the client knew of it, else nothing. */
+  private replyRef(conv: string, r: InReplyTo): ReplyRef | null {
+    const messageId = this.store.log.resolveReply(conv, { ...(r.messageId !== undefined ? { messageId: r.messageId } : {}), ...(r.outboxId !== undefined ? { outboxId: r.outboxId } : {}) });
+    if (messageId === null && !r.fallback) return null;
+    return { messageId, quote: r.quote?.trim() || null, fallback: messageId === null ? (r.fallback ?? null) : null };
+  }
+
+  /** The note before a user's words saying which earlier line they replied to; none when it isn't a reply, or it only repeats the question it answers. */
+  private replied(m: Message, tz: string): string | undefined {
+    const { store } = this;
+    if (m.role !== "user") return undefined;
+    if (m.in_reply_to !== null) {
+      const t = store.log.get(m.in_reply_to);
+      if (!t) return undefined;
+      // A reply to the very question it answers is said once, as "answering your question".
+      if (m.reply_to !== null && t.outbox_id === m.reply_to) return undefined;
+      const item = t.outbox_id ? store.outbox.get(t.outbox_id) : null;
+      const files = (t.outbox_id ? store.attachments.forOutbox([t.outbox_id]).get(t.outbox_id) : store.attachments.forMessages([t.id]).get(t.id)) ?? [];
+      return replyNote({
+        from: t.role,
+        at: fmt(t.created_at, tz),
+        text: item?.text ?? t.text,
+        quote: m.reply_quote,
+        files: files.map((f) => f.name),
+        options: item?.kind === "question" ? (item.options ?? []) : null,
+      });
+    }
+    if (!m.reply_fallback) return undefined;
+    const f = JSON.parse(m.reply_fallback) as ReplyFallback;
+    return replyNote({ from: f.from, at: f.at ? fmt(f.at, tz) : null, text: f.text, quote: m.reply_quote, files: f.files ?? [], options: null });
   }
 
   /**
@@ -262,7 +295,7 @@ export class Assistant {
         const history = fresh ? store.log.recent(conv, HISTORY_ON_FRESH, unseen[0]!.id) : [];
         const sent = store.attachments.forMessages([...history, ...unseen].filter((m) => m.role === "user").map((m) => m.id));
         const files = (m: Message) => (sent.get(m.id) ?? []).map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) }));
-        const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, notes.map((n) => interruptionNote(n, !fresh)));
+        const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, (m) => this.replied(m, settings.timezone), notes.map((n) => interruptionNote(n, !fresh)));
         return this.episode({ kind: "chat", conversationId: conv, prompt, resume: fresh ? undefined : convo.brain_session!, turn });
       };
       let result: Awaited<ReturnType<typeof run>>;
@@ -625,10 +658,12 @@ function turnPrompt(
   now: number,
   questionText: (id: number) => string | undefined,
   files: (m: Message) => Array<Attachment & { path: string | null }>,
+  replied: (m: Message) => string | undefined,
   notes: string[] = [],
 ): string {
   const line = (m: Message) => {
     const q = m.reply_to ? questionText(m.reply_to) : undefined;
+    const r = replied(m);
     // What the user sent with it, as files in the workspace the brain can open.
     const sent =
       m.role === "user"
@@ -636,7 +671,7 @@ function turnPrompt(
             .map((f, i, all) => `\n  Attached ${all.length > 1 ? `${i + 1}/${all.length} ` : ""}${f.kind} "${f.name}" (${f.mime}, ${size(f.size)})${f.caption ? `, captioned "${f.caption}"` : ""}${f.path ? `, saved at \`${f.path}\`` : ""}`)
             .join("")
         : "";
-    return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
+    return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${r ? `${r} ` : ""}${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
   };
   // The user's words come first, marked as theirs: Claude Code may put a background-task
   // notification ("NOT USER INPUT") in front of this prompt, and it must not swallow them.

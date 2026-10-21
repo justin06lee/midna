@@ -387,6 +387,15 @@ const MIGRATIONS: string[] = [
   CREATE INDEX jobs_status ON jobs(status);
   CREATE INDEX jobs_wakeup ON jobs(wakeup_id);
   `,
+  // Native replies (Telegram's "reply"): the earlier line a user's message
+  // points at, the part of it they highlighted, and what the client knew of
+  // a line it couldn't name (JSON). Separate from reply_to, which answers a
+  // question.
+  `
+  ALTER TABLE messages ADD COLUMN in_reply_to INTEGER REFERENCES messages(id);
+  ALTER TABLE messages ADD COLUMN reply_quote TEXT;
+  ALTER TABLE messages ADD COLUMN reply_fallback TEXT;
+  `,
 ];
 
 export function openDatabase(path: string): Database {
