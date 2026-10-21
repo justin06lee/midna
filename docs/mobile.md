@@ -4,8 +4,10 @@
 
 ## 1. Decisions (Justin, 2026-10-20)
 
-- **Reachability is Tailscale.** The phone runs Tailscale and reaches midna over the tailnet, at an address typed into the app: `http://midna:7717` (MagicDNS) or a 100.x IP.
-  - The daemon listens on the tailnet's address too, via a `listen` entry naming `tailscale0` (065fa4b).
+- **Reachability will be Tailscale, switched on later, when Justin is home.** The phone will run Tailscale and reach midna over the tailnet, at an address typed into the app: `http://midna:7717` (MagicDNS) or a 100.x IP.
+  - Until then, nothing changes: no Tailscale installs, and no change to the daemon's listen addresses. The address is just a field, so a tailnet one drops in later.
+  - Tests against the real midna use its makima address, `http://10.77.0.1:7717`, from the simulator on the Mac (the phone itself isn't a makima peer). The default for testing is a throwaway local daemon. Pairing the simulator with the live host needs the Lead's OK first.
+  - At switch-over, the daemon listens on the tailnet's address too, via a `listen` entry naming `tailscale0` (065fa4b, not yet released).
   - It's plain HTTP inside the tailnet, and the token auth stays.
   - App Transport Security allows exactly that: unqualified names and IPs (`NSAllowsLocalNetworking`), `*.ts.net`, and 100.64.0.0/10.
   - makima is not involved.
@@ -86,5 +88,5 @@ interface Annotation {
 6. **Trust the developer on the phone:** Settings → General → VPN & Device Management → his Apple ID → Trust.
 7. **Pair:**
    - Open midna and pair with `http://midna:7717` and a code from `midna pair`, run on the host or on the Mac (its CLI is paired).
-   - Tailscale must be on, and the daemon's `listen` must include `tailscale0`.
+   - This waits for the Tailscale switch-over: Tailscale on the phone, and `tailscale0` in the daemon's `listen`.
 8. **Every 7 days,** repeat step 5. The pairing and the drafts survive a reinstall over the same app id.

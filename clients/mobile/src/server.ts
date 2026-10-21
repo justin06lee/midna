@@ -1,8 +1,8 @@
 import { DEFAULT_PORT } from "@midna/protocol";
 
 /**
- * Where midna is, as typed on a phone: "midna", "midna:7717", "100.101.1.2"
- * or a whole URL. Over the tailnet it is plain HTTP on midna's port; a URL
+ * Where midna is, as typed on a phone: "midna", "midna:7717", "10.77.0.1"
+ * or a whole URL. Inside a private network it is plain HTTP on midna's port; a URL
  * with its own scheme is taken as it is. Null when it isn't an address.
  */
 export function serverUrl(input: string): string | null {

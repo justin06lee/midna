@@ -12,7 +12,7 @@ import { Button, Field, Problem } from "../ui";
 const REACH_MS = 6_000;
 
 /**
- * Pair this phone with midna: where it is on the tailnet, a one-time code
+ * Pair this phone with midna: where it is (a tailnet name, a mesh or LAN address), a one-time code
  * from `midna pair`, and what to call the phone. Pairing again names the
  * pairing it replaces (only to the same host), so the host retires it.
  */
@@ -27,7 +27,7 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
 
   const pair = async () => {
     const url = serverUrl(server.value);
-    if (!url) return setProblem("That isn't an address. Try http://midna:7717, or midna's 100.x address.");
+    if (!url) return setProblem("That isn't an address. Try something like http://midna:7717 or 10.77.0.1:7717.");
     if (!code.trim()) return setProblem("Enter the pairing code. Get one on the host with `midna pair`.");
     setBusy(true);
     setProblem("");
@@ -47,7 +47,7 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
       onPaired(connection);
     } catch (err) {
       if (err instanceof MidnaError) setProblem(err.status === 400 || err.status === 401 || err.status === 403 ? "That code didn't work. Codes are single-use and expire after a few minutes; get a new one with `midna pair`." : `midna said: ${err.message}`);
-      else setProblem(`Couldn't reach midna at ${url}. Is Tailscale on, and is this the right address?`);
+      else setProblem(`Couldn't reach midna at ${url}. Is this phone on a network that reaches it, and is this the right address?`);
     } finally {
       setBusy(false);
     }
@@ -59,7 +59,7 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
         <View style={s.head}>
           <Text style={[s.title, { color: t.ink }]}>{previous ? "Pair again" : "Pair with midna"}</Text>
           <Text style={[s.lede, { color: t.dim }]}>
-            This phone reaches midna over your tailnet. For a code, run <Text style={s.code}>midna pair</Text> on midna's machine or your Mac.
+            Enter midna's address and a pairing code. For a code, run <Text style={s.code}>midna pair</Text> on midna's machine or your Mac.
           </Text>
         </View>
         <Field
@@ -72,7 +72,7 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
           keyboardType="url"
           textContentType="URL"
           returnKeyType="next"
-          hint="Its MagicDNS name or 100.x address. Port 7717 unless you say otherwise."
+          hint="Its name or IP on a network this phone is on. Port 7717 unless you say otherwise."
         />
         <Field testID="pair-code" label="Pairing code" value={code} onChangeText={setCode} placeholder="ABCD2345" autoCapitalize="characters" returnKeyType="next" />
         <Field testID="pair-name" label="Call this phone" value={name.value} onChangeText={name.set} placeholder="iPhone" returnKeyType="go" onSubmitEditing={() => void pair()} />
