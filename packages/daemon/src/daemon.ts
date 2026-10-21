@@ -5,7 +5,7 @@ import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
-import { ensureHome, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
+import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
 import { HandsHub } from "./hands.ts";
 import { createApp } from "./server.ts";
 import { VERSION } from "./version.ts";
@@ -129,16 +129,25 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const serving = { fetch: app.fetch, idleTimeout: 0, maxRequestBodySize: MAX_ATTACHMENT_BYTES + 1024 * 1024 };
   const server = Bun.serve({ hostname: host, port, ...serving });
 
-  // Extra addresses may not exist yet at boot (a VPN interface comes up late): keep trying.
+  // Extra addresses may not exist yet at boot (a VPN interface comes up late), or ever
+  // again once the VPN is gone: keep trying, and say once what isn't there.
   const extra = new Map<string, { stop(force?: boolean): void }>();
+  const told = new Set<string>();
+  const waiting = (what: string) => told.has(what) || (told.add(what), console.log(`  waiting   for ${what}`));
+  for (const entry of config.listen.filter(isWildcard)) console.error(`[midna] not listening on "${entry}": that is every network, the LAN too — name one address or interface`);
   const bindExtra = () => {
-    for (const addr of config.listen) {
-      if (extra.has(addr) || addr === host) continue;
-      try {
-        extra.set(addr, Bun.serve({ hostname: addr, port, ...serving }));
-        console.log(`  also on   ${addr}:${port}`);
-      } catch {
-        /* not there yet */
+    for (const entry of config.listen.filter((e) => !isWildcard(e))) {
+      const addrs = listenAddresses(entry);
+      if (!addrs.length) waiting(entry);
+      for (const addr of addrs) {
+        if (extra.has(addr) || addr === host) continue;
+        const at = `${addr.includes(":") ? `[${addr}]` : addr}:${port}`;
+        try {
+          extra.set(addr, Bun.serve({ hostname: addr, port, ...serving }));
+          console.log(`  also on   ${at}`);
+        } catch {
+          waiting(at);
+        }
       }
     }
   };

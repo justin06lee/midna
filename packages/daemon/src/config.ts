@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { isIP } from "node:net";
+import { homedir, networkInterfaces, platform } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PORT } from "@midna/protocol";
 
@@ -27,6 +28,8 @@ export interface DaemonConfig {
   /**
    * More addresses to answer on, e.g. this machine's Tailscale IP — Tailscale,
    * unlike makima, does not carry loopback services to the other machines.
+   * An entry is an IP, or an interface by name ("tailscale0"): whatever
+   * addresses it has. Never a wildcard — see listenAddresses.
    */
   listen: string[];
   bridges: Record<string, BridgeConfig>;
@@ -57,7 +60,23 @@ export function loadConfig(home = midnaHome()): DaemonConfig {
   const file = paths(home).config;
   if (!existsSync(file)) return structuredClone(DEFAULTS);
   const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<DaemonConfig>;
-  return { ...structuredClone(DEFAULTS), ...raw, bridges: { ...raw.bridges } };
+  // A hand-edited `"listen": "tailscale0"` or `null` still means what it says.
+  return { ...structuredClone(DEFAULTS), ...raw, listen: [raw.listen ?? []].flat(), bridges: { ...raw.bridges } };
+}
+
+/** 0.0.0.0, ::, "" and their spellings: every network at once, the LAN included. */
+export const isWildcard = (addr: string) => /^(::ffff:)?[0:.]*$/i.test(addr);
+
+/**
+ * The addresses one `listen` entry stands for right now. An IP stands for
+ * itself; anything else names an interface and stands for the addresses it
+ * has at the moment — none while it is down or gone. Link-local addresses
+ * are left out, and a wildcard is never one: it would open midna to every
+ * network instead of one.
+ */
+export function listenAddresses(entry: string, interfaces = networkInterfaces()): string[] {
+  const addrs = isIP(entry) ? [entry] : (interfaces[entry] ?? []).map((a) => a.address).filter((a) => !/^fe[89ab]/i.test(a));
+  return addrs.filter((a) => !isWildcard(a));
 }
 
 /** Written atomically and private: it may hold bridge launch commands with secrets in their state paths. */
