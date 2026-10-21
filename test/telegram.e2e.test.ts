@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { MidnaClient } from "@midna/protocol";
 import type { Brain, BrainRun } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "@midna/daemon";
-import { TelegramBridge, setupTelegram, loadState } from "@midna/telegram";
+import { TelegramBridge, setupTelegram, loadState, transcribe } from "@midna/telegram";
 
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
 
@@ -102,7 +102,7 @@ class FakeUna {
       const fields = Object.fromEntries([...form.entries()].filter(([k]) => k !== "audio").map(([k, v]) => [k, String(v)]));
       this.got.push({ name: audio.name, type: audio.type, bytes: audio.size, fields });
       if (this.mode === "slow") await Bun.sleep(3_000);
-      if (this.mode === "down") return Response.json({ detail: "ASR model unloaded (training in progress); retry shortly" }, { status: 503 });
+      if (this.mode === "down") return Response.json({ error: { code: "TRAINING_IN_PROGRESS", message: "ASR model unloaded (training in progress); retry shortly" } }, { status: 503 });
       return Response.json({ id: "01J", text: this.text, raw_text: this.text, cleanup_applied: false, duration_ms: 42_000 });
     },
   });
@@ -373,7 +373,7 @@ describe("telegram bridge", () => {
     expect(prompt).toContain("User: [voice note 0:42, transcribed by una] remind me to call mom at six");
     expect(prompt).toContain('Attached file "voice-911.ogg" (audio/ogg, 1 KB)');
     // una got the recording as it is, known by Telegram's stable id so a retry isn't transcribed twice.
-    expect(una.got).toEqual([{ name: "voice.ogg", type: "audio/ogg", bytes: 17, fields: { client: "midna", app_name: "midna (Telegram)", utterance_id: "midna-telegram-AgADvoice2" } }]);
+    expect(una.got).toEqual([{ name: "voice.ogg", type: "audio/ogg", bytes: 17, fields: { clean: "false", app_name: "telegram", client: "midna-telegram-bridge", utterance_id: "tg-AgADvoice2" } }]);
     // While una listens, the owner sees midna typing.
     expect(tg.calls).toContain("sendChatAction");
   });
@@ -452,5 +452,18 @@ describe("telegram bridge", () => {
     tg.push({ message: { message_id: 932, chat, from: { id: OWNER }, text: "is this still true?", reply_to_message: { message_id: 5, chat, from: { id: 1, is_bot: true }, caption: "the old plan", document: { file_id: "x", file_name: "plan.pdf" } } } });
     await until("third", () => tg.sent.slice(sentBefore).find((m) => m.text === "Noted."));
     expect(prompts.at(-1)).toContain('User: [Replying to your message: "the old plan" — with plan.pdf] is this still true?');
+  });
+  test("una hears the language the bridge's settings name; what it can't read without ffmpeg says so", async () => {
+    una.got = [];
+    const heard = await transcribe(new TextEncoder().encode("OggS 여보세요"), { mime: "audio/ogg", id: "AgADko" }, { una: una.url, language: "ko" });
+    expect(heard).toEqual({ ok: true, text: "remind me to call mom at six", by: "una" });
+    expect(una.got[0]!.fields.language).toBe("ko");
+    const path = process.env.PATH;
+    process.env.PATH = "/nonexistent";
+    try {
+      expect(await transcribe(new Uint8Array(8), { mime: "video/mp4", id: "AgADmp4" }, { una: una.url })).toEqual({ ok: false, why: "una can't read video/mp4 and there's no ffmpeg here to convert it" });
+    } finally {
+      process.env.PATH = path;
+    }
   });
 });

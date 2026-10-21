@@ -30,6 +30,12 @@ export interface TelegramState {
    * LINES_KEPT; an older one is described from what Telegram sends.
    */
   lines?: Record<string, Line>;
+  /**
+   * una, which transcribes voice notes: where it answers (default
+   * http://127.0.0.1:8100, or UNA_URL) and the language it hears
+   * (default: una's own setting, English).
+   */
+  una?: { url?: string; language?: string };
 }
 
 /** A line of the conversation, as a Telegram message stands for it. */
@@ -78,12 +84,14 @@ export class TelegramBridge {
   /** The bot's own user id: a reply to one of its messages is a reply to midna. */
   private botId: number | undefined;
 
-  /** Where una is and how long it gets (tests point it at a fake). */
-  private readonly una: { una?: string; timeoutMs?: number };
+  /** Where una is, what it hears, and how long it gets (tests point it at a fake). */
+  private readonly una: { una?: string; language?: string; timeoutMs?: number };
 
   constructor(private readonly file: string, opts: { midnaUrl?: string; una?: { url?: string; timeoutMs?: number } } = {}) {
-    this.una = { ...(opts.una?.url ? { una: opts.una.url } : {}), ...(opts.una?.timeoutMs ? { timeoutMs: opts.una.timeoutMs } : {}) };
     this.state = loadState(file);
+    const url = opts.una?.url ?? this.state.una?.url;
+    const language = this.state.una?.language;
+    this.una = { ...(url ? { una: url } : {}), ...(language ? { language } : {}), ...(opts.una?.timeoutMs ? { timeoutMs: opts.una.timeoutMs } : {}) };
     this.bot = new Bot(this.state.botToken);
     this.midna = new MidnaClient(opts.midnaUrl ?? this.state.midna.url, this.state.midna.token);
     this.paired = new Promise((r) => (this.markPaired = r));
