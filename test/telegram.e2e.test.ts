@@ -250,7 +250,8 @@ describe("telegram bridge", () => {
     const callsBefore = tg.calls.length;
     tg.text(OWNER, "both please");
     const text = await until("text", () => tg.sent.find((m) => m.text === "Both, and the map:"));
-    const sent = tg.media.slice(before);
+    // The images follow the text: wait for all three, not just the text.
+    const sent = await until("the three images", () => tg.media.length - before >= 3 && tg.media.slice(before));
     expect(sent.map((m) => m.url ?? m.name)).toEqual(["chart.png", "chart.png", "https://example.com/map.png"]);
     const order = tg.calls.slice(callsBefore).filter((c) => c === "sendPhoto" || c === "sendMessage");
     expect(order).toEqual(["sendMessage", "sendPhoto", "sendPhoto", "sendPhoto"]);
