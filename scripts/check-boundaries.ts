@@ -13,6 +13,7 @@ const ALLOWED: Record<string, string[]> = {
   "packages/daemon": ["@midna/core", "@midna/agent", "@midna/protocol"],
   "clients/telegram": ["@midna/protocol"],
   "clients/desktop/src": ["@midna/protocol"],
+  "clients/mobile/src": ["@midna/protocol"],
   "clients/cli": ["@midna/protocol", "@midna/daemon", "@midna/telegram"],
 };
 

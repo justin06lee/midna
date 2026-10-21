@@ -8,6 +8,8 @@
     "scripts"
   ],
   "exclude": [
-    "clients/desktop"
+    "clients/desktop",
+    "clients/mobile/src",
+    "clients/mobile/node_modules"
   ]
 }

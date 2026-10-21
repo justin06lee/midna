@@ -7,7 +7,7 @@
     "clients/*"
   ],
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p clients/desktop --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p clients/desktop --noEmit && bun run --cwd clients/mobile typecheck",
     "test": "bun test",
     "boundaries": "bun scripts/check-boundaries.ts",
     "check": "bun run typecheck && bun run boundaries && bun test",
