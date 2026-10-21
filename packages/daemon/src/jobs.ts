@@ -28,15 +28,25 @@ import type { JobStart, JobsHandle } from "@midna/agent";
 export const JOB_TIMEOUT_DEFAULT = 2 * 60 * 60_000;
 export const JOB_TIMEOUT_MAX = 24 * 60 * 60_000;
 
-// $1 the job's folder, $2 where it runs. The pid comes first, so the daemon can find the job at once.
-const WRAPPER = `d="$1"
+/**
+ * The job's wrapper, written to wrapper.sh in its folder: only `/bin/sh
+ * <that path>` goes on the launch command line. systemd rewrites $ and %
+ * in a unit's command line ($$ came out as a literal $, so the pid file of
+ * every job on the Jetson held "$"); a file is read by sh alone. The pid
+ * comes first, so the daemon can find the job at once.
+ */
+const wrapper = (job: { id: number; dir: string; cwd: string }) => `d=${shq(job.dir)}
 echo $$ > "$d/pid"
-cd "$2" 2>/dev/null || { echo "midna: there is no folder $2" >> "$d/log"; echo 126 > "$d/exit"; exit 126; }
+export MIDNA_JOB_ID=${job.id} MIDNA_JOB_DIR="$d"
+cd ${shq(job.cwd)} 2>/dev/null || { echo "midna: there is no folder "${shq(job.cwd)} >> "$d/log"; echo 126 > "$d/exit"; exit 126; }
 if [ -x /bin/bash ]; then sh=/bin/bash; else sh=/bin/sh; fi
 "$sh" "$d/run.sh" < /dev/null >> "$d/log" 2>&1
 c=$?
 echo "$c" > "$d/exit.tmp" && mv "$d/exit.tmp" "$d/exit"
-exit "$c"`;
+exit "$c"
+`;
+/** What systemd rewrites on a unit's command line: environment references ($), specifiers (%) and escapes (\). */
+const REWRITTEN = /[$%\\]/;
 
 /** The service manager's own variables: they describe midna's unit, not the job's. */
 const NOT_PASSED = /^(INVOCATION_ID|JOURNAL_STREAM|NOTIFY_SOCKET|MANAGERPID|SYSTEMD_EXEC_PID|LISTEN_\w+|WATCHDOG_\w+|CLAUDECODE|_)$/;
@@ -58,6 +68,8 @@ export interface JobRunnerOptions {
   killGraceMs?: number;
   /** The `claude` a prompt job runs; found on PATH by default. */
   claudeBin?: string | null;
+  /** With no pid yet and no unit or process to show it running, how long a job may take to start before it counts as never started. */
+  startGraceMs?: number;
   /** A job ended and its wakeup is due: run the scheduler now rather than at its next tick. */
   onEnded?: (job: Job) => void;
 }
@@ -176,27 +188,30 @@ export class JobRunner implements JobsHandle {
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !NOT_PASSED.test(k)) env[k] = v;
     env.MIDNA_JOB_ID = String(job.id);
     env.MIDNA_JOB_DIR = job.dir;
-    const argv = ["/bin/sh", "-c", WRAPPER, "midna-job", job.dir, job.cwd];
+    const script = join(job.dir, "wrapper.sh");
+    writeFileSync(script, wrapper(job));
+    const argv = ["/bin/sh", script];
 
     if (this.launcher === "systemd") {
+      if (REWRITTEN.test(script)) throw new Error(`systemd would rewrite the job's path ${script} ($, % or \\ in MIDNA_HOME)`);
       const unit = `midna-${name}`;
       // A variable systemd can't carry (a newline in it, say) stays behind rather than failing the job.
       const setenv = Object.entries(env)
         .filter(([, v]) => !/[\x00-\x08\x0a-\x1f\x7f]/.test(v))
         .map(([k, v]) => `--setenv=${k}=${v}`);
       const r = Bun.spawnSync(
-        ["systemd-run", "--user", "--quiet", "--collect", `--unit=${unit}`, `--description=midna job #${job.id}: ${job.label}`, "-p", "TimeoutStopSec=10", ...setenv, ...argv],
+        ["systemd-run", "--user", "--quiet", "--collect", `--unit=${unit}`, `--description=midna job #${job.id}: ${job.label.replace(/%/g, "%%")}`, "-p", "TimeoutStopSec=10", ...setenv, ...argv],
         { stdout: "pipe", stderr: "pipe", env: process.env },
       );
       if (r.exitCode !== 0) throw new Error(`systemd-run failed: ${(r.stderr.toString() || r.stdout.toString()).trim()}`);
       this.store.jobs.launched(job.id, { pid: null, pidStarted: null, unit });
-      // The wrapper writes its pid first thing.
+      // The wrapper writes its pid first thing; failing that, the unit knows its main process.
       for (let i = 0; i < 50; i++) {
-        const pid = readPid(job.dir);
+        const pid = readPid(job.dir) ?? mainPid(unit);
         if (pid) return this.store.jobs.launched(job.id, { pid, pidStarted: processStart(pid) });
         await Bun.sleep(100);
       }
-      // Still none: check() keeps looking, and gives up on it after a while.
+      // Still none: check() keeps looking while the unit runs.
       return;
     }
 
@@ -223,15 +238,18 @@ export class JobRunner implements JobsHandle {
     const code = readExit(job.dir);
     if (code !== null) return exited(code);
     if (job.pid === null) {
-      const pid = readPid(job.dir);
+      const pid = readPid(job.dir) ?? (job.unit ? mainPid(job.unit) : null);
       if (pid) return this.store.jobs.launched(id, { pid, pidStarted: processStart(pid) });
-      if (Date.now() - job.started_at > 30_000) this.finish(job, "failed", null, "it never started");
-      return;
     }
+    // Running while its unit is active or its process is alive, pid file or not.
     if (this.alive(job)) return;
     // It may have written its exit code just as it went.
     const late = readExit(job.dir);
     if (late !== null) return exited(late);
+    if (job.pid === null) {
+      if (Date.now() - job.started_at < (this.opts.startGraceMs ?? 30_000)) return;
+      return this.finish(job, "failed", null, "it never started");
+    }
     this.finish(job, "failed", null, down ? `it ended ${down}, with no exit code: killed, or the machine restarted` : "it ended with no exit code: something outside midna killed it");
   }
 
@@ -289,6 +307,7 @@ export class JobRunner implements JobsHandle {
   }
 
   private alive(job: Job): boolean {
+    if (job.unit && unitActive(job.unit)) return true;
     if (job.pid === null) return false;
     const started = processStart(job.pid);
     if (started === null) return false;
@@ -301,6 +320,26 @@ function readExit(dir: string): number | null {
   if (!existsSync(file)) return null;
   const n = Number(readFileSync(file, "utf8").trim());
   return Number.isInteger(n) ? n : null;
+}
+
+/** Is the job's systemd unit running (or starting)? */
+function unitActive(unit: string): boolean {
+  try {
+    return Bun.spawnSync(["systemctl", "--user", "is-active", "--quiet", unit], { stdout: "ignore", stderr: "ignore", env: process.env }).exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** The unit's main process, as systemd tells it; null when there is none. */
+function mainPid(unit: string): number | null {
+  try {
+    const out = Bun.spawnSync(["systemctl", "--user", "show", "-p", "MainPID", "--value", unit], { stdout: "pipe", stderr: "ignore", env: process.env }).stdout.toString().trim();
+    const n = Number(out);
+    return Number.isInteger(n) && n > 1 ? n : null;
+  } catch {
+    return null;
+  }
 }
 
 function readPid(dir: string): number | null {

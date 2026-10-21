@@ -31,10 +31,12 @@ Nothing reaches the user unless midna sends it with `message_user`. There is no 
 
 ## How a job outlives things
 
-Each job has a folder, `MIDNA_HOME/jobs/job-…/`, holding `run.sh` (the command), `log`, `pid`, and `exit`. A small `sh` wrapper writes `exit` when the command ends. The exit file is how the daemon learns how a job ended, even if the daemon was down when it did.
+Each job has a folder, `MIDNA_HOME/jobs/job-…/`, holding `wrapper.sh`, `run.sh` (the command), `log`, `pid`, and `exit`. The wrapper, a small `sh` script, writes `pid` first and `exit` when the command ends. Only `/bin/sh <its path>` goes on the launch command line: systemd rewrites `$` and `%` there, which in 0.10.0 left a literal `$` in every job's pid file on the Jetson. The exit file is how the daemon learns how a job ended, even if the daemon was down when it did.
 
 - **Linux under systemd (the Jetson):** a restart of `midna.service` kills everything in its cgroup (the default `KillMode=control-group`). So each job runs in a transient user unit of its own, `systemd-run --user --unit midna-job-…`, which is in no cgroup of midna's. `midna.service` itself is unchanged.
 - **Elsewhere (launchd on a Mac, a terminal):** the job gets a session and process group of its own (`setsid`). launchd kills a stopped agent's process group, and a terminal's hangup reaches only its own session, so neither reaches the job.
+
+A job counts as running while its unit is active (under systemd) or its process is alive, whatever its pid file says; only a job with neither, and no exit file, 30 seconds after its start, counts as never started.
 
 When the daemon starts, it looks at every job still marked running:
 - one with an exit file ended while midna was down, and its exit code says how;

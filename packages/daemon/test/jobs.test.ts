@@ -150,31 +150,61 @@ describe("the runner", () => {
     r.shutdown();
   });
 
-  test("under systemd each job gets a transient user unit of its own", async () => {
-    const bin = join(tmp, "fake-systemd");
-    mkdirSync(bin, { recursive: true });
-    // Stands in for systemd-run: records how it was called, then starts the command in a session of its own, as a unit would be.
+  // Stand-ins for systemd-run and systemctl. systemd-run records how it was called and starts the
+  // command in a session of its own, as a unit would be, after rewriting it the way systemd does a
+  // unit's command line ($$ becomes $: what turned every Jetson job's pid file into "$"). systemctl
+  // answers is-active and MainPID from that process, and records a stop.
+  const fakeSystemd = () => {
+    const bin = mkdtempSync(join(tmp, "fake-systemd-"));
     writeFileSync(
       join(bin, "systemd-run"),
-      `#!/bin/sh\nprintf '%s\\0' "$@" > "${bin}/systemd-run.args"\nwhile [ $# -gt 0 ] && [ "$1" != "/bin/sh" ]; do shift; done\nperl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die' "$@" </dev/null >/dev/null 2>&1 &\nexit 0\n`,
+      `#!/bin/sh
+printf '%s\\0' "$@" > "${bin}/systemd-run.args"
+unit=""
+while [ $# -gt 0 ] && [ "$1" != "/bin/sh" ]; do case "$1" in --unit=*) unit="\${1#--unit=}";; esac; shift; done
+perl -MPOSIX -e 'POSIX::setsid(); exec map { s/\\$\\$/\\$/gr } @ARGV or die' "$@" </dev/null >/dev/null 2>&1 &
+echo $! > "${bin}/$unit.mainpid"
+exit 0
+`,
     );
-    writeFileSync(join(bin, "systemctl"), `#!/bin/sh\nprintf '%s\\n' "$@" > "${bin}/systemctl.args"\n`);
+    writeFileSync(
+      join(bin, "systemctl"),
+      `#!/bin/sh
+for u; do :; done
+case "$2" in
+  is-active) kill -0 "$(cat "${bin}/$u.mainpid" 2>/dev/null)" 2>/dev/null ;;
+  show) if [ -n "$NO_MAINPID" ]; then echo 0; else cat "${bin}/$u.mainpid" 2>/dev/null || echo 0; fi ;;
+  stop) printf '%s\\n' "$@" > "${bin}/systemctl.args" ;;
+esac
+`,
+    );
     chmodSync(join(bin, "systemd-run"), 0o755);
     chmodSync(join(bin, "systemctl"), 0o755);
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
+    return { bin, restore: () => (process.env.PATH = path) };
+  };
+
+  test("under systemd each job gets a transient user unit of its own, and nothing systemd rewrites reaches its command line", async () => {
+    const { bin, restore } = fakeSystemd();
     try {
       const { r, ended } = runner({ launcher: "systemd" });
-      const job = await start(r, "echo unit-ok");
+      const job = await start(r, "echo unit-ok in $MIDNA_JOB_ID");
       expect(job.unit).toMatch(/^midna-job-[a-z0-9]+-[0-9a-f]{6}$/);
-      const args = readFileSync(join(bin, "systemd-run.args"), "utf8").split("\0");
+      const args = readFileSync(join(bin, "systemd-run.args"), "utf8").split("\0").filter(Boolean);
       expect(args.slice(0, 4)).toEqual(["--user", "--quiet", "--collect", `--unit=${job.unit}`]);
       expect(args).toContain(`--setenv=MIDNA_JOB_DIR=${job.dir}`);
       expect(args).toContain(`--setenv=PATH=${process.env.PATH}`);
       expect(args.some((a) => a.startsWith("--setenv=INVOCATION_ID="))).toBe(false);
-      expect(args.slice(args.indexOf("/bin/sh") + 3, args.indexOf("/bin/sh") + 6)).toEqual(["midna-job", job.dir, job.cwd]);
+      // The command line is the shell and a path, and the path holds no $, % or \.
+      expect(args.slice(args.indexOf("/bin/sh"))).toEqual(["/bin/sh", join(job.dir, "wrapper.sh")]);
+      expect(job.dir).not.toMatch(/[$%\\]/);
+      // The pid is the wrapper's, as systemd's MainPID would be.
+      expect(job.pid).toBe(Number(readFileSync(join(bin, `${job.unit}.mainpid`), "utf8")));
+      expect(readFileSync(join(job.dir, "pid"), "utf8").trim()).toBe(String(job.pid));
       const done = await until("the job's end", () => ended[0]);
       expect(done).toMatchObject({ status: "done", exit_code: 0 });
+      expect(readFileSync(done.log_path, "utf8")).toBe(`unit-ok in ${job.id}\n`);
 
       const long = await start(r, "sleep 30");
       r.stop(long.id);
@@ -183,9 +213,31 @@ describe("the runner", () => {
       await until("its group gone", () => group(long.pid!).length === 0);
       r.shutdown();
     } finally {
-      process.env.PATH = path;
+      restore();
     }
   });
+
+  test("a pid file that's missing or garbage while the unit runs: still running, no failure, and the real end still comes", async () => {
+    const { restore } = fakeSystemd();
+    process.env.NO_MAINPID = "1";
+    try {
+      const { r, store, ended } = runner({ launcher: "systemd", startGraceMs: 100 });
+      const job = await start(r, "sleep 1; echo finished");
+      // What the Jetson saw: a "$" in the pid file, so no pid at all.
+      writeFileSync(join(job.dir, "pid"), "$\n");
+      store.jobs.launched(job.id, { pid: null, pidStarted: null });
+      await Bun.sleep(600);
+      expect(store.jobs.get(job.id)!.status).toBe("running");
+      expect(ended).toEqual([]);
+      const done = await until("the job's end", () => ended[0]);
+      expect(done).toMatchObject({ id: job.id, status: "done", exit_code: 0, reason: null });
+      expect(done.wakeup_id).toBeNumber();
+      r.shutdown();
+    } finally {
+      delete process.env.NO_MAINPID;
+      restore();
+    }
+  }, 10_000);
 });
 
 describe("the daemon", () => {
