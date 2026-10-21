@@ -1,14 +1,25 @@
 /** The slice of the Telegram Bot API the bridge uses. Plain fetch, no library. */
 
-export interface TgUser { id: number; username?: string; first_name?: string }
+export interface TgUser { id: number; is_bot?: boolean; username?: string; first_name?: string }
 export interface TgChat { id: number; type: string }
 export interface TgPhotoSize { file_id: string; width: number; height: number; file_size?: number }
 /** A document, video, audio, voice note or animation: all a file with an id. */
-export interface TgDocument { file_id: string; file_name?: string; mime_type?: string; file_size?: number }
+export interface TgDocument {
+  file_id: string;
+  /** The same for this file whichever bot fetches it, and stable: what a retry is known by. */
+  file_unique_id?: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
+  /** Seconds, for a voice note, audio, video or video note. */
+  duration?: number;
+}
 export interface TgMessage {
   message_id: number;
   chat: TgChat;
   from?: TgUser;
+  /** Unix seconds. */
+  date?: number;
   text?: string;
   caption?: string;
   /** The same photo at several sizes, smallest first. */
@@ -19,7 +30,11 @@ export interface TgMessage {
   voice?: TgDocument;
   animation?: TgDocument;
   video_note?: TgDocument;
-  reply_to_message?: { message_id: number };
+  /** The message this one replies to, as Telegram has it (without its own reply_to_message). */
+  reply_to_message?: Omit<TgMessage, "reply_to_message">;
+  /** The part of the replied-to message the user highlighted. */
+  quote?: { text: string; position?: number; is_manual?: boolean };
+  reply_markup?: { inline_keyboard?: InlineKeyboard };
 }
 export interface TgCallbackQuery { id: string; from: TgUser; message?: TgMessage; data?: string }
 export interface TgUpdate { update_id: number; message?: TgMessage; callback_query?: TgCallbackQuery }

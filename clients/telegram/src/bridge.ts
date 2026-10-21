@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
 import { APPROVAL_OPTIONS, MidnaClient, MidnaError, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
+import { marker, transcribe } from "./voice.ts";
 
 /**
  * The Telegram bridge: the user's phone, until midna has its own app.
@@ -23,6 +24,24 @@ export interface TelegramState {
   lastSeq?: number;
   /** Telegram message id → midna question id, for replies and button taps. */
   questions?: Record<string, { id: number; options: string[] }>;
+  /**
+   * Telegram message id → the midna line it is (midna's by outbox id, the
+   * user's by message id), so a reply to it names that line. The newest
+   * LINES_KEPT; an older one is described from what Telegram sends.
+   */
+  lines?: Record<string, Line>;
+}
+
+/** A line of the conversation, as a Telegram message stands for it. */
+export type Line = { outbox: number } | { message: number };
+
+const LINES_KEPT = 2_000;
+
+/** A file the owner sent, on midna's host now: its attachment id, and its bytes. */
+interface Received {
+  id: string;
+  data: Uint8Array<ArrayBuffer>;
+  mime: string;
 }
 
 export function loadState(file: string): TelegramState {
@@ -57,7 +76,11 @@ export class TelegramBridge {
   private markPaired!: () => void;
   private typingTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly file: string, opts: { midnaUrl?: string } = {}) {
+  /** Where una is and how long it gets (tests point it at a fake). */
+  private readonly una: { una?: string; timeoutMs?: number };
+
+  constructor(private readonly file: string, opts: { midnaUrl?: string; una?: { url?: string; timeoutMs?: number } } = {}) {
+    this.una = { ...(opts.una?.url ? { una: opts.una.url } : {}), ...(opts.una?.timeoutMs ? { timeoutMs: opts.una.timeoutMs } : {}) };
     this.state = loadState(file);
     this.bot = new Bot(this.state.botToken);
     this.midna = new MidnaClient(opts.midnaUrl ?? this.state.midna.url, this.state.midna.token);
@@ -140,17 +163,40 @@ export class TelegramBridge {
       if (file === null) await this.bot.send(m.chat.id, "I can only read text, photos and files here for now.");
       return;
     }
+    const said = file ? await this.hear(m, file, text) : text;
     const q = m.reply_to_message ? this.state.questions?.[String(m.reply_to_message.message_id)] : undefined;
-    await this.midna.send({ text, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(file ? { attachments: [file] } : {}) });
+    await this.midna.send({ text: said, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(file ? { attachments: [file.id] } : {}) });
+  }
+
+  /**
+   * A voice note, audio or video note, as words: its text (a caption, when
+   * it had one) then what una heard, marked as such — or why it heard
+   * nothing; the recording goes with the message either way.
+   */
+  private async hear(m: TgMessage, file: Received, text: string): Promise<string> {
+    const rec = m.voice ?? m.video_note ?? m.audio;
+    if (!rec) return text;
+    const kind = m.voice ? "voice note" : m.video_note ? "video note" : "audio";
+    const chat = m.chat.id;
+    const typing = setInterval(() => void this.bot.typing(chat).catch(() => {}), 4_500);
+    void this.bot.typing(chat).catch(() => {});
+    try {
+      const heard = await transcribe(file.data, { mime: file.mime, id: rec.file_unique_id ?? `${chat}-${m.message_id}` }, this.una);
+      if (!heard.ok) console.error(`transcribing a ${kind} failed: ${heard.why}`);
+      const words = heard.ok ? `${marker(kind, rec.duration, heard)} ${heard.text}` : marker(kind, rec.duration, heard);
+      return text ? `${text}\n${words}` : words;
+    } finally {
+      clearInterval(typing);
+    }
   }
 
   /**
    * A photo or file the user sent — a document of any type, a video, audio,
-   * a voice note — put on midna's host: its attachment id, null when there
-   * was none, false when there was one that couldn't come through (and the
-   * user has been told why).
+   * a voice note — put on midna's host: its attachment id and bytes, null
+   * when there was none, false when there was one that couldn't come
+   * through (and the user has been told why).
    */
-  private async receiveFile(m: TgMessage): Promise<string | null | false> {
+  private async receiveFile(m: TgMessage): Promise<Received | null | false> {
     const photo = m.photo?.length ? m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a)) : null;
     const file = m.document ?? m.video ?? m.audio ?? m.voice ?? m.animation ?? m.video_note;
     if (!photo && !file) return null;
@@ -165,8 +211,8 @@ export class TelegramBridge {
       const { data, path } = await this.bot.download((photo ?? file)!.file_id);
       const unnamed = m.voice ? `voice-${m.message_id}.ogg` : m.video_note || m.video ? `video-${m.message_id}.mp4` : path.split("/").pop()!;
       const name = file?.file_name ?? (photo ? `photo-${m.message_id}.jpg` : unnamed);
-      const mime = file?.mime_type ?? (photo ? "image/jpeg" : "application/octet-stream");
-      return (await this.midna.upload(data, { name, mime })).id;
+      const mime = file?.mime_type ?? (photo ? "image/jpeg" : m.voice ? "audio/ogg" : m.video_note ? "video/mp4" : "application/octet-stream");
+      return { id: (await this.midna.upload(data, { name, mime })).id, data, mime };
     } catch (err) {
       return fail((err as Error).message);
     }
@@ -292,7 +338,13 @@ export class TelegramBridge {
       })),
       ...urls.map((url) => ({ name: url, load: async (): Promise<Media> => ({ url }) })),
     ];
-    const send = (p: Part, opts: { caption?: string; keyboard?: InlineKeyboard } = {}) => p.load().then((m) => this.bot.sendMedia(chat, m, { silent, caption: p.caption, ...opts }));
+    const line = { outbox: item.id };
+    const send = (p: Part, opts: { caption?: string; keyboard?: InlineKeyboard } = {}) =>
+      p.load().then(async (m) => {
+        const sent = await this.bot.sendMedia(chat, m, { silent, caption: p.caption, ...opts });
+        this.remember([sent], line);
+        return sent;
+      });
 
     // The message that carries the text, and a question's buttons.
     let carrier: TgMessage | undefined;
@@ -304,6 +356,7 @@ export class TelegramBridge {
     const sendText = async () => {
       if (!body || carrier) return;
       const sent = await this.bot.send(chat, body, { silent, ...(keyboard ? { keyboard } : {}) });
+      this.remember(sent, line);
       carrier = sent[sent.length - 1];
     };
     if (item.kind !== "question") await sendText();
@@ -322,6 +375,15 @@ export class TelegramBridge {
       const keys = Object.keys(questions);
       for (const k of keys.slice(0, Math.max(0, keys.length - 100))) delete questions[k];
     }
+  }
+
+  /** These Telegram messages are that line, for a reply to one of them later. */
+  private remember(sent: TgMessage[], line: Line): void {
+    const lines = (this.state.lines ??= {});
+    for (const m of sent) lines[String(m.message_id)] = line;
+    // Integer keys iterate in ascending order: the oldest go first.
+    const keys = Object.keys(lines);
+    for (const k of keys.slice(0, Math.max(0, keys.length - LINES_KEPT))) delete lines[k];
   }
 
   private startTyping(): void {

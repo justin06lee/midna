@@ -88,6 +88,29 @@ class FakeTelegram {
   }
 }
 
+/** A fake una: POST /v1/dictations answers with `text`, or stalls, or refuses — and keeps what it was sent. */
+class FakeUna {
+  mode: "ok" | "slow" | "down" = "ok";
+  text = "remind me to call mom at six";
+  got: Array<{ name: string; type: string; bytes: number; fields: Record<string, string> }> = [];
+  server = Bun.serve({
+    port: 0,
+    fetch: async (req) => {
+      if (new URL(req.url).pathname !== "/v1/dictations") return new Response("?", { status: 404 });
+      const form = await req.formData();
+      const audio = form.get("audio") as File;
+      const fields = Object.fromEntries([...form.entries()].filter(([k]) => k !== "audio").map(([k, v]) => [k, String(v)]));
+      this.got.push({ name: audio.name, type: audio.type, bytes: audio.size, fields });
+      if (this.mode === "slow") await Bun.sleep(3_000);
+      if (this.mode === "down") return Response.json({ detail: "ASR model unloaded (training in progress); retry shortly" }, { status: 503 });
+      return Response.json({ id: "01J", text: this.text, raw_text: this.text, cleanup_applied: false, duration_ms: 42_000 });
+    },
+  });
+  get url() {
+    return `http://127.0.0.1:${this.server.port}`;
+  }
+}
+
 const OWNER = 42;
 const STRANGER = 99;
 const runs: BrainRun[] = [];
@@ -108,6 +131,7 @@ let daemon: RunningDaemon;
 let tg: FakeTelegram;
 let bridge: TelegramBridge;
 let pairCode: string;
+let una: FakeUna;
 
 async function until<T>(what: string, fn: () => T | undefined | false, ms = 5_000): Promise<T> {
   for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(20)) {
@@ -119,6 +143,7 @@ async function until<T>(what: string, fn: () => T | undefined | false, ms = 5_00
 
 beforeAll(async () => {
   tg = new FakeTelegram();
+  una = new FakeUna();
   process.env.TELEGRAM_API = tg.url;
   home = mkdtempSync(join(tmpdir(), "midna-tg-"));
   script = async (run, tools) => {
@@ -131,7 +156,7 @@ beforeAll(async () => {
   const { code } = await host.pairingCode();
   const file = join(home, "telegram.json");
   ({ pairCode } = await setupTelegram({ botToken: "123:abc", midnaUrl: daemon.url, pairingCode: code, deviceName: "Telegram bridge", file }));
-  bridge = new TelegramBridge(file);
+  bridge = new TelegramBridge(file, { una: { url: una.url, timeoutMs: 1_000 } });
   void bridge.run();
 });
 
@@ -139,6 +164,7 @@ afterAll(async () => {
   bridge.stop();
   await daemon.stop();
   tg.server.stop(true);
+  una.server.stop(true);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -322,7 +348,7 @@ describe("telegram bridge", () => {
     const history = await new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim()).history({ limit: 6 });
     expect(history.filter((h) => h.role === "user" && h.attachments.length).slice(-2).map((h) => [h.text, h.attachments[0]!.name, h.attachments[0]!.mime])).toEqual([
       ["my notes", "notes.zip", "application/zip"],
-      ["", "voice-902.ogg", "audio/ogg"],
+      ["[voice note, transcribed by una] remind me to call mom at six", "voice-902.ogg", "audio/ogg"],
     ]);
 
     // Past what a bot may fetch: the owner is told, and nothing reaches midna.
@@ -331,5 +357,59 @@ describe("telegram bridge", () => {
     await until("too big", () => tg.sent.find((m) => m.text.includes("30 MB")));
     await Bun.sleep(200);
     expect(runs.length).toBe(runsBefore);
+  });
+  test("a voice note reaches midna as una's words, marked as such, with the recording", async () => {
+    let prompt = "";
+    script = async (run) => {
+      prompt = run.prompt;
+      return "Will do.";
+    };
+    una.mode = "ok";
+    una.got = [];
+    tg.files.set("voice2", new TextEncoder().encode("OggS a voice note"));
+    const sentBefore = tg.sent.length;
+    tg.push({ message: { message_id: 911, chat: { id: OWNER, type: "private" }, from: { id: OWNER }, voice: { file_id: "voice2", file_unique_id: "AgADvoice2", duration: 42, mime_type: "audio/ogg", file_size: 17 } } });
+    await until("reply", () => tg.sent.slice(sentBefore).find((m) => m.text === "Will do."));
+    expect(prompt).toContain("User: [voice note 0:42, transcribed by una] remind me to call mom at six");
+    expect(prompt).toContain('Attached file "voice-911.ogg" (audio/ogg, 1 KB)');
+    // una got the recording as it is, known by Telegram's stable id so a retry isn't transcribed twice.
+    expect(una.got).toEqual([{ name: "voice.ogg", type: "audio/ogg", bytes: 17, fields: { client: "midna", app_name: "midna (Telegram)", utterance_id: "midna-telegram-AgADvoice2" } }]);
+    // While una listens, the owner sees midna typing.
+    expect(tg.calls).toContain("sendChatAction");
+  });
+
+  test("when una is slow or down, the note still reaches midna, saying why it has no words", async () => {
+    const prompts: string[] = [];
+    script = async (run) => {
+      prompts.push(run.prompt);
+      return "Heard it.";
+    };
+    tg.files.set("voice3", new TextEncoder().encode("OggS another"));
+    const note = (id: number) => ({ message: { message_id: id, chat: { id: OWNER, type: "private" }, from: { id: OWNER }, voice: { file_id: "voice3", file_unique_id: `AgAD${id}`, duration: 5, mime_type: "audio/ogg", file_size: 12 } } });
+    una.mode = "slow";
+    let sentBefore = tg.sent.length;
+    tg.push(note(912));
+    await until("reply to the slow one", () => tg.sent.slice(sentBefore).find((m) => m.text === "Heard it."), 8_000);
+    expect(prompts.at(-1)).toContain("User: [voice note 0:05, not transcribed: una didn't answer within 1 s]");
+    expect(prompts.at(-1)).toContain('Attached file "voice-912.ogg"');
+    una.mode = "down";
+    sentBefore = tg.sent.length;
+    tg.push(note(913));
+    await until("reply to the refused one", () => tg.sent.slice(sentBefore).find((m) => m.text === "Heard it."));
+    expect(prompts.at(-1)).toContain("User: [voice note 0:05, not transcribed: una said 503: ASR model unloaded (training in progress); retry shortly]");
+    una.mode = "ok";
+  });
+
+  test("a caption stays the owner's words, with what una heard after it", async () => {
+    let prompt = "";
+    script = async (run) => {
+      prompt = run.prompt;
+      return "Okay.";
+    };
+    tg.files.set("audio1", new TextEncoder().encode("ID3 an mp3"));
+    const sentBefore = tg.sent.length;
+    tg.push({ message: { message_id: 914, chat: { id: OWNER, type: "private" }, from: { id: OWNER }, caption: "from the meeting", audio: { file_id: "audio1", file_unique_id: "AgADaudio1", file_name: "meeting.mp3", duration: 190, mime_type: "audio/mpeg", file_size: 10 } } });
+    await until("reply", () => tg.sent.slice(sentBefore).find((m) => m.text === "Okay."));
+    expect(prompt).toContain("User: from the meeting\n[audio 3:10, transcribed by una] remind me to call mom at six");
   });
 });
