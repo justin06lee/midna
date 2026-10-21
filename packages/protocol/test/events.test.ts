@@ -69,3 +69,24 @@ test("a stream that goes silent is closed and reported", async () => {
   await settle();
   expect(open).toBe(0);
 });
+
+test("a fetch passed in carries every call, the event stream included", async () => {
+  const urls: string[] = [];
+  // Unbound on purpose: MidnaClient must not call it as a method of itself.
+  const counting = function (this: unknown, url: string, init?: RequestInit) {
+    expect(this).toBeUndefined();
+    const path = new URL(url).pathname;
+    urls.push(path);
+    // The stand-in daemon answers everything with a stream; only the event stream goes to it.
+    return path === "/v1/events" ? fetch(url, init) : Promise.resolve(Response.json({ ok: true, service: "midna", version: "0", name: "midna" }));
+  };
+  const viaOwn = new MidnaClient(`http://localhost:${server.port}`, "t", { fetch: counting });
+  for await (const e of viaOwn.events(0)) {
+    expect(e.type).toBe("status");
+    break;
+  }
+  expect((await viaOwn.health()).ok).toBe(true);
+  await viaOwn.attachment("att_x");
+  expect(urls).toEqual(["/v1/events", "/healthz", "/v1/attachments/att_x"]);
+  await settle();
+});

@@ -252,10 +252,22 @@ export class MidnaError extends Error {
   }
 }
 
+/** What MidnaClient fetches with: the global fetch, or one that streams where that one can't. */
+export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
+
 /** A typed client for the midna API. Works anywhere `fetch` does. */
 export class MidnaClient {
-  constructor(readonly baseUrl: string, private token?: string) {
+  /**
+   * `opts.fetch` replaces the global fetch for every call: React Native's
+   * can't stream a body, so the event stream needs expo/fetch's there.
+   */
+  constructor(readonly baseUrl: string, private token?: string, private readonly opts: { fetch?: Fetch } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
+
+  // Called unbound: a browser's fetch throws when called on another object.
+  private fetch(url: string, init: RequestInit): Promise<Response> {
+    return (this.opts.fetch ?? globalThis.fetch)(url, init);
   }
 
   setToken(token: string): void {
@@ -263,7 +275,7 @@ export class MidnaClient {
   }
 
   private async call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, raw?: { body: Upload; type: string }): Promise<T> {
-    const res = await fetch(this.baseUrl + path, {
+    const res = await this.fetch(this.baseUrl + path, {
       method,
       headers: {
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
@@ -351,7 +363,7 @@ export class MidnaClient {
   }
   /** An attachment's bytes. The desktop draws an image from them with URL.createObjectURL. */
   async attachment(id: string, signal?: AbortSignal): Promise<Blob> {
-    const res = await fetch(`${this.baseUrl}/v1/attachments/${encodeURIComponent(id)}`, {
+    const res = await this.fetch(`${this.baseUrl}/v1/attachments/${encodeURIComponent(id)}`, {
       headers: this.token ? { authorization: `Bearer ${this.token}` } : {},
       ...(signal ? { signal } : {}),
     });
@@ -423,7 +435,7 @@ export class MidnaClient {
     try {
       if (signal?.aborted) return;
       watch();
-      const res = await fetch(`${this.baseUrl}/v1/events?since=${since}`, {
+      const res = await this.fetch(`${this.baseUrl}/v1/events?since=${since}`, {
         headers: { authorization: `Bearer ${this.token ?? ""}`, accept: "text/event-stream" },
         signal: ctl.signal,
       });
