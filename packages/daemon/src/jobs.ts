@@ -128,7 +128,7 @@ export class JobRunner implements JobsHandle {
     const logPath = join(dir, "log");
     writeFileSync(logPath, "");
 
-    const job = this.store.jobs.add({ label, command, cwd, dir, logPath, resultPath, timeoutMs, episodeId: req.episodeId });
+    const job = this.store.jobs.add({ label, command, cwd, dir, logPath, resultPath, whenDone: req.whenDone?.trim() || null, timeoutMs, episodeId: req.episodeId });
     try {
       await this.launch(job, name);
     } catch (err) {

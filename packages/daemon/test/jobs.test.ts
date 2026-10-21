@@ -221,7 +221,7 @@ describe("the daemon", () => {
 
   test("a job started from a turn outlives it, and its end wakes midna with the result", async () => {
     const result = join(home, "answer.txt");
-    const started = await tool("job_start", { label: "count", command: `sleep 0.5; echo working; echo 42 > ${result}; exit 0`, result_file: result });
+    const started = await tool("job_start", { label: "count", command: `sleep 0.5; echo working; echo 42 > ${result}; exit 0`, result_file: result, when_done: "the user asked for the count" });
     expect(started.error).toBe(false);
     const id = Number(started.text.match(/job #(\d+)/)![1]);
     expect(started.text).toContain("You'll be woken when it ends");
@@ -229,7 +229,10 @@ describe("the daemon", () => {
     // The scheduler's tick is 3 s here: the job's end runs it at once.
     const woke = await until("the job's wakeup", () => runs.find((r) => r.prompt.includes(`Job #${id} "count" finished (exit code 0)`)), 4_000);
     expect(woke.prompt).toContain("Background notification — the user did not send this. A job you started has ended.");
-    expect(woke.prompt).toContain(`- result: ${result} (3 bytes)`);
+    // A short result is in the prompt as it is, so midna quotes it rather than guessing.
+    expect(woke.prompt).toContain(`- result: ${result} (3 bytes), all of it:\n\`\`\`\n42\n\`\`\``);
+    // The wakeup has no chat to remember: what to do comes with it.
+    expect(woke.prompt).toContain('you meant to do this when it ended: "the user asked for the count"');
     expect(woke.prompt).toContain("Its log:\n```\nworking\n```");
     expect((await tool("job_list", { ended: true })).text).toContain('"exit_code": 0');
     expect((await tool("job_list")).text).toBe("no jobs running");

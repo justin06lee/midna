@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { MAIN, HOUR, fmt, logTail, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
 import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
@@ -415,7 +415,7 @@ export class Assistant {
               ended: fmt(job.ended_at ?? w.due_at, tz),
               ran: (job.ended_at ?? w.due_at) - job.started_at,
               tail: logTail(job.log_path),
-              result: job.result_path && existsSync(job.result_path) ? { bytes: statSync(job.result_path).size } : null,
+              result: job.result_path && existsSync(job.result_path) ? resultOf(job.result_path) : null,
             })
           : undefined;
       const run = (resume?: string) =>
@@ -646,4 +646,16 @@ function turnPrompt(
   if (own.length) parts.push(`For context — since the last exchange you sent, on your own:\n${own.map(line).join("\n")}`);
   if (history.length) parts.push(`Earlier in this conversation (for continuity; already handled):\n${history.map(line).join("\n")}`);
   return parts.join("\n\n");
+}
+
+/** At most this much of a job's result goes in the wakeup's prompt as it is; past it, midna reads the file. */
+const RESULT_SHOWN = 4_096;
+
+/** A job's result file: its size, and its text when it is short and is text. */
+function resultOf(path: string): { bytes: number; text?: string } {
+  const bytes = statSync(path).size;
+  if (bytes > RESULT_SHOWN) return { bytes };
+  const buf = readFileSync(path);
+  const text = buf.toString("utf8");
+  return buf.includes(0) || text.includes("\uFFFD") ? { bytes } : { bytes, text: text.replace(/\n$/, "") };
 }

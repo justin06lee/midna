@@ -22,6 +22,8 @@ export interface Job {
   log_path: string;
   /** Where the job leaves its result, when it says. */
   result_path: string | null;
+  /** What midna meant to do when it ends, in its own words: the wakeup reads it without the chat it came from. */
+  when_done: string | null;
   /** The systemd user unit it runs in (Linux under systemd), so a service restart doesn't reach it. */
   unit: string | null;
   pid: number | null;
@@ -46,13 +48,16 @@ const LOG_TAIL_LINES = 40;
 export class Jobs {
   constructor(private db: Database, private schedule: Schedule) {}
 
-  add(j: { label: string; command: string; cwd: string; dir: string; logPath: string; resultPath?: string | null; timeoutMs: number; episodeId?: number | null }, now = Date.now()): Job {
+  add(
+    j: { label: string; command: string; cwd: string; dir: string; logPath: string; resultPath?: string | null; whenDone?: string | null; timeoutMs: number; episodeId?: number | null },
+    now = Date.now(),
+  ): Job {
     return this.db
       .query(
-        `INSERT INTO jobs (label, command, cwd, dir, log_path, result_path, timeout_ms, episode_id, started_at)
-         VALUES ($label, $command, $cwd, $dir, $log, $result, $timeout, $episode, $now) RETURNING *`,
+        `INSERT INTO jobs (label, command, cwd, dir, log_path, result_path, when_done, timeout_ms, episode_id, started_at)
+         VALUES ($label, $command, $cwd, $dir, $log, $result, $whenDone, $timeout, $episode, $now) RETURNING *`,
       )
-      .get({ label: j.label, command: j.command, cwd: j.cwd, dir: j.dir, log: j.logPath, result: j.resultPath ?? null, timeout: j.timeoutMs, episode: j.episodeId ?? null, now }) as Job;
+      .get({ label: j.label, command: j.command, cwd: j.cwd, dir: j.dir, log: j.logPath, result: j.resultPath ?? null, whenDone: j.whenDone ?? null, timeout: j.timeoutMs, episode: j.episodeId ?? null, now }) as Job;
   }
 
   /** Its process is up: the pid, that process's start time, and the unit it runs in. */

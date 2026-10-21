@@ -27,5 +27,7 @@ export interface JobStart {
   timeoutMs?: number;
   /** Where the job leaves its result, for the wakeup to name. */
   resultFile?: string;
+  /** What to do when it ends: the wakeup that reports it has no chat to remember. */
+  whenDone?: string;
   episodeId: number | null;
 }

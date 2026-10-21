@@ -6,11 +6,12 @@ Each of midna's turns runs in its own Claude Code process, and that process ends
 
 ## The tools
 
-- `job_start { label, command | prompt, model?, cwd?, timeout_minutes?, result_file? }` starts one and returns at once: `started job #12 (render the deck); log: …`.
+- `job_start { label, command | prompt, model?, cwd?, timeout_minutes?, result_file?, when_done? }` starts one and returns at once: `started job #12 (render the deck); log: …`.
   - `command` is bash, run in `cwd` (by default midna's workspace).
   - `prompt` runs `claude -p` with that task instead: a fresh run without midna's tools or the conversation. Its answer goes to `result.md` in the job's folder unless `result_file` says otherwise. `model` picks the Claude model; by default it's the one midna thinks with.
   - The command sees `$MIDNA_JOB_DIR`, the job's folder, and `$MIDNA_JOB_ID`.
   - A job is stopped after `timeout_minutes`: 120 by default, at most 1440.
+  - `when_done` says what to do when it ends, e.g. "the user asked to hear what out.txt says". The wakeup that reports the job runs in a session of its own, without the chat the job came from, so this note is all it knows of what the user wanted.
 - `job_list { ended? }` lists the running jobs, or with `ended: true` the latest 20 of any state.
 - `job_stop { id }` stops a running job and everything it started.
 
@@ -23,7 +24,8 @@ A wakeup comes due at once. midna reads, as a background notification rather tha
 - how it ended: finished, failed with its exit code, stopped at its time limit, or failed with no exit code;
 - how long it ran, and where;
 - its log path and the log's last 40 lines (at most 6 KB);
-- its result file's path and size, or that it wasn't written.
+- its result file's path and size, or that it wasn't written; a text result of 4 KB or less is included in full, so midna quotes it rather than guessing;
+- its `when_done` note.
 
 Nothing reaches the user unless midna sends it with `message_user`. There is no wakeup for a job midna stopped itself.
 

@@ -382,7 +382,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
     });
     tool(
       "job_start",
-      "Start long work that must outlive this turn — a render, a build, a big download, a test suite, a `claude -p` run — as a job: midna runs it detached on this machine, so it keeps going after your turn ends and through midna's own restarts. Give `command` (bash) or `prompt` (a task for a fresh `claude -p` run, without your tools or this conversation; its answer goes to the result file). When it ends you are woken with its exit code, the end of its log and its result file — so end your turn rather than wait for it, and tell the user it's under way. In the command, $MIDNA_JOB_DIR is the job's own folder. Background shells you start yourself die with your turn; jobs don't.",
+      "Start long work that must outlive this turn — a render, a build, a big download, a test suite, a `claude -p` run — as a job: midna runs it detached on this machine, so it keeps going after your turn ends and through midna's own restarts. Give `command` (bash) or `prompt` (a task for a fresh `claude -p` run, without your tools or this conversation; its answer goes to the result file). When it ends you are woken with its exit code, the end of its log and its result file, without this conversation: say in when_done what to do then (whom to tell, what they asked for). End your turn rather than wait for it, and tell the user it's under way. In the command, $MIDNA_JOB_DIR is the job's own folder. Background shells you start yourself die with your turn; jobs don't.",
       {
         label: z.string().min(1).max(80).describe('A few words saying what it is, e.g. "render the Q4 deck"'),
         command: z.string().optional().describe("A bash command, run in cwd; its output goes to the job's log"),
@@ -391,6 +391,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
         cwd: z.string().optional().describe("Absolute folder to run in (default: your workspace)"),
         timeout_minutes: z.number().int().min(1).max(1440).optional().describe("Stopped, with everything it started, after this long (default 120)"),
         result_file: z.string().optional().describe("Absolute path where it leaves its result, named when you're woken (a prompt's answer goes to result.md in its folder by default)"),
+        when_done: z.string().optional().describe("What to do when it ends. You'll read this cold, in a wakeup that doesn't have this conversation, e.g. \"the user asked to hear what out.txt says\""),
       },
       async (a) => {
         const j = await jobs.start({
@@ -401,6 +402,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
           ...(a.cwd ? { cwd: a.cwd } : {}),
           ...(a.timeout_minutes ? { timeoutMs: a.timeout_minutes * 60_000 } : {}),
           ...(a.result_file ? { resultFile: a.result_file } : {}),
+          ...(a.when_done ? { whenDone: a.when_done } : {}),
           episodeId: ctx.episodeId,
         });
         return `started job #${j.id} (${j.label}); log: ${j.log_path}${j.result_path ? `; result: ${j.result_path}` : ""}. You'll be woken when it ends (at most ${took(j.timeout_ms)}).`;

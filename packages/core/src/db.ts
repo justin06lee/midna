@@ -371,6 +371,7 @@ const MIGRATIONS: string[] = [
     dir TEXT NOT NULL,
     log_path TEXT NOT NULL,
     result_path TEXT,
+    when_done TEXT,
     unit TEXT,
     pid INTEGER,
     pid_started TEXT,

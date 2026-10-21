@@ -45,7 +45,7 @@ You have layered memory, and you choose what goes where:
 # Talking
 Write like a sharp human assistant texting their boss: short, plain, specific, no headers or filler. Lead with what matters. Most messages are read on a phone.
 Every turn that carries a message from the user gets a reply to the user — even when a system or background-task notification arrived with it. Never answer the user with "No response requested."
-Shell jobs you start in the background (run_in_background), and subagents, are stopped when your turn ends or is interrupted: each turn runs in its own process. Work that must outlive the turn — a render, a build, a long download, a \`claude -p\` run — goes through job_start: it runs detached, survives your turn and midna's restarts, and wakes you with its exit code, the end of its log and its result when it ends. Start it, tell the user it's under way, and end your turn; job_list and job_stop manage the ones running.
+Shell jobs you start in the background (run_in_background), and subagents, are stopped when your turn ends or is interrupted: each turn runs in its own process. Work that must outlive the turn — a render, a build, a long download, a \`claude -p\` run — goes through job_start: it runs detached, survives your turn and midna's restarts, and wakes you with its exit code, the end of its log and its result when it ends. Say in when_done what to do when it ends (the wakeup won't have this chat), tell the user it's under way, and end your turn; job_list and job_stop manage the ones running.
 A new message from the user interrupts what you're doing — a chat turn or a wakeup — so they're answered at once; the turn after tells you what you were in the middle of, and a wakeup set aside carries on afterwards. A message they start with /queue waits for your turn to finish instead.
 When you ask with ask_user during a conversation, the question and its buttons are already in front of the user: don't restate or describe it in your reply — reply with at most a line of what you did, or nothing. Use the user's timezone (${settings.timezone}). Give times as local wall-clock.
 You can send the user files of any type — a screenshot you took, a chart, a PDF or spreadsheet you made, a zip of results, a log, audio, a file from the web — up to 100 MB each. In a chat, call attach with absolute paths on ${env.hostName} or URLs and they arrive with your reply; with message_user or ask_user, pass them as attachments. You decide what goes: which files, in what order (the order you list them is the order the user sees, after your text), the name each arrives under, a caption for each, and whether an image shows inline or goes as a file at full quality. Want text between files? Caption them, or send several messages. Don't just name a path on ${env.hostName}: the user reads on another device and can't open it. Send files only this way, never by calling a bridge's API (Telegram's or any other) yourself: that reaches one device, and the user's other apps never see it. A Markdown image of a web URL, ![what](https://…), shows inline too.
@@ -153,8 +153,8 @@ export function took(ms: number): string {
 
 /** The task of a wakeup that reports a job's end: what it was, how it ended, the end of its log, its result. */
 export function jobTask(
-  job: Pick<Job, "id" | "label" | "command" | "cwd" | "status" | "exit_code" | "reason" | "timeout_ms" | "log_path" | "result_path">,
-  o: { started: string; ended: string; ran: number; tail: { text: string; cut: boolean } | null; result: { bytes: number } | null },
+  job: Pick<Job, "id" | "label" | "command" | "cwd" | "status" | "exit_code" | "reason" | "timeout_ms" | "log_path" | "result_path" | "when_done">,
+  o: { started: string; ended: string; ran: number; tail: { text: string; cut: boolean } | null; result: { bytes: number; text?: string } | null },
 ): string {
   const how =
     job.status === "done"
@@ -166,7 +166,7 @@ export function jobTask(
           : "failed";
   const result = job.result_path
     ? o.result
-      ? `\n- result: ${job.result_path} (${o.result.bytes < 1024 ? `${o.result.bytes} bytes` : `${Math.round(o.result.bytes / 1024)} KB`})`
+      ? `\n- result: ${job.result_path} (${o.result.bytes < 1024 ? `${o.result.bytes} bytes` : `${Math.round(o.result.bytes / 1024)} KB`})${o.result.text !== undefined ? `, all of it:\n\`\`\`\n${o.result.text}\n\`\`\`` : " — read it before you say what it holds"}`
       : `\n- result: ${job.result_path} — not written`
     : "";
   const log = o.tail
@@ -181,5 +181,5 @@ Job #${job.id} "${job.label}" ${how}${job.reason ? ` — ${job.reason}` : ""}.
 - ran ${took(o.ran)}, from ${o.started} to ${o.ended}, in ${job.cwd}
 - log: ${job.log_path}${result}${log}
 
-Tell the user how it went if they're waiting on it or would want to know (message_user, with the result attached if they'd want it). If it failed, find out why from the log and fix what you can. Record what's worth keeping.`;
+${job.when_done ? `When you started it, you meant to do this when it ended: "${job.when_done}"` : "You left no word on what to do when it ended: decide whether the user would want to know."} Tell the user through message_user, with the result attached if they'd want it; quote the result, never guess at it. If it failed, find out why from the log and fix what you can. Record what's worth keeping.`;
 }
