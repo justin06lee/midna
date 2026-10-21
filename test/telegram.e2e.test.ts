@@ -412,4 +412,45 @@ describe("telegram bridge", () => {
     await until("reply", () => tg.sent.slice(sentBefore).find((m) => m.text === "Okay."));
     expect(prompt).toContain("User: from the meeting\n[audio 3:10, transcribed by una] remind me to call mom at six");
   });
+  test("a reply to midna's message names that line, and the part the owner highlighted", async () => {
+    const prompts: string[] = [];
+    script = async (run) => {
+      prompts.push(run.prompt);
+      return run.prompt.includes("what's on this week") ? "Monday: dentist at 10. Tuesday: ship the iPhone app." : "Moved.";
+    };
+    tg.text(OWNER, "what's on this week?");
+    const week = await until("the week", () => tg.sent.find((m) => m.text.startsWith("Monday: dentist")));
+    const msg = { message_id: 921, chat: { id: OWNER, type: "private" }, from: { id: OWNER }, text: "move it to 11" };
+    tg.push({ message: { ...msg, reply_to_message: { message_id: week.message_id, chat: msg.chat, from: { id: 1, is_bot: true }, date: 1, text: week.text }, quote: { text: "dentist at 10", position: 8 } } });
+    await until("moved", () => tg.sent.find((m) => m.text === "Moved."));
+    expect(prompts.at(-1)).toMatch(/User: \[Replying to your message from [^\]]+, the part: "dentist at 10"\] move it to 11/);
+    // midna kept which line it was, for the apps to draw the thread.
+    const history = await new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim()).history({ limit: 4 });
+    const reply = history.findLast((h) => h.role === "user")!;
+    const answered = history.find((h) => h.outbox && h.text === week.text)!;
+    expect(reply.inReplyTo).toEqual({ messageId: answered.id, quote: "dentist at 10", fallback: null });
+  });
+
+  test("a reply to the owner's own message names it too; one from before the bridge kept ids is described", async () => {
+    const prompts: string[] = [];
+    script = async (run) => {
+      prompts.push(run.prompt);
+      return "Noted.";
+    };
+    const chat = { id: OWNER, type: "private" };
+    let sentBefore = tg.sent.length;
+    tg.push({ message: { message_id: 930, chat, from: { id: OWNER }, date: 1, text: "remember the dentist" } });
+    await until("first", () => tg.sent.slice(sentBefore).find((m) => m.text === "Noted."));
+    sentBefore = tg.sent.length;
+    tg.push({ message: { message_id: 931, chat, from: { id: OWNER }, text: "on Friday, I mean", reply_to_message: { message_id: 930, chat, from: { id: OWNER }, date: 1, text: "remember the dentist" } } });
+    await until("second", () => tg.sent.slice(sentBefore).find((m) => m.text === "Noted."));
+    expect(prompts.at(-1)).toMatch(/User: \[Replying to their own message from [^\]]+: "remember the dentist"\] on Friday, I mean/);
+    expect(loadState(join(home, "telegram.json")).lines?.["930"]).toEqual({ message: expect.any(Number) });
+
+    // Message 5 is older than anything the bridge remembers: Telegram's copy says what it was.
+    sentBefore = tg.sent.length;
+    tg.push({ message: { message_id: 932, chat, from: { id: OWNER }, text: "is this still true?", reply_to_message: { message_id: 5, chat, from: { id: 1, is_bot: true }, caption: "the old plan", document: { file_id: "x", file_name: "plan.pdf" } } } });
+    await until("third", () => tg.sent.slice(sentBefore).find((m) => m.text === "Noted."));
+    expect(prompts.at(-1)).toContain('User: [Replying to your message: "the old plan" — with plan.pdf] is this still true?');
+  });
 });

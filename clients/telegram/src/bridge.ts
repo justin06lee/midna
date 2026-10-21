@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { APPROVAL_OPTIONS, MidnaClient, MidnaError, type Approval, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MidnaClient, MidnaError, type Approval, type InReplyTo, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 import { marker, transcribe } from "./voice.ts";
 
@@ -75,6 +75,8 @@ export class TelegramBridge {
   private paired: Promise<void>;
   private markPaired!: () => void;
   private typingTimer: ReturnType<typeof setInterval> | null = null;
+  /** The bot's own user id: a reply to one of its messages is a reply to midna. */
+  private botId: number | undefined;
 
   /** Where una is and how long it gets (tests point it at a fake). */
   private readonly una: { una?: string; timeoutMs?: number };
@@ -94,6 +96,7 @@ export class TelegramBridge {
 
   async run(): Promise<void> {
     const me = await this.bot.getMe();
+    this.botId = me.id;
     await this.bot.setCommands(COMMANDS).catch(() => {});
     console.log(`telegram bridge up as @${me.username}${this.state.ownerChatId ? "" : " — waiting for /start <code>"}`);
     await Promise.all([this.pollTelegram(), this.followMidna()]);
@@ -165,7 +168,10 @@ export class TelegramBridge {
     }
     const said = file ? await this.hear(m, file, text) : text;
     const q = m.reply_to_message ? this.state.questions?.[String(m.reply_to_message.message_id)] : undefined;
-    await this.midna.send({ text: said, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(file ? { attachments: [file.id] } : {}) });
+    const ref = replyRef(m, this.state.lines ?? {}, this.botId);
+    const receipt = await this.midna.send({ text: said, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(ref ? { inReplyTo: ref } : {}), ...(file ? { attachments: [file.id] } : {}) });
+    // A host before 0.10.1 says no id: a reply to this one is then described from Telegram's copy.
+    if (receipt.messageId) this.remember([m], { message: receipt.messageId });
   }
 
   /**
@@ -398,6 +404,37 @@ export class TelegramBridge {
     if (this.typingTimer) clearInterval(this.typingTimer);
     this.typingTimer = null;
   }
+}
+
+/**
+ * What a Telegram reply points at, for midna: the line itself when this
+ * bridge delivered or sent it, the part the owner highlighted, and what
+ * Telegram says of it — who, when, its text and files — for a line from
+ * before the bridge kept ids (midna keeps that only when the id doesn't
+ * resolve). Null when the message isn't a reply.
+ */
+export function replyRef(m: TgMessage, lines: Record<string, Line>, botId: number | undefined): InReplyTo | null {
+  const r = m.reply_to_message;
+  if (!r) return null;
+  const line = lines[String(r.message_id)];
+  const quote = m.quote?.text.trim().slice(0, 2_000);
+  const files = [
+    ...(r.photo?.length ? ["a photo"] : []),
+    ...[r.document, r.audio, r.video, r.animation].flatMap((f) => (f ? [f.file_name ?? "a file"] : [])),
+    ...(r.voice ? ["a voice note"] : []),
+    ...(r.video_note ? ["a video note"] : []),
+  ].map((n) => n.slice(0, 300));
+  return {
+    ...(line && "outbox" in line ? { outboxId: line.outbox } : {}),
+    ...(line && "message" in line ? { messageId: line.message } : {}),
+    ...(quote ? { quote } : {}),
+    fallback: {
+      from: r.from?.is_bot || (botId !== undefined && r.from?.id === botId) ? "midna" : "user",
+      ...(r.date ? { at: r.date * 1000 } : {}),
+      text: (r.text ?? r.caption ?? "").slice(0, 8_000),
+      ...(files.length ? { files: files.slice(0, 20) } : {}),
+    },
+  };
 }
 
 /** Markdown images of web URLs, taken out of the text to be sent as photos. */
