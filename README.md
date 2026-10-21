@@ -17,7 +17,7 @@ The brain is whichever agent CLI you pick, through [yagami](../yagami): Claude C
 
 ## Status
 
-**Phase 2 — the desktop app.** The daemon, database, memory, objectives, scheduler, rituals, API, CLI and Telegram bridge work end to end, with live turns through Claude Code and Codex. The desktop app (Linux and macOS) finds your machines over makima or Tailscale, makes the one you click midna's home, and is where you talk to it. Not built yet: the unified inbox (mail connectors and spam filtering), calendar sync, the overnight memory pass that uses a model, voice notes.
+**Phase 2 — the desktop app.** The daemon, database, memory, objectives, scheduler, rituals, API, CLI and Telegram bridge work end to end, with live turns through Claude Code and Codex. The desktop app (Linux and macOS) finds your machines over makima or Tailscale, makes the one you click midna's home, and is where you talk to it. Not built yet: the unified inbox (mail connectors and spam filtering), calendar sync, the overnight memory pass that uses a model.
 
 ## Install
 
@@ -74,7 +74,7 @@ A new message from any device interrupts whatever midna is doing, and the turn a
 
 **From other programs:** `midna event --source ci --title "nightly build passed"` tells midna something happened elsewhere (`--json -` adds the details). midna hears it in the background, never as you, and it interrupts nothing; see [docs/inbound-events.md](docs/inbound-events.md).
 
-**From your phone:** in the app go to Settings → Your phone, paste a bot token from @BotFather, and send the bot the `/start <code>` it shows. `midna telegram setup` does the same from a terminal. The bot answers exactly one chat, yours, and ignores everyone else. `/pause` switches to ask mode and `/resume` switches back.
+**From your phone:** in the app go to Settings → Your phone, paste a bot token from @BotFather, and send the bot the `/start <code>` it shows. `midna telegram setup` does the same from a terminal. The bot answers exactly one chat, yours, and ignores everyone else. `/pause` switches to ask mode and `/resume` switches back. Telegram's Reply on any message tells midna which one you mean, and the part you highlighted. Voice notes reach midna as words, transcribed by [una](https://github.com/justin06lee/una) in English mode (`una.language` in `telegram.json` changes it), with the recording attached. Each note stays in una's history, so una can learn from it.
 
 **Another terminal:** run `midna pair` on the host, then `midna connect <url> <code>` on the other machine. Every device pairs with its own revocable token, even on a private mesh.
 

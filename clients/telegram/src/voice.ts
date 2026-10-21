@@ -14,7 +14,9 @@
  * una has no Korean+English mode yet: by default it hears English, so
  * Korean comes back translated; `language: "ko"` keeps Korean but writes
  * English words in Hangul. Every note also becomes an entry in una's
- * history, labelled as the Telegram bridge's.
+ * history, labelled as the Telegram bridge's, and stays there. Both are
+ * Justin's calls (2026-10-20): English for now, and keep the notes, since
+ * una learns from them.
  */
 
 /** How long una gets before the note goes on without its words. */
