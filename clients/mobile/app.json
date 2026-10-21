@@ -14,8 +14,16 @@
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true,
           "NSExceptionDomains": {
-            "ts.net": { "NSIncludesSubdomains": true, "NSExceptionAllowsInsecureHTTPLoads": true },
-            "100.64.0.0/10": { "NSExceptionAllowsInsecureHTTPLoads": true }
+            "10.77.0.0/16": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "100.64.0.0/10": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            },
+            "ts.net": {
+              "NSIncludesSubdomains": true,
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
           }
         },
         "ITSAppUsesNonExemptEncryption": false
@@ -26,8 +34,20 @@
       "expo-sharing",
       "expo-sqlite",
       "expo-image",
-      ["expo-local-authentication", { "faceIDPermission": "midna asks for Face ID before you answer an approval." }],
-      ["expo-image-picker", { "photosPermission": "midna sends the photos and videos you pick to your midna.", "cameraPermission": false, "microphonePermission": false }]
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "midna asks for Face ID before you answer an approval."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "midna sends the photos and videos you pick to your midna.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }

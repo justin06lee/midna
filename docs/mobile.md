@@ -9,7 +9,12 @@
   - Tests against the real midna use its makima address, `http://10.77.0.1:7717`, from the simulator on the Mac (the phone itself isn't a makima peer). The default for testing is a throwaway local daemon. Pairing the simulator with the live host needs the Lead's OK first.
   - At switch-over, the daemon listens on the tailnet's address too, via a `listen` entry naming `tailscale0` (065fa4b, not yet released).
   - It's plain HTTP inside the tailnet, and the token auth stays.
-  - App Transport Security allows exactly that: unqualified names and IPs (`NSAllowsLocalNetworking`), `*.ts.net`, and 100.64.0.0/10.
+  - **App Transport Security** (iOS's HTTPS-only rule; `ios.infoPlist` in `clients/mobile/app.json`) lets plain HTTP through to midna's addresses only, now and after the switch-over, with no rebuild:
+    - `NSAllowsLocalNetworking`: unqualified names (`http://midna:7717`), `.local` names and IP addresses.
+    - Plain HTTP exceptions for makima's mesh, `10.77.0.0/16` (`http://10.77.0.1:7717` today), and Tailscale's addresses, `100.64.0.0/10`. From iOS 17, IP addresses need listing; CIDR ranges are allowed.
+    - `ts.net` and its subdomains, for a MagicDNS full name (`http://midna.<tailnet>.ts.net:7717`). The tailnet's own name isn't known yet; once it is, this can narrow to `<tailnet>.ts.net`, which needs a rebuild.
+    - Everything else stays HTTPS-only (`NSAllowsArbitraryLoads` is false).
+    - Expo replaces the whole dictionary, not merging it, so `NSAllowsLocalNetworking` must stay listed there.
   - makima is not involved.
 - **Notifications are Telegram's** for now. The app has no push; revisit with the paid ($99) account.
 - **Face ID before any approval** is answered from the phone: Face ID only, with no passcode fallback, so a phone picked up unlocked can't say yes. This guards the phone, not midna's side: any paired token can still answer through `/v1/approvals` (the forgery item already with Justin).
