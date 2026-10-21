@@ -1,10 +1,11 @@
-import { MAIN, HOUR, fmt, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
+import { existsSync, statSync } from "node:fs";
+import { MAIN, HOUR, fmt, logTail, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
 import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
-import { INTRODUCTION, eventsTask, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, eventsTask, jobTask, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -404,7 +405,19 @@ export class Assistant {
       this.wakeups.set(w.id, turn);
       // A wakeup that delivers events from another program says what they are.
       const heard = store.inbound.forWakeup(w.id);
-      const task = heard.length ? eventsTask(heard.map((e) => ({ ...e, at: fmt(e.received_at, tz) }))) : undefined;
+      // So does one that reports how a job ended.
+      const job = heard.length ? null : store.jobs.forWakeup(w.id);
+      const task = heard.length
+        ? eventsTask(heard.map((e) => ({ ...e, at: fmt(e.received_at, tz) })))
+        : job
+          ? jobTask(job, {
+              started: fmt(job.started_at, tz),
+              ended: fmt(job.ended_at ?? w.due_at, tz),
+              ran: (job.ended_at ?? w.due_at) - job.started_at,
+              tail: logTail(job.log_path),
+              result: job.result_path && existsSync(job.result_path) ? { bytes: statSync(job.result_path).size } : null,
+            })
+          : undefined;
       const run = (resume?: string) =>
         this.episode({
           kind: "wakeup",
@@ -594,7 +607,7 @@ function interruptionNote(n: Interruption, resumed: boolean): string {
     : resumed
       ? "What its tools already did is done, and it's in your transcript above."
       : "What its tools already did is done, but that session is gone: check the state of things before redoing any of it.";
-  return `[midna] You were interrupted: the user wrote again while your previous turn was still working, ${Math.max(1, Math.round(n.ms / 1000))} s in, ${n.doing ? `in the middle of ${n.doing}` : "before it called a tool"}. ${done} Nothing it was going to say reached the user, and files you attached in it were not sent. Background jobs it started were stopped — a "stopped" task notification is that, not news. Go by what the user wrote last: carry on, change course or drop what you were doing, and reply to them.`;
+  return `[midna] You were interrupted: the user wrote again while your previous turn was still working, ${Math.max(1, Math.round(n.ms / 1000))} s in, ${n.doing ? `in the middle of ${n.doing}` : "before it called a tool"}. ${done} Nothing it was going to say reached the user, and files you attached in it were not sent. Background shells and subagents it started were stopped — a "stopped" task notification is that, not news; jobs from job_start keep running. Go by what the user wrote last: carry on, change course or drop what you were doing, and reply to them.`;
 }
 
 /**

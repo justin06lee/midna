@@ -1,12 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hostname, homedir, platform, release } from "node:os";
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
 import { HandsHub } from "./hands.ts";
+import { JobRunner } from "./jobs.ts";
 import { createApp } from "./server.ts";
 import { VERSION } from "./version.ts";
 
@@ -14,6 +16,8 @@ import { VERSION } from "./version.ts";
 const INBOUND_EVENTS_KEPT = 30 * 24 * 60 * 60_000;
 /** How long device hands' audit log keeps a command, and an approval. */
 const DEVICE_COMMANDS_KEPT = 90 * 24 * 60 * 60_000;
+/** How long an ended job's record and folder (its log, its result unless it put that elsewhere) are kept. */
+const JOBS_KEPT = 30 * 24 * 60 * 60_000;
 
 export interface DaemonOptions {
   home?: string;
@@ -30,6 +34,8 @@ export interface DaemonOptions {
   /** Device hands: how long an approval waits, and how long past its timeout a result may come; tests make both short. */
   approvalMs?: number;
   handsGraceMs?: number;
+  /** How jobs are launched, and how often they're looked at; tests set both. */
+  jobs?: { launcher?: "systemd" | "setsid"; pollMs?: number; claudeBin?: string | null };
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
   /**
@@ -50,6 +56,7 @@ export interface RunningDaemon {
   store: Store;
   assistant: Assistant;
   hands: HandsHub;
+  jobs: JobRunner;
   stop(): Promise<void>;
 }
 
@@ -86,6 +93,16 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     ...(opts.handsGraceMs !== undefined ? { graceMs: opts.handsGraceMs } : {}),
   });
 
+  // A job that ends queues its wakeup; the scheduler runs it now rather than at its next tick.
+  let tickSoon = () => {};
+  const jobs = new JobRunner({
+    store,
+    root: join(home, "jobs"),
+    workspace: p.workspace,
+    ...opts.jobs,
+    onEnded: () => tickSoon(),
+  });
+
   const assistant = new Assistant({
     store,
     hands,
@@ -100,6 +117,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     store,
     assistant,
     hands,
+    jobs,
     workspace: p.workspace,
     mcpToken,
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
@@ -158,6 +176,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   store.schedule.retime(store.settings().timezone);
   assistant.ensureRituals();
   assistant.ensureIntroduced(opts.introDelayMs);
+  const stillRunning = jobs.reconcile();
   const revived = assistant.reviveBrainFailures();
   if (revived) console.log(`  revived   ${revived} wakeup(s) that failed for want of a brain`);
   if (assistant.answerLeftovers()) console.log(`  answering what the user wrote before the restart`);
@@ -177,12 +196,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       if (n) console.log(`[midna] deleted ${n} attachment(s) never sent`);
       store.inbound.prune(swept - INBOUND_EVENTS_KEPT);
       store.hands.prune(swept - DEVICE_COMMANDS_KEPT);
+      jobs.prune(swept - JOBS_KEPT);
     }
     for (const w of store.schedule.claimDue()) {
       void assistant.wakeup(w).then((r) => (typeof r === "object" ? store.schedule.postpone(w.id, r.retryAt) : store.schedule.finish(w.id, r === "done", tz())));
     }
   };
   const timer = setInterval(tick, opts.tickMs ?? 15_000);
+  tickSoon = () => void setTimeout(tick, 0);
   tick();
 
   bridges.sync(config.bridges);
@@ -193,6 +214,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   console.log(`  brain     ${s.model} (${s.mode})`);
   console.log(`  timezone  ${s.timezone}`);
   if (recovered) console.log(`  recovered ${recovered} interrupted wakeup(s)`);
+  if (stillRunning) console.log(`  jobs      ${stillRunning} still running`);
   if (Object.keys(config.bridges).length) console.log(`  bridges   ${Object.entries(config.bridges).filter(([, b]) => b.enabled).map(([n]) => n).join(", ") || "none enabled"}`);
 
   return {
@@ -200,8 +222,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     store,
     assistant,
     hands,
+    jobs,
     async stop() {
       clearInterval(timer);
+      // The jobs themselves keep running: the next start picks them up.
+      jobs.shutdown();
       clearInterval(bindTimer);
       for (const s of extra.values()) s.stop(true);
       bridges.stopAll();

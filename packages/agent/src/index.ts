@@ -3,5 +3,6 @@ export { yagamiBrain, resolveModel, checkModel, installedBrains, BrainError, typ
 export { handleMcp } from "./mcp.ts";
 export { createToolServer, type ToolContext } from "./tools.ts";
 export type { HandsHandle, HandsRequest, HandsOutcome } from "./hands.ts";
-export { systemPrompt, wakeupPrompt, eventsTask, devicesSection, RITUALS, type Environment } from "./prompt.ts";
+export type { JobsHandle, JobStart } from "./jobs.ts";
+export { systemPrompt, wakeupPrompt, eventsTask, jobTask, took, devicesSection, RITUALS, type Environment } from "./prompt.ts";
 export { checkBrainLive, type BrainCheck } from "./check.ts";

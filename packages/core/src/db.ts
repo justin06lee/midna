@@ -359,6 +359,33 @@ const MIGRATIONS: string[] = [
   CREATE INDEX approvals_outbox ON approvals(outbox_id);
   ALTER TABLE device_commands ADD COLUMN approval_id TEXT;
   `,
+  // Jobs: long work midna started from a turn, run detached so it outlives
+  // the turn's process and the daemon's restarts. A wakeup reports how each
+  // one ended (none when midna stopped it itself).
+  `
+  CREATE TABLE jobs (
+    id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    command TEXT NOT NULL,
+    cwd TEXT NOT NULL,
+    dir TEXT NOT NULL,
+    log_path TEXT NOT NULL,
+    result_path TEXT,
+    unit TEXT,
+    pid INTEGER,
+    pid_started TEXT,
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','done','failed','stopped','timeout')),
+    exit_code INTEGER,
+    reason TEXT,
+    timeout_ms INTEGER NOT NULL,
+    episode_id INTEGER REFERENCES episodes(id),
+    wakeup_id INTEGER REFERENCES wakeups(id),
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER
+  );
+  CREATE INDEX jobs_status ON jobs(status);
+  CREATE INDEX jobs_wakeup ON jobs(wakeup_id);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

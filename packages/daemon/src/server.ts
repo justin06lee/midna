@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant } from "@midna/agent";
+import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
   AnswerApproval,
   HandsHello,
@@ -42,6 +42,8 @@ export interface ServerDeps {
   onSettingsChanged: (changed: SettingsPatch) => void;
   /** The user's computers that offer midna their hands. */
   hands: HandsHub;
+  /** Long work midna runs detached from its turns. */
+  jobs?: JobsHandle;
   /** midna's working directory, where its tools put files for the brain. */
   workspace: string;
 }
@@ -111,7 +113,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, signal: c.req.raw.signal, workspace: deps.workspace });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
   });
 
   // ── everything else needs a paired device ────────────────────────────

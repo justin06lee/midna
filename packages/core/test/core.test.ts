@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
-import { ARCHIVE_BELOW, DAY, Store, afterQuietHours, fmt, parseWhen, renderContext, strength } from "../src/index.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ARCHIVE_BELOW, DAY, Store, afterQuietHours, fmt, logTail, parseWhen, renderContext, strength } from "../src/index.ts";
 
 const TZ = "America/Los_Angeles";
 const fresh = () => {
@@ -385,5 +388,58 @@ describe("inbound events", () => {
     // Sent again after that, "a" is new: it joins the subject's wakeup still waiting.
     expect(add("a", "umi", now + 11 * DAY)).toMatchObject({ status: "merged", wakeupId: c.wakeupId });
     expect(s.inbound.forWakeup(c.wakeupId).map((e) => e.ext_id)).toEqual(["c", "a"]);
+  });
+});
+
+describe("jobs", () => {
+  const job = (s: Store, label = "render", now = 1_000) =>
+    s.jobs.add({ label, command: "make", cwd: "/tmp", dir: `/tmp/jobs/${label}`, logPath: `/tmp/jobs/${label}/log`, timeoutMs: 60_000 }, now);
+
+  test("the first ending counts, and wakes midna unless it stopped the job itself", () => {
+    const s = fresh();
+    const a = job(s, "a");
+    expect(s.jobs.running().map((j) => j.id)).toEqual([a.id]);
+    const ended = s.jobs.end(a.id, { status: "failed", exitCode: 2, tz: TZ }, 5_000)!;
+    expect(ended).toMatchObject({ status: "failed", exit_code: 2, ended_at: 5_000 });
+    // A stop racing the exit changes nothing.
+    expect(s.jobs.end(a.id, { status: "stopped", tz: TZ })).toBeNull();
+    const w = s.schedule.pending(10).find((w) => w.id === ended.wakeup_id)!;
+    expect(w).toMatchObject({ kind: "followup", created_by: `job:${a.id}`, due_at: 5_000 });
+    expect(s.jobs.forWakeup(w.id)!.id).toBe(a.id);
+
+    const b = job(s, "b");
+    expect(s.jobs.end(b.id, { status: "stopped", tz: TZ })!.wakeup_id).toBeNull();
+    const c = job(s, "c");
+    expect(s.jobs.end(c.id, { status: "failed", reason: "it couldn't start", quiet: true, tz: TZ })!.wakeup_id).toBeNull();
+    expect(s.jobs.running()).toEqual([]);
+    expect(s.jobs.recent(2).map((j) => j.label)).toEqual(["c", "b"]);
+  });
+
+  test("ended jobs are pruned with their folders named; running ones never", () => {
+    const s = fresh();
+    const old = job(s, "old");
+    s.jobs.end(old.id, { status: "done", exitCode: 0, tz: TZ }, 2_000);
+    const live = job(s, "live");
+    expect(s.jobs.prune(3_000)).toEqual(["/tmp/jobs/old"]);
+    expect(s.jobs.get(old.id)).toBeNull();
+    expect(s.jobs.get(live.id)!.status).toBe("running");
+  });
+
+  test("a log's tail is its last lines, whole ones", () => {
+    const dir = mkdtempSync(join(tmpdir(), "midna-tail-"));
+    try {
+      const file = join(dir, "log");
+      expect(logTail(file)).toBeNull();
+      writeFileSync(file, "");
+      expect(logTail(file)).toEqual({ text: "", cut: false });
+      writeFileSync(file, Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n") + "\n");
+      const t = logTail(file, 60, 40)!;
+      expect(t.cut).toBe(true);
+      expect(t.text.split("\n").at(-1)).toBe("line 99");
+      expect(t.text.split("\n")[0]).toMatch(/^line \d+$/);
+      expect(logTail(file, 100_000, 3)).toEqual({ text: "line 97\nline 98\nline 99", cut: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

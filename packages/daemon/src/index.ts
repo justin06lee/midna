@@ -2,6 +2,7 @@ export { startDaemon, type DaemonOptions, type RunningDaemon, type BridgeSetup }
 export { createApp, type ServerDeps } from "./server.ts";
 export { HandsHub, decide, summarize, loadHandsKey, type Approver, type ApprovalDecision, type ApprovalRequest, type Gate, type HandsConnection } from "./hands.ts";
 export { Approvals, answerIn } from "./approvals.ts";
+export { JobRunner, processStart, JOB_TIMEOUT_DEFAULT, JOB_TIMEOUT_MAX, type JobRunnerOptions } from "./jobs.ts";
 export { midnaHome, paths, ensureHome, loadConfig, saveConfig, writePrivate, type DaemonConfig, type BridgeConfig } from "./config.ts";
 export { installService, uninstallService, restartService, serviceInstalled } from "./service.ts";
 export { VERSION } from "./version.ts";

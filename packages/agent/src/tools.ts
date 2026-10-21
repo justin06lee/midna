@@ -1,9 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Store } from "@midna/core";
+import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Job, type Store } from "@midna/core";
 import { MAX_ATTACHMENTS_PER_MESSAGE, type Attachment, type Op } from "@midna/protocol";
 import { attach, liftLocalImages, workspaceCopy, type FileRef } from "./attachments.ts";
 import type { HandsHandle, HandsOutcome, HandsRequest } from "./hands.ts";
+import { took } from "./prompt.ts";
+import type { JobsHandle } from "./jobs.ts";
 
 /**
  * midna's own tools, served over MCP so every harness gets the same set.
@@ -23,6 +25,8 @@ export interface ToolContext {
   signal?: AbortSignal;
   /** midna's working directory: files a device sends are copied here for the brain to open. */
   workspace?: string;
+  /** Long work run detached from the turn; without it, there are no job tools. */
+  jobs?: JobsHandle;
 }
 
 const when = z.string().describe('Local time "2026-10-02 09:30", a date "2026-10-02", ISO with offset, or relative "+2h" / "+3d"');
@@ -358,6 +362,64 @@ export function createToolServer(ctx: ToolContext): McpServer {
     store.schedule.cancel(id);
     return `cancelled #${id}`;
   });
+
+  // ── long work: jobs that outlive the turn ────────────────────────────
+  if (ctx.jobs) {
+    const jobs = ctx.jobs;
+    const view = (j: Job) => ({
+      id: j.id,
+      label: j.label,
+      status: j.status,
+      ...(j.exit_code !== null ? { exit_code: j.exit_code } : {}),
+      ...(j.reason ? { how: j.reason } : {}),
+      started: t(j.started_at),
+      ...(j.ended_at ? { ended: t(j.ended_at) } : {}),
+      ran: took((j.ended_at ?? Date.now()) - j.started_at),
+      command: j.command,
+      cwd: j.cwd,
+      log: j.log_path,
+      ...(j.result_path ? { result: j.result_path } : {}),
+    });
+    tool(
+      "job_start",
+      "Start long work that must outlive this turn — a render, a build, a big download, a test suite, a `claude -p` run — as a job: midna runs it detached on this machine, so it keeps going after your turn ends and through midna's own restarts. Give `command` (bash) or `prompt` (a task for a fresh `claude -p` run, without your tools or this conversation; its answer goes to the result file). When it ends you are woken with its exit code, the end of its log and its result file — so end your turn rather than wait for it, and tell the user it's under way. In the command, $MIDNA_JOB_DIR is the job's own folder. Background shells you start yourself die with your turn; jobs don't.",
+      {
+        label: z.string().min(1).max(80).describe('A few words saying what it is, e.g. "render the Q4 deck"'),
+        command: z.string().optional().describe("A bash command, run in cwd; its output goes to the job's log"),
+        prompt: z.string().optional().describe("Instead of command: the task for a `claude -p` run"),
+        model: z.string().optional().describe('For prompt: the Claude model, e.g. "opus" or "sonnet" (default: yours)'),
+        cwd: z.string().optional().describe("Absolute folder to run in (default: your workspace)"),
+        timeout_minutes: z.number().int().min(1).max(1440).optional().describe("Stopped, with everything it started, after this long (default 120)"),
+        result_file: z.string().optional().describe("Absolute path where it leaves its result, named when you're woken (a prompt's answer goes to result.md in its folder by default)"),
+      },
+      async (a) => {
+        const j = await jobs.start({
+          label: a.label,
+          ...(a.command !== undefined ? { command: a.command } : {}),
+          ...(a.prompt !== undefined ? { prompt: a.prompt } : {}),
+          ...(a.model ? { model: a.model } : {}),
+          ...(a.cwd ? { cwd: a.cwd } : {}),
+          ...(a.timeout_minutes ? { timeoutMs: a.timeout_minutes * 60_000 } : {}),
+          ...(a.result_file ? { resultFile: a.result_file } : {}),
+          episodeId: ctx.episodeId,
+        });
+        return `started job #${j.id} (${j.label}); log: ${j.log_path}${j.result_path ? `; result: ${j.result_path}` : ""}. You'll be woken when it ends (at most ${took(j.timeout_ms)}).`;
+      },
+    );
+    tool(
+      "job_list",
+      "Your jobs: the running ones, or with ended=true the latest 20 of any state — status, exit code, how long they ran, their log and result.",
+      { ended: z.boolean().optional() },
+      ({ ended }) => {
+        const list = jobs.list({ ended: !!ended });
+        return list.length ? list.map(view) : ended ? "no jobs yet" : "no jobs running";
+      },
+    );
+    tool("job_stop", "Stop a running job, with everything it started (its whole process group). You aren't woken about a job you stopped.", { id }, ({ id }) => {
+      const j = jobs.stop(id);
+      return `stopped job #${j.id} (${j.label}) after ${took((j.ended_at ?? Date.now()) - j.started_at)}`;
+    });
+  }
 
   // ── reaching the user ────────────────────────────────────────────────
   /** Text plus files: the listed ones, and any Markdown image of a file on this machine. */
