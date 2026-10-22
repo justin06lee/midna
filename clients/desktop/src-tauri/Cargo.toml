@@ -1,6 +1,6 @@
 [package]
 name = "midna-desktop"
-version = "0.11.0"
+version = "0.11.1"
 description = "midna — your personal assistant, from your desk"
 authors = ["justin06lee"]
 edition = "2021"
