@@ -4,7 +4,7 @@ import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ARCHIVE_BELOW, DAY, HOUR, Store, afterQuietHours, fmt, logTail, parseWhen, renderContext, strength } from "../src/index.ts";
+import { ARCHIVE_BELOW, DAY, HOUR, Store, afterQuietHours, fmt, logTail, nearlySame, parseWhen, renderContext, strength } from "../src/index.ts";
 import { MIGRATIONS } from "../src/db.ts";
 
 const TZ = "America/Los_Angeles";
@@ -549,5 +549,63 @@ describe("spend", () => {
     });
     expect(days[1]).toEqual({ date: "2026-10-21", usd: 1.01, turns: 2, byKind: { followup: { usd: 1, turns: 1 }, chat: { usd: 0.01, turns: 1 } } });
     expect(days[2]).toEqual({ date: "2026-10-20", usd: 0, turns: 0, byKind: {} });
+  });
+});
+
+describe("wakeup guardrails", () => {
+  const MIN = 60_000;
+  test("due follow-ups run as one turn, taking along those due within minutes; rituals and reminders run alone", () => {
+    const s = fresh();
+    const now = 10 * DAY;
+    const add = (reason: string, dueAt: number, kind: "followup" | "ritual" | "reminder" = "followup", createdBy = "midna") => s.schedule.add({ dueAt, reason, kind, createdBy, tz: TZ }).id;
+    const a = add("check mira", now - MIN);
+    const b = add("ruri: cobalt is idle", now, "followup", "event:ruri");
+    const c = add("look at the build", now + 4 * MIN);
+    const late = add("much later", now + 6 * MIN);
+    const ritual = add("morning brief", now - MIN, "ritual", "system");
+    const reminder = add("drink water", now, "reminder");
+    const turns = s.schedule.claimTurns(now, 5 * MIN, 8).map((t) => t.map((w) => w.id));
+    expect(turns).toEqual([[ritual], [reminder], [a, b, c]]);
+    expect(s.schedule.get(c)).toMatchObject({ status: "running", fired_at: now });
+    expect(s.schedule.get(late)!.status).toBe("pending");
+    // Nothing due: nothing is taken early.
+    expect(s.schedule.claimTurns(now + MIN, 5 * MIN, 8)).toEqual([]);
+    expect(s.schedule.get(late)!.status).toBe("pending");
+  });
+
+  test("at most `max` to a turn: the last turn alone takes along what's due soon, as far as it has room", () => {
+    const s = fresh();
+    const now = 10 * DAY;
+    const ids = [0, 1, 2, 3, 4].map((i) => s.schedule.add({ dueAt: now - 5 + i, reason: `due ${i}`, tz: TZ }).id);
+    const soon = [1, 2].map((i) => s.schedule.add({ dueAt: now + i * 60_000, reason: `soon ${i}`, tz: TZ }).id);
+    const turns = s.schedule.claimTurns(now, 5 * 60_000, 3).map((t) => t.map((w) => w.id));
+    expect(turns).toEqual([[ids[0]!, ids[1]!, ids[2]!], [ids[3]!, ids[4]!, soon[0]!]]);
+    expect(s.schedule.get(soon[1]!)!.status).toBe("pending");
+    s.schedule.joined(ids[3]!, [ids[4]!, soon[0]!]);
+    expect(s.schedule.get(soon[0]!)!.joined_to).toBe(ids[3]!);
+  });
+
+  test("a follow-up that says nearly what a pending one says, around the same time, is its twin", () => {
+    const s = fresh();
+    const now = 10 * DAY;
+    const w = s.schedule.add({ dueAt: now, reason: "Check whether the mira Lead finished the TLS fix and tell Justin.", tz: TZ });
+    const daily = s.schedule.add({ cron: "30 8 * * *", reason: "Daily 8:30 digest for Justin", tz: TZ }, now);
+    expect(s.schedule.twin("check whether the mira lead finished the TLS fix, and tell Justin", { dueAt: now + 30 * 60_000 })!.id).toBe(w.id);
+    // Too far apart in time, or saying something else: not a twin.
+    expect(s.schedule.twin("Check whether the mira Lead finished the TLS fix and tell Justin.", { dueAt: now + 3 * 60 * 60_000 })).toBeNull();
+    expect(s.schedule.twin("Check whether the cobalt Lead finished the deploy and tell Justin.", { dueAt: now })).toBeNull();
+    // A recurring one is matched against recurring ones, whenever they're due.
+    expect(s.schedule.twin("daily 8:30 digest for Justin", { cron: "30 8 * * 1-5" })!.id).toBe(daily.id);
+    expect(nearlySame("ruri: mira is idle", "ruri: cobalt is idle")).toBe(false);
+  });
+
+  test("today's wakeup turns and their cost, from local midnight", () => {
+    const s = fresh();
+    const now = Date.parse("2026-10-22T20:00:00Z");
+    for (const [kind, at, usd] of [["wakeup", now - 60_000, 0.3], ["wakeup", now - 2 * 60_000, 0.2], ["chat", now, 1], ["wakeup", now - DAY, 5]] as const) {
+      s.log.endEpisode(s.log.startEpisode({ kind, model: "claude:opus" }, at), { sessionCostUsd: usd });
+    }
+    expect(s.log.wakeupsToday(TZ, now)).toEqual({ turns: 2, usd: 0.5 });
+    expect(s.settings().wakeupBudget).toEqual({ turns: 60, usd: 20 });
   });
 });

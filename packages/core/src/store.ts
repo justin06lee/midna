@@ -26,6 +26,8 @@ export interface Settings {
   rituals: { morning: string | null; evening: string | null; weekly: string | null };
   /** "paused" stops every device's hands at once, whatever each app says. */
   hands: "on" | "paused";
+  /** Past this many wakeup turns, or this much spent on them, in a local day, midna is told it's over; null for no budget. */
+  wakeupBudget: { turns: number; usd: number } | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },
   hands: "on",
+  wakeupBudget: { turns: 60, usd: 20 },
 };
 
 /** Everything midna knows, in one SQLite file. */

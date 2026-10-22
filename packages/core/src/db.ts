@@ -417,6 +417,11 @@ export const MIGRATIONS: string[] = [
   -- A total that went down started counting afresh: the turn cost all of it.
   UPDATE episodes SET cost_usd = session_cost_usd WHERE cost_usd < 0;
   `,
+  // Follow-ups due within minutes of each other run as one turn: each one that
+  // ran in another's turn names it.
+  `
+  ALTER TABLE wakeups ADD COLUMN joined_to INTEGER REFERENCES wakeups(id);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

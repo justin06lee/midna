@@ -65,9 +65,10 @@ From a terminal:
 ```sh
 midna chat                  # talk to it in the terminal
 midna send "remind me to call mom at 6pm"
-midna status
+midna status                # also what thinking cost, today and each of the last 7 days
 midna mode ask              # ask before acting; `midna mode autonomous` to undo
 midna model codex:gpt-5.6-sol
+midna budget 60 20          # past 60 wakeup turns or $20 a day, midna is told to hold back
 ```
 
 A new message from any device interrupts whatever midna is doing, and the turn after picks up with what it was in the middle of. Start a message with `/queue` to have it wait for the current turn instead.

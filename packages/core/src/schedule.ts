@@ -27,6 +27,26 @@ export interface Wakeup {
   created_by: string;
   created_at: number;
   fired_at: number | null;
+  /** The wakeup whose turn this one ran in, when it joined another's. */
+  joined_to: number | null;
+}
+
+/** Follow-ups due within this long of one that's due run in its turn. */
+export const JOIN_MS = 5 * 60_000;
+/** At most this many wakeups in one turn. */
+export const JOIN_MAX = 8;
+
+/** Words, for telling two reasons apart: lowercase, no punctuation. */
+const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/).filter(Boolean));
+
+/** Whether two reasons say nearly the same thing: at least 80% of their words in common. */
+export function nearlySame(a: string, b: string): boolean {
+  const x = words(a);
+  const y = words(b);
+  if (!x.size || !y.size) return a.trim() === b.trim();
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / (x.size + y.size - both) >= 0.8;
 }
 
 export function nextCron(cron: string, tz: string, after: number): number {
@@ -62,6 +82,54 @@ export class Schedule {
     return this.db
       .query("UPDATE wakeups SET status = 'running', fired_at = $now WHERE status = 'pending' AND due_at <= $now RETURNING *")
       .all({ now }) as Wakeup[];
+  }
+
+  /**
+   * Atomically take every due wakeup, as turns. Due follow-ups — midna's own,
+   * events, a job's end — run together, `max` to a turn, and the last turn
+   * takes along follow-ups due within `joinMs`, early; rituals, reminders and
+   * system upkeep run alone. Each turn's first wakeup leads it.
+   */
+  claimTurns(now = Date.now(), joinMs = JOIN_MS, max = JOIN_MAX): Wakeup[][] {
+    return this.db.transaction((): Wakeup[][] => {
+      const order = (a: Wakeup, b: Wakeup) => a.due_at - b.due_at || a.id - b.id;
+      const due = this.claimDue(now).sort(order);
+      const turns = due.filter((w) => w.kind !== "followup").map((w) => [w]);
+      const follow = due.filter((w) => w.kind === "followup");
+      if (!follow.length) return turns;
+      const room = (max - (follow.length % max)) % max;
+      if (room) {
+        const early = this.db
+          .query(
+            `UPDATE wakeups SET status = 'running', fired_at = $now WHERE id IN (
+               SELECT id FROM wakeups WHERE status = 'pending' AND kind = 'followup' AND due_at <= $until ORDER BY due_at, id LIMIT $n)
+             RETURNING *`,
+          )
+          .all({ now, until: now + joinMs, n: room }) as Wakeup[];
+        follow.push(...early.sort(order));
+      }
+      for (let i = 0; i < follow.length; i += max) turns.push(follow.slice(i, i + max));
+      return turns;
+    })();
+  }
+
+  /** These wakeups ran in `lead`'s turn. */
+  joined(lead: number, ids: number[]): void {
+    const q = this.db.query("UPDATE wakeups SET joined_to = $lead WHERE id = $id");
+    for (const id of ids) q.run({ lead, id });
+  }
+
+  /**
+   * A pending follow-up saying nearly what `reason` says, due within `withinMs`
+   * of `dueAt` — or, for a recurring one, recurring too — or null.
+   */
+  twin(reason: string, at: { dueAt?: number; cron?: string }, withinMs = 60 * 60_000): Wakeup | null {
+    const pending = this.db.query("SELECT * FROM wakeups WHERE status = 'pending' AND kind = 'followup' ORDER BY due_at").all() as Wakeup[];
+    return (
+      pending.find(
+        (w) => (at.cron ? w.cron !== null : at.dueAt !== undefined && Math.abs(w.due_at - at.dueAt) <= withinMs) && nearlySame(w.reason, reason),
+      ) ?? null
+    );
   }
 
   /** A finished wakeup either ends, or — when recurring — waits for its next time. */

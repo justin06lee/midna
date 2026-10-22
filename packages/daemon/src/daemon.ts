@@ -31,6 +31,8 @@ export interface DaemonOptions {
   introDelayMs?: number;
   /** How close together the user's messages make one interrupt; tests make it short. */
   coalesceMs?: number;
+  /** How soon after a due follow-up another may come due and still run in its turn (default 5 min). */
+  joinMs?: number;
   /** Device hands: how long an approval waits, and how long past its timeout a result may come; tests make both short. */
   approvalMs?: number;
   handsGraceMs?: number;
@@ -198,8 +200,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       store.hands.prune(swept - DEVICE_COMMANDS_KEPT);
       jobs.prune(swept - JOBS_KEPT);
     }
-    for (const w of store.schedule.claimDue()) {
-      void assistant.wakeup(w).then((r) => (typeof r === "object" ? store.schedule.postpone(w.id, r.retryAt) : store.schedule.finish(w.id, r === "done", tz())));
+    // Follow-ups due within minutes of each other run as one turn; what becomes of it becomes of each.
+    for (const [first, ...joined] of store.schedule.claimTurns(Date.now(), opts.joinMs)) {
+      void assistant.wakeup(first!, joined).then((r) => {
+        for (const w of [first!, ...joined]) {
+          if (typeof r === "object") store.schedule.postpone(w.id, r.retryAt);
+          else store.schedule.finish(w.id, r === "done", tz());
+        }
+      });
     }
   };
   const timer = setInterval(tick, opts.tickMs ?? 15_000);

@@ -270,6 +270,8 @@ export interface Status {
   hands?: "on" | "paused";
   /** What thinking cost, each of the last 7 local days, today first. From 0.11. */
   spend?: SpendDay[];
+  /** Today's wakeup turns and what they cost, against the day's budget (null: none). From 0.11. */
+  wakeups?: { turns: number; usd: number; budget: { turns: number; usd: number } | null };
 }
 
 /** What started a turn: a chat, or a wakeup — midna's own follow-up, an event from another program, a job's end, a ritual. */
@@ -300,6 +302,8 @@ export const SettingsPatch = z.object({
   quietHours: z.object({ start: z.string(), end: z.string() }).nullable().optional(),
   /** "paused" stops every device's hands at once, whatever each app says. */
   hands: z.enum(["on", "paused"]).optional(),
+  /** Past this many wakeup turns, or this much spent on them, in a day, midna is told it's over; null for none. From 0.11. */
+  wakeupBudget: z.object({ turns: z.number().int().min(1), usd: z.number().positive() }).nullable().optional(),
 });
 export type SettingsPatch = z.infer<typeof SettingsPatch>;
 

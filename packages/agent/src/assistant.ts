@@ -5,7 +5,7 @@ import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
-import { INTRODUCTION, eventsTask, jobTask, replyNote, systemPrompt, wakeupPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, eventsTask, jobTask, overBudget, ownTask, replyNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -420,16 +420,22 @@ export class Assistant {
   }
 
   /**
-   * Do what a due wakeup calls for. A wakeup that failed only because the
-   * brain can't be reached is retried later rather than lost; one the user's
-   * message interrupted carries on soon after, in its own session.
+   * Do what a due wakeup calls for — with any that came due within minutes of
+   * it (`joined`), in one turn. A wakeup that failed only because the brain
+   * can't be reached is retried later rather than lost; one the user's
+   * message interrupted carries on soon after, in its own session. The
+   * outcome is every joined wakeup's too.
    */
-  async wakeup(w: Wakeup): Promise<"done" | "failed" | { retryAt: number }> {
+  async wakeup(first: Wakeup, joined: Wakeup[] = []): Promise<"done" | "failed" | { retryAt: number }> {
     const { store } = this;
     const tz = store.settings().timezone;
+    const all = [first, ...joined];
+    // One the user's message set aside leads, so its session carries on.
+    const w = all.find((x) => this.paused.has(x.id)) ?? first;
+    const rest = all.filter((x) => x !== w);
     const turn: Turn = { abort: new AbortController(), startedAt: Date.now(), ran: false, doing: null, tools: 0, reason: w.reason };
     const paused = this.paused.get(w.id);
-    this.paused.delete(w.id);
+    for (const x of all) this.paused.delete(x.id);
     try {
       if (w.kind === "reminder") {
         // A reminder the user set for a time is meant to buzz at that time.
@@ -441,29 +447,23 @@ export class Assistant {
         return "done";
       }
       this.wakeups.set(w.id, turn);
-      // A wakeup that delivers events from another program says what they are.
-      const heard = store.inbound.forWakeup(w.id);
-      // So does one that reports how a job ended.
-      const job = heard.length ? null : store.jobs.forWakeup(w.id);
-      const task = heard.length
-        ? eventsTask(heard.map((e) => ({ ...e, at: fmt(e.received_at, tz) })))
-        : job
-          ? jobTask(job, {
-              started: fmt(job.started_at, tz),
-              ended: fmt(job.ended_at ?? w.due_at, tz),
-              ran: (job.ended_at ?? w.due_at) - job.started_at,
-              tail: logTail(job.log_path),
-              result: job.result_path && existsSync(job.result_path) ? resultOf(job.result_path) : null,
-            })
-          : undefined;
-      const run = (resume?: string) =>
-        this.episode({
-          kind: "wakeup",
-          wakeupId: w.id,
-          prompt: wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), { ...(task ? { task } : {}), ...(paused ? { resumed: { doing: paused.doing, transcript: !!resume } } : {}) }),
-          resume,
-          turn,
-        });
+      if (rest.length) store.schedule.joined(w.id, rest.map((x) => x.id));
+      const budget = this.overBudget(tz);
+      const prompt = (resume?: string) => {
+        const resumed = paused ? { resumed: { doing: paused.doing, transcript: !!resume } } : {};
+        if (!rest.length) {
+          const task = this.taskOf(w, tz);
+          return wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), { ...(task ? { task } : {}), ...resumed, ...(budget ? { budget } : {}) });
+        }
+        const items = all.map((x) => ({
+          id: x.id,
+          scheduledFor: fmt(x.due_at, tz),
+          early: x.fired_at !== null && x.due_at > x.fired_at ? took(x.due_at - x.fired_at) : null,
+          task: this.taskOf(x, tz) ?? ownTask(x.reason, x.kind, fmt(x.due_at, tz)),
+        }));
+        return wakeupsPrompt(items, { ...resumed, ...(budget ? { budget } : {}) });
+      };
+      const run = (resume?: string) => this.episode({ kind: "wakeup", wakeupId: w.id, prompt: prompt(resume), resume, turn });
       let result: Awaited<ReturnType<typeof run>>;
       try {
         result = await run(paused?.session);
@@ -471,7 +471,8 @@ export class Assistant {
         if (!paused?.session || turn.abort.signal.aborted) throw err;
         result = await run(); // its session is gone: start it over
       }
-      if (result.text) console.log(`[midna] wakeup #${w.id} (${w.reason.slice(0, 60)}): ${result.text.slice(0, 200)}`);
+      const with_ = rest.length ? ` with ${rest.map((x) => `#${x.id}`).join(", ")}` : "";
+      if (result.text) console.log(`[midna] wakeup #${w.id}${with_} (${w.reason.slice(0, 60)}): ${result.text.slice(0, 200)}`);
       return "done";
     } catch (err) {
       if (turn.abort.signal.aborted) {
@@ -483,13 +484,37 @@ export class Assistant {
       }
       console.error(`[midna] wakeup #${w.id} failed:`, (err as Error).message);
       if (this.brainTrouble(err)) {
-        this.blocked.add(w.id);
+        for (const x of all) this.blocked.add(x.id);
         return { retryAt: Date.now() + BRAIN_RETRY };
       }
       return "failed";
     } finally {
       this.wakeups.delete(w.id);
     }
+  }
+
+  /** What a wakeup that another program caused is about: the events it delivers, or how a job ended. */
+  private taskOf(w: Wakeup, tz: string): string | undefined {
+    const { store } = this;
+    const heard = store.inbound.forWakeup(w.id);
+    if (heard.length) return eventsTask(heard.map((e) => ({ ...e, at: fmt(e.received_at, tz) })));
+    const job = store.jobs.forWakeup(w.id);
+    if (!job) return undefined;
+    return jobTask(job, {
+      started: fmt(job.started_at, tz),
+      ended: fmt(job.ended_at ?? w.due_at, tz),
+      ran: (job.ended_at ?? w.due_at) - job.started_at,
+      tail: logTail(job.log_path),
+      result: job.result_path && existsSync(job.result_path) ? resultOf(job.result_path) : null,
+    });
+  }
+
+  /** The note every wakeup carries once today's wakeups are past the budget, or undefined. */
+  private overBudget(tz: string): string | undefined {
+    const budget = this.store.settings().wakeupBudget;
+    if (!budget) return undefined;
+    const today = this.store.log.wakeupsToday(tz);
+    return today.turns >= budget.turns || today.usd >= budget.usd ? overBudget(today, budget) : undefined;
   }
 
   /**

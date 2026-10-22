@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { MidnaClient, MidnaError, type OutboxItem, type SpendDay, type SpendKind } from "@midna/protocol";
+import { MidnaClient, MidnaError, type OutboxItem, type SpendDay, type SpendKind, type Status } from "@midna/protocol";
 import {
   VERSION,
   checkBrainLive,
@@ -40,6 +40,7 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
                                   tell midna something happened elsewhere; it hears it in the background
   midna status                    mode, model, what it's doing
   midna mode [autonomous|ask]     show or switch the permission mode
+  midna budget [<n> <usd>|off]    today's wakeups, or set how many (or how much) a day is too many
   midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, …
   midna pair                      a one-time code for adding another device
   midna connect <url> <code>      point this machine's CLI at a midna elsewhere
@@ -154,6 +155,13 @@ function spendLines(days: SpendDay[] | undefined): string {
     `\n  spent     today ${usd(today.usd)} in ${today.turns} turn(s)${kinds.length ? `: ${kinds.join(" · ")}` : ""}` +
     `\n            ${days.length} days ${usd(week)}: ${days.map((d) => `${d.date.slice(5)} ${usd(d.usd)}`).join(" · ")}`
   );
+}
+
+/** Today's wakeups against the day's budget. */
+function wakeupLine(w: Status["wakeups"]): string {
+  if (!w) return "";
+  const of = w.budget ? `, of a budget of ${w.budget.turns} or $${w.budget.usd.toFixed(2)}${w.turns >= w.budget.turns || w.usd >= w.budget.usd ? " — over" : ""}` : "";
+  return `\n  wakeups   ${w.turns} today, $${w.usd.toFixed(2)}${of}`;
 }
 
 function loginPath(): string {
@@ -403,7 +411,7 @@ async function main(): Promise<void> {
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);
-      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  model     ${s.model}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}`);
+      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  model     ${s.model}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
     }
     case "version":
     case "--version":
@@ -427,6 +435,16 @@ async function main(): Promise<void> {
       const c = client();
       if (!rest[0]) return console.log((await reach(() => c.status())).model);
       return console.log(`model: ${(await reach(() => c.updateSettings({ model: rest[0] }))).model}`);
+    }
+    case "budget": {
+      const c = client();
+      const show = (st: Status) => console.log(st.wakeups ? `${wakeupLine(st.wakeups).trim().replace(/^wakeups\s+/, "wakeups: ")}` : "this midna is older than 0.11: it keeps no wakeup budget");
+      if (!rest[0]) return show(await reach(() => c.status()));
+      if (rest[0] === "off") return show(await reach(() => c.updateSettings({ wakeupBudget: null })));
+      const turns = Number(rest[0]);
+      const usd = Number((rest[1] ?? "").replace(/^\$/, ""));
+      if (!Number.isInteger(turns) || turns < 1 || !(usd > 0)) die("usage: midna budget [<turns> <usd> | off] — e.g. midna budget 60 20");
+      return show(await reach(() => c.updateSettings({ wakeupBudget: { turns, usd } })));
     }
     case "pair": {
       const { code, expiresAt } = await reach(() => client().pairingCode());

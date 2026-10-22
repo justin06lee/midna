@@ -4,7 +4,7 @@ import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Job, type Store } from
 import { MAX_ATTACHMENTS_PER_MESSAGE, type Attachment, type Op } from "@midna/protocol";
 import { attach, liftLocalImages, workspaceCopy, type FileRef } from "./attachments.ts";
 import type { HandsHandle, HandsOutcome, HandsRequest } from "./hands.ts";
-import { took } from "./prompt.ts";
+import { overBudget, took } from "./prompt.ts";
 import type { JobsHandle } from "./jobs.ts";
 
 /**
@@ -351,8 +351,18 @@ export function createToolServer(ctx: ToolContext): McpServer {
     { reason: z.string(), when: when.optional(), cron: z.string().optional(), kind: z.enum(["followup", "reminder"]).optional() },
     (a) => {
       if (!a.when && !a.cron) throw new Error("give `when` or `cron`");
-      const w = store.schedule.add({ dueAt: a.when ? parseWhen(a.when, tz()) : undefined, cron: a.cron, reason: a.reason, kind: a.kind ?? "followup", createdBy: "midna", tz: tz() });
-      return `scheduled #${w.id} for ${t(w.due_at)}${w.cron ? ` (recurring: ${w.cron})` : ""}`;
+      const dueAt = a.when ? parseWhen(a.when, tz()) : undefined;
+      const kind = a.kind ?? "followup";
+      // The same follow-up twice is two turns for one job.
+      const twin = kind === "followup" ? store.schedule.twin(a.reason, a.cron ? { cron: a.cron } : { dueAt: dueAt! }) : null;
+      if (twin) {
+        return `not scheduled: #${twin.id}, for ${t(twin.due_at)}${twin.cron ? ` (recurring: ${twin.cron})` : ""}, already says nearly this: "${twin.reason.length > 200 ? `${twin.reason.slice(0, 200)}…` : twin.reason}". Cancel it first if you mean to move it.`;
+      }
+      const w = store.schedule.add({ dueAt, cron: a.cron, reason: a.reason, kind, createdBy: "midna", tz: tz() });
+      const budget = store.settings().wakeupBudget;
+      const today = store.log.wakeupsToday(tz());
+      const over = kind === "followup" && budget && (today.turns >= budget.turns || today.usd >= budget.usd) ? `\n${overBudget(today, budget)}` : "";
+      return `scheduled #${w.id} for ${t(w.due_at)}${w.cron ? ` (recurring: ${w.cron})` : ""}${over}`;
     },
   );
   tool("wakeups_list", "Your pending wakeups: follow-ups, reminders, rituals.", {}, () =>

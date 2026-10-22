@@ -249,6 +249,14 @@ export class Log {
     return (this.db.query("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM episodes WHERE started_at >= $s").get({ s: since }) as { c: number }).c;
   }
 
+  /** Wakeup turns since local midnight, and what they cost. */
+  wakeupsToday(tz: string, now = Date.now()): { turns: number; usd: number } {
+    const r = this.db
+      .query("SELECT COUNT(*) AS turns, COALESCE(SUM(cost_usd), 0) AS usd FROM episodes WHERE kind = 'wakeup' AND started_at >= $s")
+      .get({ s: startOfLocalDay(now, tz) }) as { turns: number; usd: number };
+    return { turns: r.turns, usd: Math.round(r.usd * 10_000) / 10_000 };
+  }
+
   /** What thinking cost on each of the last `days` local days, today first, by what started each turn. */
   spendByDay(days: number, tz: string, now = Date.now()): SpendDay[] {
     const today = startOfLocalDay(now, tz);
