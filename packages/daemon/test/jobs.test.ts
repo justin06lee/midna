@@ -201,7 +201,8 @@ esac
       expect(job.dir).not.toMatch(/[$%\\]/);
       // The pid is the wrapper's, as systemd's MainPID would be.
       expect(job.pid).toBe(Number(readFileSync(join(bin, `${job.unit}.mainpid`), "utf8")));
-      expect(readFileSync(join(job.dir, "pid"), "utf8").trim()).toBe(String(job.pid));
+      // MainPID can come back before the wrapper has written its own pid file.
+      expect(await until("the pid file", () => existsSync(join(job.dir, "pid")) && readFileSync(join(job.dir, "pid"), "utf8").trim())).toBe(String(job.pid));
       const done = await until("the job's end", () => ended[0]);
       expect(done).toMatchObject({ status: "done", exit_code: 0 });
       expect(readFileSync(done.log_path, "utf8")).toBe(`unit-ok in ${job.id}\n`);
