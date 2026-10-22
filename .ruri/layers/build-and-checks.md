@@ -20,7 +20,7 @@ This layer compiles the CLI into a single-file binary and checks package import 
 
 - **Build:** Select the current machine or all four Linux and macOS targets → Compile clients/cli/src/main.ts with Bun → Write the binary under dist/ and fail if compilation fails
 - **Live smoke check:** Create a temporary home and configure the selected model → Start a daemon and connect a MidnaClient with its host token → Watch events for activity and an outbox message reply
-- **Release cut:** Bump the version in all six version files → Run make tenet-check, and cargo test on tenet once webkit2gtk-4.1 is installed there (on the Mac until then) → Make the release commit and tag vX.Y.Z → Build the kits and the signed desktop app on the Mac, then verify each reports the new version
+- **Release cut:** Bump the version in all six version files → Run make tenet-check and make tenet-cargo-test → Make the release commit and tag vX.Y.Z → Build the kits and the signed desktop app on the Mac, then verify each reports the new version
 - **Run on tenet:** Snapshot the working tree as a commit through a scratch index → Push it to tenet:~/work/midna as refs/tenet/<sha>, and yagami's HEAD to ~/work/yagami → Check it out in the slot (~/work/midna, or ~/work/midna-<name> for a worktree) under a per-slot flock; rebuild yagami and bun install only when they changed → Run the command in a background.slice scope (MemoryMax 6G, CPUWeight 20, nice 10) with the Mac's bun version via mise; exit with its status
 
 ## Key files
@@ -46,7 +46,7 @@ This layer compiles the CLI into a single-file binary and checks package import 
 - Run heavy steps through scripts/tenet.sh, never by hand on tenet: it is Justin's KDE desktop, and the script keeps work in background.slice under a memory cap (tenet has no swap). No root and nothing system-wide there; user-level toolchains only (mise bun and node, rustup in ~/.cargo).
 - A slot on tenet mirrors its Mac checkout: each run force-checks-out the snapshot and git clean -fd's it, so don't keep work there; ignored files (node_modules, dist, target) stay.
 - systemd-run expands $VAR in the command it runs unless --expand-environment=no, and a scope sets INVOCATION_ID, which makes JobRunner default to real systemd-run jobs; tenet.sh passes the flag and unsets it.
-- cargo test of clients/desktop/src-tauri on tenet needs webkit2gtk-4.1 (sudo pacman, not installed yet) and the Linux sidecar first: cd clients/desktop && bun scripts/sidecar.ts, since tauri-build wants binaries/midna-<triple>. It covers the platform-neutral Rust tests; the macOS-only code compiles only in the Mac's app build.
+- cargo test of clients/desktop/src-tauri on tenet: make tenet-cargo-test. A fresh checkout needs the frontend built (bun run build: generate_context! wants ../dist) and this platform's sidecar (bun scripts/sidecar.ts: tauri-build wants binaries/midna-<triple>) first. It covers the platform-neutral Rust tests; the macOS-only code compiles only in the Mac's app build.
 
 ## What it talks to
 

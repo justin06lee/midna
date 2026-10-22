@@ -150,9 +150,9 @@
     "packages/core/ — SQLite state, memory, scheduling, context, and inbound events",
     "packages/daemon/ — HTTP server, background loop, bridges, and host setup",
     "packages/daemon/src/approvals.ts — device action approvals; first answer wins",
-    "scripts/ — builds, boundary checking, and live smoke checks",
+    "scripts/ — builds, boundary checks, live smoke checks; scripts/tenet.sh ships the tree to tenet for heavy runs",
     "test/ — tests",
-    "Makefile (desktop package builds) and package.json (Bun scripts and workspace dependencies)",
+    "Makefile (desktop package builds, make tenet-check) and package.json (Bun scripts and workspace dependencies)",
     "README.md — project behavior, setup, and architecture",
     "docs/ — design notes awaiting or recording decisions (device-hands.md: the desktop app as midna's hands on a machine; inbound-events.md: other programs telling midna what happened; mobile.md: iPhone app over Tailscale and attachment shape)"
   ],
@@ -162,7 +162,7 @@
     "./dist/midna setup — configure and install the host service",
     "bun run build:all — build Linux and macOS x64 and arm64 binaries",
     "bun run dev — run the daemon from source",
-    "bun run check — typecheck, check import boundaries, and test; run it on tenet with make tenet-check (scripts/tenet.sh bun run check), not on the 8 GB Mac",
+    "bun run check — typecheck, check import boundaries, and test; run it on tenet with make tenet-check, and the desktop app's Rust tests with make tenet-cargo-test, not on the 8 GB Mac",
     "bun run smoke — run one live turn through Claude Sonnet",
     "bun run smoke codex — run a live turn through Codex",
     "scripts/tenet.sh <command> — run any heavy step on tenet (ssh tenet, ~/work/midna; ~/work/midna-<name> for a git worktree): check, build:all, cargo test, e2e daemons, smoke, video renders, expo export. It ships the working tree, uncommitted files included, and never pushes to origin; scripts/tenet.sh pull <path> copies results back",
@@ -391,7 +391,7 @@
           "name": "Release cut",
           "steps": [
             "Bump the version in all six version files",
-            "Run make tenet-check, and cargo test on tenet once webkit2gtk-4.1 is installed there (on the Mac until then)",
+            "Run make tenet-check and make tenet-cargo-test",
             "Make the release commit and tag vX.Y.Z",
             "Build the kits and the signed desktop app on the Mac, then verify each reports the new version"
           ]
@@ -427,7 +427,7 @@
         "Run heavy steps through scripts/tenet.sh, never by hand on tenet: it is Justin's KDE desktop, and the script keeps work in background.slice under a memory cap (tenet has no swap). No root and nothing system-wide there; user-level toolchains only (mise bun and node, rustup in ~/.cargo).",
         "A slot on tenet mirrors its Mac checkout: each run force-checks-out the snapshot and git clean -fd's it, so don't keep work there; ignored files (node_modules, dist, target) stay.",
         "systemd-run expands $VAR in the command it runs unless --expand-environment=no, and a scope sets INVOCATION_ID, which makes JobRunner default to real systemd-run jobs; tenet.sh passes the flag and unsets it.",
-        "cargo test of clients/desktop/src-tauri on tenet needs webkit2gtk-4.1 (sudo pacman, not installed yet) and the Linux sidecar first: cd clients/desktop && bun scripts/sidecar.ts, since tauri-build wants binaries/midna-<triple>. It covers the platform-neutral Rust tests; the macOS-only code compiles only in the Mac's app build."
+        "cargo test of clients/desktop/src-tauri on tenet: make tenet-cargo-test. A fresh checkout needs the frontend built (bun run build: generate_context! wants ../dist) and this platform's sidecar (bun scripts/sidecar.ts: tauri-build wants binaries/midna-<triple>) first. It covers the platform-neutral Rust tests; the macOS-only code compiles only in the Mac's app build."
       ],
       "edges": [
         "Clients — the build compiles the CLI entry point; the boundary check scans both clients; the hosting e2e test drives the CLI's install pairing",

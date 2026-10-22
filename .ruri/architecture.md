@@ -36,9 +36,9 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - packages/core/ — SQLite state, memory, scheduling, context, and inbound events
 - packages/daemon/ — HTTP server, background loop, bridges, and host setup
 - packages/daemon/src/approvals.ts — device action approvals; first answer wins
-- scripts/ — builds, boundary checking, and live smoke checks
+- scripts/ — builds, boundary checks, live smoke checks; scripts/tenet.sh ships the tree to tenet for heavy runs
 - test/ — tests
-- Makefile (desktop package builds) and package.json (Bun scripts and workspace dependencies)
+- Makefile (desktop package builds, make tenet-check) and package.json (Bun scripts and workspace dependencies)
 - README.md — project behavior, setup, and architecture
 - docs/ — design notes awaiting or recording decisions (device-hands.md: the desktop app as midna's hands on a machine; inbound-events.md: other programs telling midna what happened; mobile.md: iPhone app over Tailscale and attachment shape)
 
@@ -49,7 +49,7 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - ./dist/midna setup — configure and install the host service
 - bun run build:all — build Linux and macOS x64 and arm64 binaries
 - bun run dev — run the daemon from source
-- bun run check — typecheck, check import boundaries, and test; run it on tenet with make tenet-check (scripts/tenet.sh bun run check), not on the 8 GB Mac
+- bun run check — typecheck, check import boundaries, and test; run it on tenet with make tenet-check, and the desktop app's Rust tests with make tenet-cargo-test, not on the 8 GB Mac
 - bun run smoke — run one live turn through Claude Sonnet
 - bun run smoke codex — run a live turn through Codex
 - scripts/tenet.sh <command> — run any heavy step on tenet (ssh tenet, ~/work/midna; ~/work/midna-<name> for a git worktree): check, build:all, cargo test, e2e daemons, smoke, video renders, expo export. It ships the working tree, uncommitted files included, and never pushes to origin; scripts/tenet.sh pull <path> copies results back
