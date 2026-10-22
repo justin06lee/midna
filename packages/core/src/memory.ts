@@ -166,13 +166,18 @@ export class Memory {
     return scored;
   }
 
-  /** The strongest live facts overall — the always-in-context profile. */
-  strongest(limit: number, now = Date.now()): ScoredFact[] {
-    const rows = this.db.query("SELECT * FROM facts WHERE archived_at IS NULL").all() as Fact[];
+  /** The strongest live facts overall — the always-in-context profile; `unpinned` leaves the pinned ones out. */
+  strongest(limit: number, now = Date.now(), opts: { unpinned?: boolean } = {}): ScoredFact[] {
+    const rows = this.db.query(`SELECT * FROM facts WHERE archived_at IS NULL${opts.unpinned ? " AND pinned = 0" : ""}`).all() as Fact[];
     return rows
       .map((f) => this.score(f, now))
       .sort((a, b) => b.strength - a.strength || b.importance - a.importance)
       .slice(0, limit);
+  }
+
+  /** The live pinned facts, the most important first: they never fade, so their order holds. */
+  pinned(): Fact[] {
+    return this.db.query("SELECT * FROM facts WHERE archived_at IS NULL AND pinned = 1 ORDER BY importance DESC, id").all() as Fact[];
   }
 
   private touch(ids: number[], now: number): void {

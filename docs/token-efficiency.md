@@ -1,6 +1,6 @@
 # midna's token efficiency: the plan
 
-Justin's brief: make midna token-efficient at the root, in this codebase, without side scripts. Items 1–3 are built straight away. Items 4–5 wait for midna's review.
+Justin's brief: make midna token-efficient at the root, in this codebase, without side scripts. Items 1–3 are in 0.11.0, cut and not yet rolled out. Item 5 is built on master, after the tag. Item 4 is on hold.
 
 ## The baseline
 
@@ -104,15 +104,38 @@ So a WebSocket bridge would duplicate idle and blocked, and would put a key that
 - **Prices:** Sonnet 5.5 is half Opus 5.5's input and output price, with the same cache read price. Haiku 5.5 is about a fortieth of Opus.
 - **Saves:** moving half of what's left of the wakeup spend to Sonnet saves −$5 to −$10/day. Caches are per model, so a cheaper model pays its own cache writes.
 
-### 5. Context (after midna's review)
+### 5. A cache-stable prompt (built after the 0.11.0 tag)
 
-- **Measure:** each turn's input size and its cache hit rate, from item 1's columns.
-- **Keep the prefix cache-stable:** the fixed instructions first, the working context next, the volatile parts ("Now") last.
-  - Today, the working context sits inside the system prompt, so every fresh wakeup session writes it all again.
-  - With a stable prefix, wakeup sessions within the hour read the shared part from the cache instead.
-- **Trim tool output** that's returned whole today.
-- **Roll the chat session over** with a short summary once its context is large. Today it rolls at 40 turns or after 4 idle hours.
-- **Saves:** likely the largest single cut for wakeups, perhaps 30–50% of what remains, but to be measured before it's promised. Chat: −20–40%.
+- **The system prompt is byte for byte the same every turn:** who midna is, its rules, the environment, the hands guide once any computer offers its hands, and the pinned facts (they never fade or reorder). A daemon test holds it to that across turns whose state changes.
+- **The state ends each turn's prompt instead:** the clock, then the working context's sections (objectives, calendar, tasks, commitments, wakeups, decisions due, people to reconnect with, the strongest unpinned memories, the user's computers).
+  - A new session gets every section with something in it.
+  - A session carrying on gets only the sections that changed since its last finished turn, so its transcript doesn't fill with copies. What each session last saw is kept in memory; after a restart, a session gets the whole state again.
+- **Found while measuring:** Claude Code keeps a resumed session's first system prompt and drops the one passed with later turns. Every request in a resumed session carries the same system prompt hash.
+  - So in 0.11.0 and before, a resumed chat saw the working context as it was at the session's first turn, up to 40 turns or 4 idle hours old. A task added mid-session never reached it.
+  - The same holds now for the static part: a change to the pinned facts or the mode text reaches a chat session when it starts over. The state's clock line carries the current mode every turn.
+- **Not built:** trimming tool output and rolling the chat session over with a summary.
+
+**Measured on tenet, Haiku 5.5, a throwaway daemon, the same scripted runs before (v0.11.0) and after.** Cache-read ratio = cache read ÷ (input + cache read + cache write).
+
+| turn | before: read / write | ratio | after: read / write | ratio |
+|---|---|---|---|---|
+| chat, fresh session | 24432 / 8724 | 0.737 | 24432 / 8858 | 0.734 |
+| chat, resumed after the state changed | 27737 / 6303 | 0.815 | 27871 / 5840 | 0.827 |
+| wakeup, fresh (wrote a file) | 55715 / 9299 | 0.857 | 27063 / 4354 | 0.861 |
+| wakeup, fresh, after the state changed | 24432 / 6916 | 0.779 | 27063 / 4419 | 0.860 |
+
+Four chat turns in one session, 20 s apart, the state changed before the fourth:
+
+| turn | before: write | ratio | after: write | ratio |
+|---|---|---|---|---|
+| 1, fresh | 8810 | 0.867 (two requests) | 6227 | 0.813 |
+| 2 | 885 | 0.974 | 273 | 0.992 |
+| 3 | 1975 | 0.945 | 241 | 0.993 |
+| 4, state changed | 151 | 0.996 | 1127 | 0.968 |
+
+- **Fresh sessions read midna's static system prompt from the cache** (2631 tokens here: 27063 against 24432) instead of writing it. A single-request wakeup wrote 36% less and cost 22% less.
+- **Resumed chat turns read their whole history either way.** Before, that was because Claude Code froze the system prompt. Now each turn adds its state changes: a few hundred tokens, about a thousand when tasks or wakeups change. Before, turns 2 and 3 also carried Claude Code's own tool-list changes, which is noise.
+- **Saves, on Opus:** each fresh session stops writing about 3k tokens: the static prompt, the hands guide and the pinned facts. At 1-hour cache-write prices that's about $0.02 per wakeup or new chat session, $2–4/day at the baseline's wakeup count and less after item 3. This is far below the 30–50% guessed here before measuring. The larger gain is that a resumed chat now sees the current state.
 
 ## Before and after
 

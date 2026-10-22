@@ -162,11 +162,43 @@ describe("midnad", () => {
       expect(run.resume).toBeDefined();
       expect(run.prompt).toContain("you sent, on your own");
       expect(run.prompt).toContain("⏰ stretch");
-      expect(run.systemPrompt).toContain("Run a marathon"); // context is rendered fresh
+      expect(run.prompt).toContain("Run a marathon"); // the objectives changed during its last turn
       return "Done stretching? Good.";
     };
     await client.send({ text: "stretched", client: "test" });
     await until("second reply", () => outbox().find((i) => i.text === "Done stretching? Good."));
+  });
+
+  test("the system prompt stays byte for byte the same; what changes ends each turn's prompt", async () => {
+    script = async () => "noted";
+    const from = runs.length;
+    await client.send({ text: "first, before the new task", client: "test" });
+    await until("first turn", () => runs.length > from && !daemon.store.log.unseen("main").length);
+    const a = runs.at(-1)!;
+    daemon.store.planning.saveTask({ title: "Renew the passport" });
+    await client.send({ text: "second, after it", client: "test" });
+    await until("second turn", () => runs.length > from + 1 && !daemon.store.log.unseen("main").length);
+    const b = runs.at(-1)!;
+    expect(b.resume).toBeDefined();
+    expect(b.systemPrompt).toBe(a.systemPrompt);
+    expect(a.systemPrompt).toContain("# Current state");
+    expect(a.systemPrompt).not.toContain("## Now");
+    // The resumed session hears the clock and what changed, not what it already holds.
+    expect(b.prompt).toMatch(/\[midna\] The current state: the sections that changed since your last turn in this session\.[^]*## Now\n[^]*## Open tasks\n[^]*Renew the passport/);
+    expect(b.prompt).not.toContain("## The user's objectives");
+    // A wakeup starts a fresh session on the same system prompt, and hears all of it.
+    daemon.store.schedule.add({ dueAt: Date.now(), reason: "check the passport form", tz: "UTC" });
+    const w = await until("wakeup turn", () => runs.slice(from + 2).find((r) => r.prompt.includes("check the passport form")));
+    expect(w.resume).toBeUndefined();
+    expect(w.systemPrompt).toBe(a.systemPrompt);
+    expect(w.prompt).toMatch(/\[midna\] The current state, from your database[^]*## The user's objectives\n[^]*Run a marathon[^]*## Open tasks\n[^]*Renew the passport/);
+    // A pinned fact is in the system prompt, the one part that changes only when the user's world does.
+    daemon.store.memory.remember({ content: "Allergic to penicillin", kind: "identity", importance: 10, pinned: true });
+    await client.send({ text: "third", client: "test" });
+    await until("third turn", () => runs.at(-1)!.prompt.includes("third") && !daemon.store.log.unseen("main").length);
+    expect(runs.at(-1)!.systemPrompt).toContain("# Pinned memories\nWhat you pinned because it must never fade:\n- #");
+    expect(runs.at(-1)!.systemPrompt).toContain("Allergic to penicillin");
+    expect(runs.at(-1)!.prompt).not.toContain("Allergic to penicillin");
   });
 
   test("questions carry options and answers are tied back to them", async () => {
@@ -268,7 +300,8 @@ describe("midnad", () => {
     const signedOut = new Error("claude: not logged in (Claude Code returned an error result: Not logged in · Please run /login). Run: claude (then /login)");
     let wakeupRuns = 0;
     script = async (run) => {
-      if (run.prompt.includes("check the oven")) {
+      // The wakeup's own turn: a chat turn's state lists it too, as a wakeup waiting.
+      if (run.prompt.startsWith("[Wakeup") && run.prompt.includes("check the oven")) {
         wakeupRuns++;
         if (wakeupRuns === 1) throw signedOut;
         return "checked";

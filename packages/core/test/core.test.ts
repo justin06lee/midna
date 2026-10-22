@@ -4,7 +4,7 @@ import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ARCHIVE_BELOW, DAY, HOUR, Store, afterQuietHours, fmt, logTail, nearlySame, parseWhen, renderContext, strength } from "../src/index.ts";
+import { ARCHIVE_BELOW, DAY, HOUR, Store, afterQuietHours, contextSections, fmt, logTail, nearlySame, parseWhen, pinnedFacts, renderContext, strength } from "../src/index.ts";
 import { MIGRATIONS } from "../src/db.ts";
 
 const TZ = "America/Los_Angeles";
@@ -114,6 +114,25 @@ describe("planning", () => {
     expect(ctx).toContain("more (use the tools");
     expect(ctx.length).toBeLessThan(20_000);
     expect(ctx).toContain("none recorded yet");
+  });
+
+  test("the working context has the same sections every turn; pinned facts stay out of it, for the system prompt", () => {
+    const s = fresh();
+    const titles = contextSections(s).map((x) => x.title);
+    expect(titles).toEqual(["The user's objectives", "Calendar, next 48 hours", "Open tasks", "Open commitments", "Your own scheduled wakeups, next 24 hours", "Decisions due for review", "People overdue for contact", "What you know about the user (strongest memories)"]);
+    expect(pinnedFacts(s)).toBe("");
+    const low = s.memory.remember({ content: "Likes oat milk", kind: "preference", importance: 3, pinned: true });
+    const high = s.memory.remember({ content: "Allergic to penicillin", kind: "identity", importance: 9, pinned: true });
+    s.memory.remember({ content: "Works from cafes on Fridays", kind: "pattern", importance: 5 });
+    s.planning.saveTask({ title: "Renew the passport" });
+    expect(pinnedFacts(s)).toBe(`- #${high.id} (identity) Allergic to penicillin\n- #${low.id} (preference) Likes oat milk`);
+    const sections = contextSections(s);
+    expect(sections.map((x) => x.title)).toEqual(titles);
+    const facts = sections.at(-1)!.body;
+    expect(facts).toContain("Works from cafes on Fridays");
+    expect(facts).not.toContain("penicillin");
+    expect(sections[2]!.body).toContain("Renew the passport");
+    expect(sections[1]!.body).toBe("");
   });
 });
 

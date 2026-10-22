@@ -505,7 +505,8 @@ describe("device hands", () => {
     await host.send({ text: "what's on my screen?", client: "cli" });
     const run = await until("a chat turn", () => runs.slice(before).find((r) => r.prompt.includes("what's on my screen?")));
     expect(run.systemPrompt).toContain("# The user's computers");
-    expect(run.systemPrompt).toContain("- MacBook Air: online; screen, open, notify");
+    expect(run.systemPrompt).not.toContain("MacBook Air"); // whether it's online changes: that ends the prompt
+    expect(run.prompt).toContain("## The user's computers\n- MacBook Air: online; screen, open, notify");
   });
 
   test("an approval asks everywhere at once, and the first answer wins", async () => {

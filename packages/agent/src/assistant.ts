@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { MAIN, HOUR, fmt, logTail, renderContext, type Message, type Store, type Wakeup } from "@midna/core";
+import { MAIN, HOUR, contextSections, fmt, logTail, pinnedFacts, renderNow, type ContextSection, type Message, type Store, type Wakeup } from "@midna/core";
 import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt, type InReplyTo, type ReplyFallback, type ReplyRef } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
-import { INTRODUCTION, eventsTask, jobTask, overBudget, ownTask, replyNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, devicesSection, eventsTask, jobTask, overBudget, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -36,6 +36,8 @@ const COALESCE = 3_000;
 const WAKEUP_RESUME = 60_000;
 /** After a restart, what the user wrote this recently and never got a reply to is answered. */
 const LEFTOVER_WINDOW = 6 * HOUR;
+/** How many brain sessions' last-seen state is kept, so their next turn gets only what changed. */
+const STATE_SESSIONS_KEPT = 200;
 
 /** "/queue …" waits for the turn in progress instead of interrupting it. */
 export const QUEUE_PREFIX = /^\/queue(?:@\w+)?(?:\s+|$)/i;
@@ -88,6 +90,8 @@ export class Assistant {
   private readonly interruptions = new Map<string, Interruption[]>();
   /** Wakeups set aside for the user, with the session that holds how far they got. */
   private readonly paused = new Map<number, { session?: string; doing: string | null }>();
+  /** The working context each brain session last saw, section by section, as of its last finished turn. */
+  private readonly stateSeen = new Map<string, Map<string, string>>();
   private readonly lastUserAt = new Map<string, number>();
   private readonly coalesce: number;
   private stopping = false;
@@ -382,11 +386,16 @@ export class Assistant {
       if (e.turn) e.turn.ran = true;
       const settings = store.settings();
       const episodeId = store.log.startEpisode({ kind: e.kind, conversationId: e.conversationId, wakeupId: e.wakeupId, model: settings.model });
+      // The system prompt stays byte for byte the same, so the prompt cache keeps it and the session's
+      // transcript after it; what changes turn by turn ends the turn's prompt instead.
+      const now = Date.now();
+      const devices = opts.hands?.devices() ?? [];
+      const state = [...contextSections(store, now), { title: "The user's computers", body: devicesSection(devices) }];
       this.aborts.add(abort);
       try {
         const result = await this.brain({
-          prompt: e.prompt,
-          systemPrompt: systemPrompt(settings, opts.env, renderContext(store), opts.hands?.devices()),
+          prompt: `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
+          systemPrompt: systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0 }),
           model: settings.model,
           resume: e.resume,
           cwd: opts.env.workspace,
@@ -408,6 +417,7 @@ export class Assistant {
           ...(u ? { tokens: { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens } } : {}),
         });
         this.healthy();
+        if (result.sessionId) this.sawState(result.sessionId, state);
         return { ...result, episodeId };
       } catch (err) {
         const why = !abort.signal.aborted ? String((err as Error).message ?? err) : this.stopping ? "interrupted: midna stopped" : "interrupted by a message from the user";
@@ -417,6 +427,13 @@ export class Assistant {
         this.aborts.delete(abort);
       }
     });
+  }
+
+  /** A session's turn finished having seen this state; its next turn hears only what changes from it. */
+  private sawState(session: string, state: ContextSection[]): void {
+    this.stateSeen.delete(session);
+    this.stateSeen.set(session, new Map(state.map((x) => [x.title, x.body])));
+    if (this.stateSeen.size > STATE_SESSIONS_KEPT) this.stateSeen.delete(this.stateSeen.keys().next().value!);
   }
 
   /**

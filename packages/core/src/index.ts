@@ -22,5 +22,5 @@ export {
 } from "./planning.ts";
 export { Schedule, Outbox, nextCron, nearlySame, JOIN_MS, JOIN_MAX, type Wakeup, type WakeupKind } from "./schedule.ts";
 export { Store, DEFAULT_SETTINGS, type Settings } from "./store.ts";
-export { renderContext } from "./context.ts";
+export { contextSections, pinnedFacts, renderContext, renderNow, type ContextSection } from "./context.ts";
 export * from "./time.ts";

@@ -110,7 +110,7 @@ clients/desktop      the desktop app: Tauri 2 + React; a thin Rust shell around 
 | **Structured state** | the objective tree, tasks, commitments both ways, calendar, people, the decision journal, notes, midna's own wakeups | Never forgotten. Things close, finish or get dropped, and the record stays |
 | **Episode log** | every message, every episode, every tool call (the audit log) | Kept and full-text searchable; never loaded whole |
 | **Facts** | small claims with an importance, links to what they're about, and a use history | Decay unless used or tied to something alive. Contradictions supersede, keeping history |
-| **Working context** | a summary rendered from all of the above at the start of each session, every section capped | Rebuilt every time. This is what the model always sees |
+| **Working context** | a summary rendered from all of the above, every section capped | Rebuilt every turn and given at the end of the turn's prompt; a session carrying on gets only the sections that changed. Pinned facts sit in the system prompt, which stays byte for byte the same so the prompt cache keeps it |
 
 **Forgetting:** a fact's strength halves with disuse, at a rate set by its importance (3 days for trivia, 2 years for core identity). Recall renews it. A link to an active goal, an open commitment, a person or an unreviewed decision holds it up. Each night, facts below the line are archived: taken out of recall, not deleted. Pinned facts never fade.
 
