@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BIN    := $(PREFIX)/bin/midna
 
-.PHONY: all build install app app-dev signing check update
+.PHONY: all build install app app-dev signing check tenet-check update
 
 # The golden path: the CLI on your PATH, and the desktop app built for this machine.
 all: build install app
@@ -33,6 +33,10 @@ app-dev:
 
 check:
 	bun run check
+
+# The same on tenet, so this 8 GB Mac stays free: any other heavy step is scripts/tenet.sh <command>.
+tenet-check:
+	scripts/tenet.sh bun run check
 
 # Pick up changes: rebuild, reinstall, and restart the service if this machine is a host.
 update: build install
