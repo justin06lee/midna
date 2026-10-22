@@ -1,7 +1,8 @@
 import type { Database } from "bun:sqlite";
-import type { HistoryItem, ReplyFallback, ReplyRef } from "@midna/protocol";
+import type { HistoryItem, ReplyFallback, ReplyRef, SpendDay, SpendKind } from "@midna/protocol";
 import type { Attachments } from "./attachments.ts";
 import { ftsQuery } from "./planning.ts";
+import { DAY, HOUR, fmtDate, startOfLocalDay } from "./time.ts";
 
 /** The episodic record: conversations, every message, every episode, every action. */
 
@@ -199,10 +200,29 @@ export class Log {
     return row.id;
   }
 
-  endEpisode(id: number, r: { session?: string; costUsd?: number; error?: string }, now = Date.now()): void {
+  /**
+   * The turn is over. `sessionCostUsd` is what the brain says its session has
+   * cost so far — a running total across resumed turns — so the turn's own
+   * cost is how far that total climbed since the session's last turn; a
+   * total that went down started counting afresh.
+   */
+  endEpisode(id: number, r: { session?: string; sessionCostUsd?: number; tokens?: TurnTokens; error?: string }, now = Date.now()): void {
+    let cost: number | null = null;
+    if (r.sessionCostUsd !== undefined) {
+      const prev = r.session
+        ? (this.db
+            .query("SELECT session_cost_usd AS c FROM episodes WHERE brain_session = $s AND id < $id AND session_cost_usd IS NOT NULL ORDER BY id DESC LIMIT 1")
+            .get({ s: r.session, id }) as { c: number } | null)
+        : null;
+      cost = prev && r.sessionCostUsd >= prev.c ? r.sessionCostUsd - prev.c : r.sessionCostUsd;
+    }
+    const t = r.tokens;
     this.db
-      .query("UPDATE episodes SET ended_at = $now, brain_session = $s, cost_usd = $c, error = $e WHERE id = $id")
-      .run({ now, s: r.session ?? null, c: r.costUsd ?? null, e: r.error ?? null, id });
+      .query(
+        `UPDATE episodes SET ended_at = $now, brain_session = $s, cost_usd = $c, session_cost_usd = $total, error = $e,
+           input_tokens = $in, cache_read_tokens = $cr, cache_write_tokens = $cw, output_tokens = $out WHERE id = $id`,
+      )
+      .run({ now, s: r.session ?? null, c: cost, total: r.sessionCostUsd ?? null, e: r.error ?? null, in: t?.input ?? null, cr: t?.cacheRead ?? null, cw: t?.cacheWrite ?? null, out: t?.output ?? null, id });
   }
 
   episodeExists(id: number): boolean {
@@ -228,6 +248,53 @@ export class Log {
   spend(since: number): number {
     return (this.db.query("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM episodes WHERE started_at >= $s").get({ s: since }) as { c: number }).c;
   }
+
+  /** What thinking cost on each of the last `days` local days, today first, by what started each turn. */
+  spendByDay(days: number, tz: string, now = Date.now()): SpendDay[] {
+    const today = startOfLocalDay(now, tz);
+    // Noon of each day names it, whatever a DST change does to its length.
+    const out: SpendDay[] = Array.from({ length: days }, (_, i) => ({ date: fmtDate(today + 12 * HOUR - i * DAY, tz).slice(0, 10), usd: 0, turns: 0, byKind: {} }));
+    const byDate = new Map(out.map((d) => [d.date, d]));
+    const rows = this.db
+      .query(
+        `SELECT e.started_at AS at, e.kind AS kind, e.cost_usd AS usd, w.kind AS wkind, w.created_by AS by
+         FROM episodes e LEFT JOIN wakeups w ON w.id = e.wakeup_id WHERE e.started_at >= $s`,
+      )
+      .all({ s: startOfLocalDay(today + 12 * HOUR - (days - 1) * DAY, tz) }) as Array<{ at: number; kind: string; usd: number | null; wkind: string | null; by: string | null }>;
+    for (const r of rows) {
+      const d = byDate.get(fmtDate(r.at, tz).slice(0, 10));
+      if (!d) continue;
+      const k = spendKind(r.kind, r.wkind, r.by);
+      const b = (d.byKind[k] ??= { usd: 0, turns: 0 });
+      b.usd += r.usd ?? 0;
+      b.turns++;
+      d.usd += r.usd ?? 0;
+      d.turns++;
+    }
+    const cents = (n: number) => Math.round(n * 10_000) / 10_000;
+    for (const d of out) {
+      d.usd = cents(d.usd);
+      for (const b of Object.values(d.byKind)) b.usd = cents(b.usd);
+    }
+    return out;
+  }
+}
+
+/** The tokens one turn used: fresh input, read from the prompt cache, written to it, and output. */
+export interface TurnTokens {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+/** What started a turn, for spend: a chat, or a wakeup by where it came from. */
+export function spendKind(kind: string, wakeupKind: string | null, createdBy: string | null): SpendKind {
+  if (kind === "chat") return "chat";
+  if (wakeupKind === "ritual") return "ritual";
+  if (createdBy?.startsWith("event:")) return "event";
+  if (createdBy?.startsWith("job:")) return "job";
+  return "followup";
 }
 
 /** A message's native reply, as clients get it; null when it isn't one. */

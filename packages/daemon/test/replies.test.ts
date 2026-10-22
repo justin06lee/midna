@@ -22,7 +22,7 @@ const events: StreamEvent[] = [];
 const abort = new AbortController();
 const brain: Brain = async (run) => {
   runs.push(run);
-  return { text: "ok", sessionId: `s-${runs.length}`, costUsd: 0 };
+  return { text: "ok", sessionId: `s-${runs.length}`, sessionCostUsd: 0 };
 };
 
 async function until<T>(what: string, fn: () => T | undefined | null | false, ms = 5_000): Promise<T> {

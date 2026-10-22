@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { MAX_ATTACHMENT_BYTES } from "@midna/protocol";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ARCHIVE_BELOW, DAY, Store, afterQuietHours, fmt, logTail, parseWhen, renderContext, strength } from "../src/index.ts";
+import { ARCHIVE_BELOW, DAY, HOUR, Store, afterQuietHours, fmt, logTail, parseWhen, renderContext, strength } from "../src/index.ts";
+import { MIGRATIONS } from "../src/db.ts";
 
 const TZ = "America/Los_Angeles";
 const fresh = () => {
@@ -441,5 +443,111 @@ describe("jobs", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("spend", () => {
+  const ep = (s: Store, kind: "chat" | "wakeup", at: number, wakeupId?: number) => s.log.startEpisode({ kind, model: "claude:opus", ...(wakeupId ? { wakeupId } : {}) }, at);
+  const row = (s: Store, id: number) =>
+    s.db.query("SELECT cost_usd, session_cost_usd, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens FROM episodes WHERE id = $id").get({ id }) as Record<string, number | null>;
+
+  test("a turn costs what its session's running total climbed since the session's last turn", () => {
+    const s = fresh();
+    const a = ep(s, "chat", 1_000);
+    s.log.endEpisode(a, { session: "s1", sessionCostUsd: 0.5, tokens: { input: 3, cacheRead: 10_000, cacheWrite: 2_000, output: 40 } });
+    const b = ep(s, "chat", 2_000);
+    s.log.endEpisode(b, { session: "s1", sessionCostUsd: 0.8 });
+    // Interrupted: no total, so the next turn's climb carries what it cost.
+    const c = ep(s, "chat", 3_000);
+    s.log.endEpisode(c, { session: "s1", error: "interrupted by a message from the user" });
+    const d = ep(s, "chat", 4_000);
+    s.log.endEpisode(d, { session: "s1", sessionCostUsd: 1.5 });
+    // Another session's turns in between change nothing.
+    const other = ep(s, "wakeup", 2_500);
+    s.log.endEpisode(other, { session: "s2", sessionCostUsd: 0.25 });
+    // A total that went down started counting afresh.
+    const e = ep(s, "chat", 5_000);
+    s.log.endEpisode(e, { session: "s1", sessionCostUsd: 0.1 });
+    // No session to compare with: the total is the turn's.
+    const f = ep(s, "wakeup", 6_000);
+    s.log.endEpisode(f, { sessionCostUsd: 0.07 });
+
+    expect(row(s, a)).toEqual({ cost_usd: 0.5, session_cost_usd: 0.5, input_tokens: 3, cache_read_tokens: 10_000, cache_write_tokens: 2_000, output_tokens: 40 });
+    expect(row(s, b).cost_usd).toBeCloseTo(0.3);
+    expect(row(s, c)).toMatchObject({ cost_usd: null, session_cost_usd: null, input_tokens: null });
+    expect(row(s, d).cost_usd).toBeCloseTo(0.7);
+    expect(row(s, other).cost_usd).toBe(0.25);
+    expect(row(s, e).cost_usd).toBe(0.1);
+    expect(row(s, f).cost_usd).toBe(0.07);
+    expect(s.log.spend(0)).toBeCloseTo(0.5 + 0.3 + 0.7 + 0.25 + 0.1 + 0.07);
+  });
+
+  test("migration 10 turns the running totals already recorded into each turn's own cost", () => {
+    const dir = mkdtempSync(join(tmpdir(), "midna-mig-"));
+    try {
+      const path = join(dir, "midna.db");
+      const old = new Database(path, { create: true, strict: true });
+      for (const [v, sql] of MIGRATIONS.slice(0, 9).entries()) {
+        old.exec(sql);
+        old.exec(`PRAGMA user_version = ${v + 1}`);
+      }
+      const add = old.query("INSERT INTO episodes (kind, model, brain_session, started_at, cost_usd) VALUES ($k, 'claude:opus', $s, $at, $c)");
+      for (const [k, sess, at, c] of [
+        ["chat", "s1", 1, 0.56],
+        ["chat", "s1", 2, 0.68],
+        ["wakeup", "w1", 3, 0.3],
+        ["chat", "s1", 4, null],
+        ["chat", "s1", 5, 2.92],
+        ["chat", "s1", 6, 0.2],
+        ["wakeup", null, 7, 0.4],
+      ] as const) add.run({ k, s: sess, at, c });
+      old.close();
+
+      const s = Store.open(path);
+      const costs = (s.db.query("SELECT cost_usd AS c, session_cost_usd AS t FROM episodes ORDER BY id").all() as Array<{ c: number | null; t: number | null }>).map((r) => [r.c === null ? null : Math.round(r.c * 100) / 100, r.t]);
+      expect(costs).toEqual([
+        [0.56, 0.56],
+        [0.12, 0.68],
+        [0.3, 0.3],
+        [null, null],
+        [2.24, 2.92],
+        [0.2, 0.2],
+        [0.4, 0.4],
+      ]);
+      expect((s.db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(MIGRATIONS.length);
+      s.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("each local day's spend, today first, by what started each turn", () => {
+    const s = fresh();
+    const now = Date.parse("2026-10-22T20:00:00Z"); // 13:00 in Los Angeles
+    const yesterday = now - DAY;
+    const turn = (kind: "chat" | "wakeup", at: number, usd: number, wakeupId?: number) => s.log.endEpisode(ep(s, kind, at, wakeupId), { sessionCostUsd: usd });
+    const w = (by: string, kind: "followup" | "ritual" = "followup") => s.schedule.add({ dueAt: now, reason: by, kind, createdBy: by, tz: TZ }).id;
+    turn("chat", now - HOUR, 0.2);
+    turn("chat", now - 2 * HOUR, 0.1);
+    turn("wakeup", now - HOUR, 0.3, w("midna"));
+    turn("wakeup", now - HOUR, 0.05, w("event:ruri"));
+    turn("wakeup", now - HOUR, 0.04, w("job:7"));
+    turn("wakeup", now - HOUR, 0.5, w("system", "ritual"));
+    turn("wakeup", yesterday, 1, w("midna"));
+    // Before local midnight, so yesterday's, though the same UTC date as today.
+    turn("chat", Date.parse("2026-10-22T06:30:00Z"), 0.01);
+    // Older than the days asked for.
+    turn("chat", now - 9 * DAY, 9);
+
+    const days = s.log.spendByDay(3, TZ, now);
+    expect(days.map((d) => d.date)).toEqual(["2026-10-22", "2026-10-21", "2026-10-20"]);
+    expect(days[0]).toEqual({
+      date: "2026-10-22",
+      usd: 1.19,
+      turns: 6,
+      byKind: { chat: { usd: 0.3, turns: 2 }, followup: { usd: 0.3, turns: 1 }, event: { usd: 0.05, turns: 1 }, job: { usd: 0.04, turns: 1 }, ritual: { usd: 0.5, turns: 1 } },
+    });
+    expect(days[1]).toEqual({ date: "2026-10-21", usd: 1.01, turns: 2, byKind: { followup: { usd: 1, turns: 1 }, chat: { usd: 0.01, turns: 1 } } });
+    expect(days[2]).toEqual({ date: "2026-10-20", usd: 0, turns: 0, byKind: {} });
   });
 });

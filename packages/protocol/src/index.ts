@@ -268,6 +268,20 @@ export interface Status {
   brain: BrainHealth;
   /** Device hands, all paused or not. From 0.8. */
   hands?: "on" | "paused";
+  /** What thinking cost, each of the last 7 local days, today first. From 0.11. */
+  spend?: SpendDay[];
+}
+
+/** What started a turn: a chat, or a wakeup — midna's own follow-up, an event from another program, a job's end, a ritual. */
+export type SpendKind = "chat" | "followup" | "event" | "job" | "ritual";
+
+/** One local day's spend on thinking, in USD, and how many turns it took. */
+export interface SpendDay {
+  /** YYYY-MM-DD, in midna's timezone. */
+  date: string;
+  usd: number;
+  turns: number;
+  byKind: Partial<Record<SpendKind, { usd: number; turns: number }>>;
 }
 
 export interface BrainHealth {

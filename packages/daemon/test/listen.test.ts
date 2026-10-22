@@ -48,7 +48,7 @@ describe("listen", () => {
 
 describe("a daemon with extra addresses", () => {
   const port = 17000 + Math.floor(Math.random() * 20000);
-  const brain: Brain = async () => ({ text: "ok", sessionId: "s", costUsd: 0 });
+  const brain: Brain = async () => ({ text: "ok", sessionId: "s", sessionCostUsd: 0 });
   // This machine's loopback interface, by name (lo on Linux, lo0 on macOS), when it has ::1.
   const loopback = Object.entries(networkInterfaces()).find(([, a]) => a?.some((x) => x.address === "::1"))?.[0];
   // An address of this machine on a real network: midna must not answer there.

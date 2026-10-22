@@ -268,7 +268,7 @@ describe("the daemon", () => {
   const runs: BrainRun[] = [];
   const brain: Brain = async (run) => {
     runs.push(run);
-    return { text: "ok", sessionId: `s-${runs.length}`, costUsd: 0 };
+    return { text: "ok", sessionId: `s-${runs.length}`, sessionCostUsd: 0 };
   };
   const options = () => ({ home, port: 17000 + Math.floor(Math.random() * 20000), brain, tickMs: 3_000, introDelayMs: 10, coalesceMs: 50, jobs: { launcher: "setsid" as const, pollMs: 50 } });
 

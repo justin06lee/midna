@@ -141,6 +141,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       host: { name: hostname(), platform: `${platform()} ${arch()}` },
       brain: assistant.brainHealth,
       hands: s.hands,
+      spend: store.log.spendByDay(7, s.timezone),
     };
   };
 

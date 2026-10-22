@@ -401,7 +401,12 @@ export class Assistant {
             store.bus.emit({ type: "activity", conversationId: e.conversationId ?? null, tool });
           },
         });
-        store.log.endEpisode(episodeId, { session: result.sessionId, costUsd: result.costUsd });
+        const u = result.usage;
+        store.log.endEpisode(episodeId, {
+          session: result.sessionId,
+          ...(result.sessionCostUsd !== undefined ? { sessionCostUsd: result.sessionCostUsd } : {}),
+          ...(u ? { tokens: { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens } } : {}),
+        });
         this.healthy();
         return { ...result, episodeId };
       } catch (err) {

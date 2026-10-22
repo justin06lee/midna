@@ -42,7 +42,28 @@ export interface BrainResult {
   /** The final reply: what the model said after its last tool call. */
   text: string;
   sessionId?: string;
-  costUsd?: number;
+  /**
+   * What the session has cost so far, as the harness reports it: Claude Code
+   * and ACP agents carry a running total across resumed turns, so this is not
+   * the turn's own cost — Core works that out.
+   */
+  sessionCostUsd?: number;
+  /** The tokens this turn used, when the harness says. */
+  usage?: TurnUsage;
+}
+
+/** One turn's tokens, in the Messages API's terms. */
+export interface TurnUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+/** Only the counts: a result's usage carries much else (iterations, tiers). */
+function turnUsage(u: TurnUsage | undefined): TurnUsage | undefined {
+  if (!u) return undefined;
+  return { input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0 };
 }
 
 export type Brain = (run: BrainRun) => Promise<BrainResult>;
@@ -143,7 +164,7 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
   // Resuming a session whose last process died with background jobs running, Claude Code first runs
   // their "didn't finish before the previous session ended" notices as a turn of their own — no model
   // call, an empty result — and only then the prompt. That result is not the reply: wait for the next.
-  let notice: { costUsd: number } | null = null;
+  let notice: { sessionCostUsd: number } | null = null;
   let waiting: ReturnType<typeof setTimeout> | undefined;
   try {
     session.send(run.prompt);
@@ -160,13 +181,13 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
       }
       if (msg.type === "result") {
         if (msg.subtype === "success" && !msg.is_error && msg.num_turns === 0 && !msg.result.trim() && !run.signal?.aborted) {
-          notice = { costUsd: msg.total_cost_usd };
+          notice = { sessionCostUsd: msg.total_cost_usd };
           waiting = setTimeout(() => session.close(), NOTICE_GRACE);
           continue;
         }
         // A turn that finished just as the interrupt landed still counts: its reply is whole.
         if (msg.subtype === "success" && !msg.is_error) {
-          return { text: msg.result, sessionId, costUsd: msg.total_cost_usd };
+          return { text: msg.result, sessionId, sessionCostUsd: msg.total_cost_usd, usage: turnUsage(msg.usage) };
         }
         if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
         const why = msg.subtype === "success" ? msg.result : msg.subtype;
@@ -175,11 +196,11 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
     }
     if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
     // The prompt's turn never came: say nothing, and let the caller ask again.
-    if (notice) return { text: "", sessionId, costUsd: notice.costUsd };
+    if (notice) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw new BrainError("claude session ended without a result", sessionId);
   } catch (err) {
     if (run.signal?.aborted && !(err instanceof BrainError)) throw new BrainError("claude turn interrupted", sessionId, { cause: err });
-    if (notice && !(err instanceof BrainError)) return { text: "", sessionId, costUsd: notice.costUsd };
+    if (notice && !(err instanceof BrainError)) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw err;
   } finally {
     clearTimeout(forced);
@@ -218,18 +239,22 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
   const onAbort = () => void session.interrupt().catch(() => {});
   run.signal?.addEventListener("abort", onAbort, { once: true });
   let reply = "";
-  let costUsd: number | undefined;
+  let sessionCostUsd: number | undefined;
+  let usage: TurnUsage | undefined;
   try {
     for await (const ev of session.send(run.prompt)) {
       if (ev.type === "text" && !ev.thread) reply += ev.text;
       else if (ev.type === "tool_call" && !ev.thread && ev.status === "started") {
         run.onActivity?.(ev.name.replace(/^(mcp__midna__|midna[.:/])/, ""), ev.title ?? toolDetail(ev.input));
         reply = ""; // the reply is what comes after the last tool call
-      } else if (ev.type === "done") costUsd = ev.costUsd;
+      } else if (ev.type === "done") {
+        sessionCostUsd = ev.costUsd;
+        usage = turnUsage(ev.usage);
+      }
     }
     // Not every harness says a turn was cut short (ACP reports "end_turn"): an interrupted one is never a whole reply.
     if (run.signal?.aborted) throw new BrainError(`${providerId} turn interrupted`, session.id);
-    return { text: reply.trim(), sessionId: session.id, costUsd };
+    return { text: reply.trim(), sessionId: session.id, ...(sessionCostUsd !== undefined ? { sessionCostUsd } : {}), ...(usage ? { usage } : {}) };
   } catch (err) {
     if (err instanceof BrainError) throw err;
     throw new BrainError(`${providerId} turn ${run.signal?.aborted ? "interrupted" : `failed: ${(err as Error).message}`}`, session.id, { cause: err });

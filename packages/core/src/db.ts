@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
  * database has come. Append — never edit — so an existing midna.db upgrades
  * cleanly.
  */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
@@ -395,6 +395,27 @@ const MIGRATIONS: string[] = [
   ALTER TABLE messages ADD COLUMN in_reply_to INTEGER REFERENCES messages(id);
   ALTER TABLE messages ADD COLUMN reply_quote TEXT;
   ALTER TABLE messages ADD COLUMN reply_fallback TEXT;
+  `,
+  // What a turn cost. Claude Code (and an ACP agent) reports what its session
+  // has cost so far, carried across resumed turns, not the turn's own cost:
+  // that running total is kept apart, and cost_usd becomes the turn's own —
+  // rows already there too — so sums are true. Plus the turn's tokens.
+  `
+  ALTER TABLE episodes ADD COLUMN session_cost_usd REAL;
+  ALTER TABLE episodes ADD COLUMN input_tokens INTEGER;
+  ALTER TABLE episodes ADD COLUMN cache_read_tokens INTEGER;
+  ALTER TABLE episodes ADD COLUMN cache_write_tokens INTEGER;
+  ALTER TABLE episodes ADD COLUMN output_tokens INTEGER;
+  CREATE INDEX episodes_session ON episodes(brain_session, id);
+  CREATE INDEX episodes_started ON episodes(started_at);
+  UPDATE episodes SET session_cost_usd = cost_usd WHERE cost_usd IS NOT NULL;
+  UPDATE episodes SET cost_usd = session_cost_usd - COALESCE(
+    (SELECT p.session_cost_usd FROM episodes p
+     WHERE p.brain_session = episodes.brain_session AND p.id < episodes.id AND p.session_cost_usd IS NOT NULL
+     ORDER BY p.id DESC LIMIT 1), 0)
+  WHERE session_cost_usd IS NOT NULL AND brain_session IS NOT NULL;
+  -- A total that went down started counting afresh: the turn cost all of it.
+  UPDATE episodes SET cost_usd = session_cost_usd WHERE cost_usd < 0;
   `,
 ];
 

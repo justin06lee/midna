@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { MidnaClient, MidnaError, type OutboxItem } from "@midna/protocol";
+import { MidnaClient, MidnaError, type OutboxItem, type SpendDay, type SpendKind } from "@midna/protocol";
 import {
   VERSION,
   checkBrainLive,
@@ -139,6 +139,23 @@ function show(item: OutboxItem): void {
  * bare (no ~/.local/bin, where `claude` usually lives); the service should see
  * what the user's own terminal sees.
  */
+const SPEND_KINDS: Record<SpendKind, string> = { chat: "chat", followup: "follow-ups", event: "events", job: "jobs", ritual: "rituals" };
+
+/** What thinking cost: today by what started it, then each of the last days. Hosts before 0.11 don't say. */
+function spendLines(days: SpendDay[] | undefined): string {
+  if (!days?.length) return "";
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+  const today = days[0]!;
+  const kinds = Object.entries(today.byKind)
+    .sort(([, a], [, b]) => b.usd - a.usd)
+    .map(([k, v]) => `${SPEND_KINDS[k as SpendKind] ?? k} ${usd(v.usd)}`);
+  const week = days.reduce((n, d) => n + d.usd, 0);
+  return (
+    `\n  spent     today ${usd(today.usd)} in ${today.turns} turn(s)${kinds.length ? `: ${kinds.join(" · ")}` : ""}` +
+    `\n            ${days.length} days ${usd(week)}: ${days.map((d) => `${d.date.slice(5)} ${usd(d.usd)}`).join(" · ")}`
+  );
+}
+
 function loginPath(): string {
   const parts: string[] = [];
   const shell = process.env.SHELL;
@@ -386,7 +403,7 @@ async function main(): Promise<void> {
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);
-      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  model     ${s.model}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)`);
+      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  model     ${s.model}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}`);
     }
     case "version":
     case "--version":

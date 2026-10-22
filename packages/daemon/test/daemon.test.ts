@@ -36,7 +36,7 @@ const fakeBrain: Brain = async (run) => {
   else run.signal?.addEventListener("abort", stop, { once: true });
   try {
     const text = await Promise.race([script(run, tools), interrupted]);
-    return { text, sessionId, costUsd: 0.01 };
+    return { text, sessionId, sessionCostUsd: 0.01 };
   } finally {
     run.signal?.removeEventListener("abort", stop);
     await tools.close();
@@ -113,6 +113,16 @@ describe("midnad", () => {
     const hello = await until("intro", () => outbox().find((i) => i.text === "Hi, I'm midna."));
     expect(hello.kind).toBe("notification");
     expect(runs[0]!.prompt).toContain("Wakeup");
+  });
+
+  test("status says what thinking cost: each of the last 7 days, today by what started each turn", async () => {
+    await until("intro", () => outbox().find((i) => i.text === "Hi, I'm midna."));
+    const spend = (await client.status()).spend!;
+    expect(spend).toHaveLength(7);
+    // The introduction is a follow-up midna set itself; each fake turn is a session of its own at $0.01.
+    expect(spend[0]!.byKind.followup).toEqual({ usd: 0.01, turns: 1 });
+    expect(spend[0]!.usd).toBeGreaterThanOrEqual(0.01);
+    expect(spend.slice(1).every((d) => d.usd === 0 && d.turns === 0)).toBe(true);
   });
 
   test("health is open; everything else needs a device token", async () => {
