@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BIN    := $(PREFIX)/bin/midna
 
-.PHONY: all build install app app-dev signing check tenet-check update
+.PHONY: all build install app app-dev signing check tenet-check tenet-cargo-test update
 
 # The golden path: the CLI on your PATH, and the desktop app built for this machine.
 all: build install app
@@ -37,6 +37,11 @@ check:
 # The same on tenet, so this 8 GB Mac stays free: any other heavy step is scripts/tenet.sh <command>.
 tenet-check:
 	scripts/tenet.sh bun run check
+
+# The desktop app's Rust tests on tenet. generate_context! wants the built frontend and
+# tauri-build this platform's sidecar, so both come first.
+tenet-cargo-test:
+	scripts/tenet.sh 'cd clients/desktop && bun run build >/dev/null && bun scripts/sidecar.ts && cd src-tauri && cargo test'
 
 # Pick up changes: rebuild, reinstall, and restart the service if this machine is a host.
 update: build install
