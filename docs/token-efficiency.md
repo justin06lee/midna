@@ -57,18 +57,30 @@ Measured read-only against the live `midna.db` on the Jetson (0.10.1), over the 
   - the last 7 days, one figure per day.
 - **Saves:** nothing by itself. It makes every number after it true, and status stops reporting about 3.7× the real spend.
 
-### 2. Events instead of polling: a ruri bridge (built now)
+### 2. Events instead of polling (changed after ruri's answer)
 
-- **A bridge,** run like Telegram's: a supervised process, an ordinary API client. It subscribes to ruri's WebSocket and posts `midna event`s (`POST /v1/inbound`) for:
-  - a project gone idle, with its finished sessions' last replies, trimmed;
-  - a permission request waiting;
-  - weekly usage crossing 70%, 78% or 80%.
+The brief asked for a ruri bridge on the Jetson that subscribes to ruri's WebSocket. ruri's team answered with these facts, from ruri master `f6e58cc`:
 
-  ruri's address, auth and event shapes come from ruri's own team, not guesses. They are asked, and recorded here once answered.
-- **Where it runs:** on the Jetson beside the daemon, reaching ruri on the Mac over makima.
-- **The system prompt** tells midna that these events arrive on their own, so it doesn't schedule "is it done yet" checks.
-- **Then midna retires its stopgap** (`ruri-watch.py` and its timer). That is midna's job.
-- **Saves:** most of the 117 progress checks ($39/day). Expected −$20 to −$30/day. Not all of them are polls: the 8:30 digest and the night-shift rounds remain.
+- **ruri already pushes the events.** Since v0.77 (2026-10-19) its hooks run `midna event --source ruri` → `POST /v1/inbound`:
+  - `project.idle`, with each finished chat's last reply in `chats[].lastSummary` (about 600 characters);
+  - `project.blocked`, 15 s after a chat starts waiting: "Asks: …", "Waiting on approval: …" or "Stopped on an error: …".
+
+  Each event carries a stable `data.id`, which midna de-duplicates on. These are the 63 `event:ruri` wakeups in the baseline.
+- **The WebSocket can't be reached from the Jetson.** It is bound to the Mac's loopback, with a token regenerated at every launch.
+- **The only door from another machine needs a full-access key.** That is the devices door: TLS on 7775, open only while sharing is on. Its key can answer ruri's permission cards. On the Jetson, midna's brain shares the bridge's Unix user and could read it.
+- **The read-only route isn't on master.** `/status` and `/status/live` with a status-scoped key sit on the unmerged `feat/mobile-status` branch, and merging it is Justin's call. It carries no usage either.
+- **Weekly usage has no event anywhere.** The socket reports the percentage every 5 min, with no threshold event.
+
+So a WebSocket bridge would duplicate idle and blocked, and would put a key that can approve ruri's actions where the brain can read it. That isn't built. What is built:
+
+- **The system prompt** tells midna that ruri reports idle and blocked on its own, and that a job reports its end, so it doesn't schedule "is it done yet" checks.
+
+**Open, for midna:**
+
+- **Retire `ruri-watch.py`'s idle and permission parts now.** They duplicate ruri's hooks, under ids that don't match, so midna hears each idle twice. Only the usage thresholds have no other source.
+- **Usage thresholds:** the clean fix is in ruri, a hook event such as `usage.weekly` when weekly usage crosses 70, 78 or 80%, sent like idle. ruri's liaison offered to take it to its team. Until then the stopgap keeps only that part.
+
+**Saves:** the 117 progress checks ($39/day) go once midna stops scheduling them. Expected −$20 to −$30/day, as before.
 
 ### 3. Guardrails on wakeups (built now)
 
