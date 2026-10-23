@@ -34,8 +34,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
     <View style={[s.root, { backgroundColor: t.bg }]}>
       <View style={[s.header, { paddingTop: insets.top + 6, borderBottomColor: t.line }]}>
         <View style={[s.mark, { opacity: offline ? 0.35 : 1 }]}>
-          <Image accessibilityLabel="midna" source={require("../../assets/icon.png")} style={s.icon} />
-          {midna.thinking ? <ActivityIndicator size="small" color={t.dim} style={s.spinner} /> : null}
+          <View style={s.spinner}>{midna.thinking ? <ActivityIndicator size="small" color={t.dim} /> : null}</View>
+          <Image accessibilityLabel="midna" source={require("../../assets/mark.png")} style={[s.icon, { tintColor: t.ink }]} />
         </View>
       </View>
       <View style={[s.body, { opacity: offline ? 0.45 : 1 }]}>
@@ -63,10 +63,10 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  header: { alignItems: "center", paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth },
-  mark: { alignItems: "center", justifyContent: "center", height: 30 },
-  icon: { width: 28, height: 28, borderRadius: 7 },
-  spinner: { position: "absolute", left: 38 },
+  header: { alignItems: "flex-start", paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  mark: { flexDirection: "row", alignItems: "center", gap: 6, height: 30 },
+  icon: { width: 26, height: 26 },
+  spinner: { width: 20, alignItems: "center" },
   body: { flex: 1 },
   tabs: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 36 },
