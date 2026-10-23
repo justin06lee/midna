@@ -43,4 +43,5 @@ export function useTheme(): Theme {
   return useColorScheme() === "dark" ? dark : light;
 }
 
-export const mono = "Menlo";
+/** SF Mono through the system's monospaced face (Menlo on anything older). Every other face is the system font: no fontFamily anywhere. */
+export const mono = "ui-monospace";

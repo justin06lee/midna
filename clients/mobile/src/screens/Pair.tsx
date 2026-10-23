@@ -5,7 +5,7 @@ import { MidnaError } from "@midna/protocol";
 import { clientFor, saveConnection, type PhoneConnection } from "../connection";
 import { useDraft, useSecretDraft } from "../drafts";
 import { sameHost, serverUrl } from "../server";
-import { useTheme } from "../theme";
+import { mono, useTheme } from "../theme";
 import { Button, Field, Problem } from "../ui";
 
 /** Waits this long for an answer before saying midna can't be reached. */
@@ -89,5 +89,5 @@ const s = StyleSheet.create({
   head: { gap: 8, marginBottom: 8 },
   title: { fontSize: 30, fontWeight: "700", letterSpacing: -0.5 },
   lede: { fontSize: 15.5, lineHeight: 21 },
-  code: { fontFamily: "Menlo", fontSize: 14 },
+  code: { fontFamily: mono, fontSize: 14 },
 });
