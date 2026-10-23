@@ -11,11 +11,10 @@ The Host layer sets midna up on a machine: it resolves the home directory that h
 - **Bind address, port, extra listen addresses:** packages/daemon/src/config.ts, packages/daemon/src/daemon.ts
 - **Background service install, restart, and removal:** packages/daemon/src/service.ts
 - **Settings read and written before the daemon runs:** packages/daemon/src/host.ts
-- **Bridge process configuration:** packages/daemon/src/config.ts
+- **Bridge process configuration, including Telegram alerts-only mode:** packages/daemon/src/config.ts, packages/daemon/src/bridges.ts, packages/daemon/src/daemon.ts
 - **Version constant reported by the daemon and CLI (bumped at each release):** packages/daemon/src/version.ts
 - **Device hands: paired desktop devices, signed commands, policy gate, audit log:** packages/daemon/src/hands.ts, packages/daemon/src/server.ts, packages/daemon/test/hands.test.ts
 - **Re-pairing a device retires the one it replaces (/v1/pair with replaces):** packages/daemon/src/server.ts, packages/daemon/test/daemon.test.ts
-- **Status spend and wakeup counts (no limit or warning):** packages/daemon/src/server.ts, packages/daemon/src/daemon.ts
 
 ## How it works
 
@@ -25,14 +24,14 @@ The Host layer sets midna up on a machine: it resolves the home directory that h
 
 ## Key files
 
-- packages/daemon/src/config.ts — home directory resolution, daemon bind settings, and config read and write
+- packages/daemon/src/config.ts — home directory resolution, daemon bind settings, bridge config, and config read and write
 - packages/daemon/src/hands.ts — device hands hub: sessions, signed commands, policy gate, audit
 - packages/daemon/src/approvals.ts — approval records, their states, and answers from each client
 - packages/daemon/src/jobs.ts — long-job registry: detached launch, timeout, group kill, restart reconcile, exit wakeup
 - packages/daemon/src/service.ts — installs, restarts, and removes the background user service
 - packages/daemon/src/host.ts — reads and writes settings straight to the database
+- packages/daemon/src/bridges.ts — bridge supervision: starts bridge processes from config and passes their mode
 - packages/daemon/src/server.ts — HTTP routes, including the /v1/hands, /v1/approvals, /v1/pair and /v1/messages endpoints
-- packages/daemon/src/daemon.ts — starts the daemon from the config and runs the job tick
 
 ## Rules and traps
 
@@ -50,3 +49,4 @@ The Host layer sets midna up on a machine: it resolves the home directory that h
 - Daemon — daemon.ts and server.ts consume the config, and index.ts re-exports startDaemon and createApp from them
 - Assistant — index.ts re-exports installedBrains, checkModel, and checkBrainLive from @midna/agent; hands.ts implements the HandsHandle interface that the device_* tools call; jobs.ts implements the JobsHandle interface that the job_start, job_list and job_stop tools call, so the agent never imports the daemon; receive() in @midna/agent resolves native replies and prompt.ts writes the [Replying to …] line
 - Runtime — the service runs under the user's systemd user manager or launchd, so the agent CLIs it starts are the user's own signed-in ones; on Linux, jobs run as midna-job-… user units that appear in systemctl --user list-units
+- Clients — bridges.ts starts each bridge from BridgeConfig.command and passes its mode as MIDNA_BRIDGE_MODE; the alerts filter lives in clients/telegram/src/bridge.ts, and the CLI's telegram run passes the mode through from clients/cli/src/main.ts

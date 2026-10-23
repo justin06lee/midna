@@ -34,8 +34,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
     <View style={[s.root, { backgroundColor: t.bg }]}>
       <View style={[s.header, { paddingTop: insets.top + 6, borderBottomColor: t.line }]}>
         <View style={[s.mark, { opacity: offline ? 0.35 : 1 }]}>
-          <View style={s.spinner}>{midna.thinking ? <ActivityIndicator size="small" color={t.dim} /> : null}</View>
           <Image accessibilityLabel="midna" source={require("../../assets/mark.png")} style={[s.icon, { tintColor: t.ink }]} />
+          <View style={s.spinner}>{midna.thinking ? <ActivityIndicator size="small" color={t.dim} /> : null}</View>
         </View>
       </View>
       <View style={[s.body, { opacity: offline ? 0.45 : 1 }]}>

@@ -38,3 +38,11 @@ What midna may do on this computer: connection and Pause card (with the trusted 
 Its files: clients/desktop/src/screens/Computer.tsx
 Reaches into: clients/desktop/src/host.ts, clients/desktop/src/screens/Main.tsx, clients/desktop/src-tauri/src/hands/mod.rs, clients/desktop/src/useHands.ts
 Tags: screen, settings, permissions, hands
+
+## markdown-view — the message markdown
+iPhone: renders midna's markdown in chat bubbles (lists, code with Copy, links)
+Its files: clients/mobile/src/markdown.tsx
+
+## phone-image-viewer — the phone image viewer
+iPhone: fixed-size image thumbnails in messages and the composer chip, full-screen viewer with Share
+Its files: clients/mobile/src/attachments.tsx

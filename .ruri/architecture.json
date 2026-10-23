@@ -4,16 +4,16 @@
     "Tracks goals, tasks, commitments, people, decisions, and notes",
     "Schedules follow-ups, reminders, and recurring daily and weekly reviews",
     "Batches due follow-ups into one turn; skips near-duplicates",
-    "Tracks per-turn spend, caches prompts; no wakeup budget or warnings (removed on purpose in 0.11.2)",
+    "Tracks per-turn spend, caches prompts, batches wakeups",
     "Delivers notifications by priority, respecting quiet hours and replay position",
     "Keeps searchable conversations, episodes, and tool-call audit records",
     "Recalls facts with decay, links, archival; builds bounded context",
     "Runs Claude Code, Codex, and other agents through yagami",
     "Holds work through outages; interrupts or queues messages; never drops",
     "Autonomous and ask modes; device actions approved on Mac, chat, Telegram, iPhone",
-    "Chats via terminal, Telegram, desktop, iPhone; reads reply quotes",
+    "Chats via terminal, Telegram (alerts-only mode), desktop, iPhone; markdown, reply quotes",
     "Installs, starts, pairs hosts; opt-in tailnet listen, never wildcards",
-    "Sends files via paste, drop, picker; previews, downloads, keeps order",
+    "Sends files via paste, drop, picker; previews, thumbnails, keeps order",
     "Keeps unsent desktop drafts across views and restarts",
     "Accepts inbound events from other programs, deduplicated, rate-limited",
     "Drives paired computers: screen, input, shell, files, clipboard"
@@ -142,7 +142,8 @@
     "clients/cli/ — terminal commands, host discovery and installation, and single-binary entry point",
     "clients/telegram/ — Telegram bot API, owner-bound bridge, reply context, and una voice transcription (voice.ts)",
     "clients/desktop/ — native desktop app, screens, packages, and build scripts (scripts/app.ts, signing.ts)",
-    "clients/mobile/ — Expo iPhone app: chat, ask buttons, attachments, Face ID approvals; v1 code done, device run pending",
+    "clients/mobile/ — Expo iPhone app: chat with markdown (src/markdown.tsx), inline image thumbnails and full-screen viewer, ask buttons, attachments, Face ID approvals; v1 code done, device run pending",
+    "clients/mobile/src/keyboard.ts — pure composer keyboard-lift math; unit test in clients/mobile/test/keyboard.test.ts",
     "clients/desktop/src-tauri/src/hands/ — device hands on this computer: permissions, screenshots, input, gated commands",
     "packages/protocol/ — API schemas, device wire shapes (src/hands.ts), and client",
     "packages/agent/ — orchestration, brain adapter, prompts, and MCP tools",
@@ -153,7 +154,7 @@
     "test/ — tests",
     "Makefile (desktop package builds, make tenet-check, make tenet-cargo-test on tenet) and package.json (Bun scripts and workspace dependencies)",
     "README.md — project behavior, setup, and architecture",
-    "docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching; the daily budget was removed on purpose in 0.11.2)"
+    "docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching)"
   ],
   "run": [
     "bun install — install dependencies",
@@ -440,7 +441,7 @@
       ]
     },
     "clients": {
-      "summary": "The clients layer provides the Bun CLI, a Telegram bridge with native replies and voice-note transcription through una, a desktop app and an iPhone app. The CLI handles setup and local commands, including the spend and wakeup status lines; Telegram, the desktop and the phone use the public Midna API through MidnaClient, the phone at an address it is given (Tailscale later). The desktop shell handles host operations, its web view talks to Midna over HTTP, and its Rust side is a signed device-hands endpoint that runs input, shell, AppleScript, file and clipboard operations for the daemon. Approval requests for risky actions reach the user on the Mac, in chat, on Telegram and on the phone, behind Face ID. Re-pairing retires the previous pairing: each install or reconnect names the old token it replaces.",
+      "summary": "The clients layer holds the Bun CLI, a Telegram bridge (native replies, una voice-note transcription, full or alerts-only mode), a desktop app and an iPhone app. The CLI handles setup and local status lines; Telegram, desktop and phone all use the public Midna API through MidnaClient. Clients are thin: the daemon owns state and decisions, and each bridge only filters and forwards what it is given. Re-pairing retires the previous pairing by naming the old token it replaces.",
       "map": [
         {
           "name": "CLI commands (status spend and wakeup lines)",
@@ -473,6 +474,15 @@
           ]
         },
         {
+          "name": "Telegram alerts-only mode (which messages Telegram receives)",
+          "files": [
+            "clients/telegram/src/bridge.ts",
+            "clients/telegram/src/index.ts",
+            "clients/cli/src/main.ts",
+            "test/telegram-alerts.e2e.test.ts"
+          ]
+        },
+        {
           "name": "Telegram native replies (Telegram reply threads mapped to midna message ids)",
           "files": [
             "clients/telegram/src/bridge.ts",
@@ -499,32 +509,41 @@
           ]
         },
         {
-          "name": "iPhone plain-HTTP addresses (App Transport Security exceptions)",
+          "name": "iPhone keyboard lift (composer stays above the keyboard, including after backgrounding)",
           "files": [
-            "clients/mobile/app.json",
-            "docs/mobile.md"
+            "clients/mobile/src/keyboard.ts",
+            "clients/mobile/src/screens/Chat.tsx",
+            "clients/mobile/test/keyboard.test.ts"
           ]
         },
         {
-          "name": "Desktop connection and live conversation state",
+          "name": "iPhone image attachments (thumbnails in messages, composer chip, full-screen viewer)",
           "files": [
-            "clients/desktop/src/useMidna.ts",
-            "clients/desktop/src/screens/Main.tsx"
+            "clients/mobile/src/attachments.tsx",
+            "clients/mobile/src/screens/Chat.tsx"
           ]
         },
         {
-          "name": "Desktop onboarding",
+          "name": "iPhone chat rendering (markdown, composer keyboard avoidance)",
           "files": [
-            "clients/desktop/src/screens/Welcome.tsx",
-            "clients/desktop/src/screens/Install.tsx",
-            "clients/desktop/src/host.ts"
+            "clients/mobile/src/markdown.tsx",
+            "clients/mobile/src/screens/Chat.tsx",
+            "clients/mobile/package.json"
           ]
         },
         {
-          "name": "Desktop chat (including the composer hint line and approval buttons)",
+          "name": "iPhone header (bare midna mark on the left, working spinner to its left, offline greying)",
           "files": [
-            "clients/desktop/src/screens/Chat.tsx",
-            "clients/desktop/src/useMidna.ts"
+            "clients/mobile/src/screens/Main.tsx",
+            "clients/mobile/assets/mark.svg",
+            "clients/mobile/assets/mark.png"
+          ]
+        },
+        {
+          "name": "iPhone fonts (system font, SF Mono for code)",
+          "files": [
+            "clients/mobile/src/theme.ts",
+            "clients/mobile/src/markdown.tsx"
           ]
         }
       ],
@@ -532,9 +551,9 @@
         {
           "name": "Desktop installation",
           "steps": [
-            "Welcome discovers and ranks machines",
-            "Install displays installation events",
-            "host runs the CLI through Tauri or the development server",
+            "Welcome ranks discovered machines",
+            "Install shows installation events",
+            "host runs the CLI through Tauri or the dev server",
             "the CLI installs and pairs the machine",
             "the desktop app receives a Connection"
           ]
@@ -544,7 +563,7 @@
           "steps": [
             "Main creates useMidna with a Connection",
             "useMidna uses MidnaClient for history and live events",
-            "Chat renders every midna line as a plain message, whatever its kind (questions add option buttons), and sends"
+            "Chat renders each midna line (questions add option buttons) and sends"
           ]
         },
         {
@@ -553,61 +572,67 @@
             "bot.ts takes the voice message",
             "voice.ts downloads the audio",
             "una transcribes it",
-            "bridge.ts sends the transcript to Midna with its duration marker"
+            "bridge.ts sends the transcript with its duration marker"
+          ]
+        },
+        {
+          "name": "Telegram alerts-only delivery",
+          "steps": [
+            "The daemon outbox hands each item to the Telegram bridge",
+            "bridge.ts checks the mode read at start",
+            "Chat replies and fyi items are dropped",
+            "Reminders and urgent or normal proactive messages go out, with buttons where asked"
           ]
         },
         {
           "name": "iPhone",
           "steps": [
-            "Pair takes an address (now the makima one, http://10.77.0.1:7717, from the simulator; a tailnet name later) and a code",
+            "Pair takes an address and a code",
             "pairs as kind mobile, naming the old token as replaces only to the same host",
-            "token in the Keychain",
-            "useMidna streams /v1/events through expo/fetch, refetching history on return to the foreground",
-            "approval buttons ask Face ID, then POST /v1/approvals/:id"
-          ]
-        },
-        {
-          "name": "Re-pairing",
-          "steps": [
-            "hostInstall reads the token saved in client.json",
-            "install.ts sends it as replaces only when the saved address matches the host and port being paired",
-            "the daemon pairs the new device and retires the replaced one",
-            "the CLI saves the new client.json as kind cli",
-            "the desktop app keeps the old connection as connection.previous.json and passes its token to the bundled CLI through an environment variable",
-            "saving the new connection deletes connection.previous.json"
+            "token goes to the Keychain",
+            "useMidna streams /v1/events through expo/fetch, refetching history on foreground",
+            "Chat renders markdown and keeps the composer above the keyboard",
+            "approvals ask Face ID, then POST /v1/approvals/:id"
           ]
         }
       ],
       "files": [
-        "clients/cli/src/main.ts — CLI entry point, commands, and hostInstall reuse of the saved token",
+        "clients/cli/src/main.ts — CLI entry point, commands, mode passed to telegram run, and hostInstall reuse of the saved token",
         "clients/cli/src/install.ts — machine installation, pairing with replaces, and progress events",
         "clients/cli/src/discover.ts — machine discovery with a timeout on health checks",
-        "clients/telegram/src/bridge.ts — owner pairing, API exchange, /queue handling, approval buttons, persistent delivery positions, native reply context and id mapping",
+        "clients/telegram/src/bridge.ts — owner pairing, API exchange, /queue handling, approval buttons, alerts-only filter, persistent delivery positions, native reply context and id mapping",
         "clients/telegram/src/bot.ts — the bot's command menu, Telegram API wiring, and reply and voice message intake",
         "clients/telegram/src/voice.ts — voice note download, una transcription and duration marker",
         "clients/telegram/src/index.ts — Telegram bridge entry point",
-        "clients/mobile/src/useMidna.ts — phone connection: history, event stream through expo/fetch, foreground reconnect, approvals, uploads",
-        "clients/mobile/app.json — App Transport Security exceptions for plain HTTP to the phone's address",
-        "clients/desktop/src/useMidna.ts — desktop connection, conversation state, and approval answers",
-        "clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition"
+        "clients/mobile/src/useMidna.ts — phone connection: history, event stream, foreground reconnect, approvals, uploads",
+        "clients/mobile/src/screens/Chat.tsx — phone chat screen with composer, keyboard lift and message list",
+        "clients/mobile/src/keyboard.ts — pure keyboard lift calculation from the measured frame and keyboard frame",
+        "clients/mobile/src/attachments.tsx — image thumbnails, composer chip and full-screen viewer with share",
+        "clients/mobile/src/screens/Main.tsx — phone header with the bare midna mark, working spinner and offline greying",
+        "clients/mobile/assets/mark.svg — bare midna mark glyph used by the phone header",
+        "clients/mobile/src/theme.ts — phone font and monospace settings",
+        "clients/mobile/test/keyboard.test.ts — unit tests for the keyboard lift"
       ],
       "rules": [
         "The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.",
         "Persist Telegram update offsets and Midna outbox sequence positions so restarts do not replay or miss deliveries.",
-        "Bridge state must be loaded before any handler reads it; reading it earlier yields stale or empty values.",
+        "Bridge state must be loaded before any handler reads it; earlier reads give stale or empty values.",
         "Pass PATH explicitly to Bun.which or child lookups; the ambient PATH may not reflect later changes.",
         "una forces English by default, so Korean speech comes back translated; language=ko keeps Korean but writes English words in Hangul, and the per-bridge language override is the only control.",
         "The bridge must not delete voice notes from una's history; kept notes may be learned from, and only test clips are deleted.",
         "A tap on a closed approval gets a 409: say so (Telegram: the tap's toast, buttons cleared), and guess its outcome only while its record still reads pending, or the guess overwrites the stream's real answer.",
         "The daemon refuses approval answers sent with the host's own token, so any client that answers must be paired separately.",
         "midna's input stops only when the user touches the mouse or keyboard within the last 2 s and the event did not come from midna.",
-        "A version bump is five places, all matching: clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/Cargo.lock, clients/desktop/src-tauri/tauri.conf.json and packages/daemon/src/version.ts."
+        "Alerts mode drops chat replies and fyi items; a reply to a Telegram-sent message is dropped too, since kind cannot show where a message came from.",
+        "Alerts mode is read at bridge start: after editing config.json, POST /v1/bridges/reload or restart midna.",
+        "An unknown mode falls back to full with a log line, so a typo cannot silence Telegram.",
+        "The alerts notice goes out once per local day, its day kept as alertsNoticeDay in telegram.json."
       ],
       "edges": [
-        "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal; hands wire shapes, including approval events and every op's arguments and results, are in packages/protocol/src/hands.ts; pair takes an optional replaces token and returns the retired device id; SendMessage.inReplyTo names a native reply's target (messageId, outboxId, quote, fallback), POST /v1/messages returns messageId in MessageReceipt, and HistoryItem and user_message carry inReplyTo",
-        "Daemon — the CLI manages the host service and shows its spend and wakeup status; desktop, Telegram and the phone use its public API; the desktop is also a hands device over /v1/hands (hello, SSE stream, state, results), trusting the daemon key from pairing or its first hello; approval requests arrive on that stream and answers go to POST /v1/approvals/:id; pairing with replaces retires the named device, whatever its kind",
+        "Protocol — clients use MidnaClient and shared API types; hands wire shapes are in packages/protocol/src/hands.ts; pair takes an optional replaces token and returns the retired device id; SendMessage.inReplyTo names a native reply's target; HistoryItem and user_message carry inReplyTo",
+        "Daemon — the CLI manages the host service and shows spend and wakeup status; desktop, Telegram and the phone use its public API; the desktop is also a hands device over /v1/hands, trusting the daemon key from pairing or its first hello; the daemon reads bridges.telegram.mode and passes it to the bridge as MIDNA_BRIDGE_MODE",
         "Host — CLI setup uses host configuration and service operations from the daemon package",
-        "una — speech-to-text for Telegram voice notes; the Telegram bridge sends the downloaded audio and receives the transcript"
+        "una — speech-to-text for Telegram voice notes; the bridge sends the downloaded audio and receives the transcript"
       ]
     },
     "protocol": {
@@ -760,9 +785,11 @@
           ]
         },
         {
-          "name": "Bridge process configuration",
+          "name": "Bridge process configuration, including Telegram alerts-only mode",
           "files": [
-            "packages/daemon/src/config.ts"
+            "packages/daemon/src/config.ts",
+            "packages/daemon/src/bridges.ts",
+            "packages/daemon/src/daemon.ts"
           ]
         },
         {
@@ -784,13 +811,6 @@
           "files": [
             "packages/daemon/src/server.ts",
             "packages/daemon/test/daemon.test.ts"
-          ]
-        },
-        {
-          "name": "Status spend and wakeup counts (no limit or warning)",
-          "files": [
-            "packages/daemon/src/server.ts",
-            "packages/daemon/src/daemon.ts"
           ]
         }
       ],
@@ -828,14 +848,14 @@
         }
       ],
       "files": [
-        "packages/daemon/src/config.ts — home directory resolution, daemon bind settings, and config read and write",
+        "packages/daemon/src/config.ts — home directory resolution, daemon bind settings, bridge config, and config read and write",
         "packages/daemon/src/hands.ts — device hands hub: sessions, signed commands, policy gate, audit",
         "packages/daemon/src/approvals.ts — approval records, their states, and answers from each client",
         "packages/daemon/src/jobs.ts — long-job registry: detached launch, timeout, group kill, restart reconcile, exit wakeup",
         "packages/daemon/src/service.ts — installs, restarts, and removes the background user service",
         "packages/daemon/src/host.ts — reads and writes settings straight to the database",
-        "packages/daemon/src/server.ts — HTTP routes, including the /v1/hands, /v1/approvals, /v1/pair and /v1/messages endpoints",
-        "packages/daemon/src/daemon.ts — starts the daemon from the config and runs the job tick"
+        "packages/daemon/src/bridges.ts — bridge supervision: starts bridge processes from config and passes their mode",
+        "packages/daemon/src/server.ts — HTTP routes, including the /v1/hands, /v1/approvals, /v1/pair and /v1/messages endpoints"
       ],
       "rules": [
         "The service must run as the user's own account; that is what gives the agent the user's signed-in CLIs, so do not move it to a system-wide unit.",
@@ -850,7 +870,8 @@
         "Core — host.ts uses Store and the Settings type from @midna/core, and the database file path comes from ensureHome(); hands.ts stores devices, audit rows and approvals through the hands module in @midna/core; device retirement lives in packages/core/src/devices.ts; jobs.ts stores job records through the Jobs module in @midna/core; migration 9 stores messages.in_reply_to, reply_quote and reply_fallback, and outbox ids resolve through messages.outbox_id",
         "Daemon — daemon.ts and server.ts consume the config, and index.ts re-exports startDaemon and createApp from them",
         "Assistant — index.ts re-exports installedBrains, checkModel, and checkBrainLive from @midna/agent; hands.ts implements the HandsHandle interface that the device_* tools call; jobs.ts implements the JobsHandle interface that the job_start, job_list and job_stop tools call, so the agent never imports the daemon; receive() in @midna/agent resolves native replies and prompt.ts writes the [Replying to …] line",
-        "Runtime — the service runs under the user's systemd user manager or launchd, so the agent CLIs it starts are the user's own signed-in ones; on Linux, jobs run as midna-job-… user units that appear in systemctl --user list-units"
+        "Runtime — the service runs under the user's systemd user manager or launchd, so the agent CLIs it starts are the user's own signed-in ones; on Linux, jobs run as midna-job-… user units that appear in systemctl --user list-units",
+        "Clients — bridges.ts starts each bridge from BridgeConfig.command and passes its mode as MIDNA_BRIDGE_MODE; the alerts filter lives in clients/telegram/src/bridge.ts, and the CLI's telegram run passes the mode through from clients/cli/src/main.ts"
       ]
     },
     "daemon": {
@@ -882,9 +903,11 @@
           ]
         },
         {
-          "name": "Bridge process supervision and restart",
+          "name": "Bridge process supervision, restart, and per-bridge mode (bridges.telegram.mode passed as MIDNA_BRIDGE_MODE)",
           "files": [
-            "packages/daemon/src/bridges.ts"
+            "packages/daemon/src/bridges.ts",
+            "packages/daemon/src/config.ts",
+            "packages/daemon/src/daemon.ts"
           ]
         },
         {
@@ -908,6 +931,13 @@
             "packages/daemon/src/jobs.ts",
             "packages/daemon/test/jobs.test.ts",
             "packages/daemon/src/daemon.ts"
+          ]
+        },
+        {
+          "name": "Daemon version and release (version string, status wakeup spend)",
+          "files": [
+            "packages/daemon/src/version.ts",
+            "packages/daemon/src/server.ts"
           ]
         }
       ],
@@ -969,35 +999,34 @@
         }
       ],
       "files": [
-        "packages/daemon/src/server.ts — Hono app, routes, SSE stream, MCP/token auth, approval answers, pairing and re-pairing",
+        "packages/daemon/src/server.ts — Hono app, routes, SSE stream, MCP/token auth, approval answers, pairing and re-pairing, status spend",
         "packages/daemon/src/daemon.ts — startDaemon, config, scheduler loop, dependency wiring",
-        "packages/daemon/src/config.ts — config loading, including the listen addresses",
-        "packages/daemon/src/bridges.ts — bridge subprocess spawn, logging, backoff restart",
+        "packages/daemon/src/config.ts — config loading, including the listen addresses and bridge mode",
+        "packages/daemon/src/bridges.ts — bridge subprocess spawn, logging, backoff restart, and MIDNA_BRIDGE_MODE",
         "packages/daemon/src/hands.ts — HandsHub: device sessions, Ed25519 signing, dispatch and timeouts, the decide() gate, summarize() for approvals, the audit rows",
         "packages/daemon/src/approvals.ts — Approvals: asks on the device stream, the event stream and as a chat question; first answer wins, 2-min expiry, 10-min grants, catches replies in POST /v1/messages",
         "packages/daemon/src/jobs.ts — JobRunner: writes wrapper.sh into each job folder under MIDNA_HOME/jobs/job-…, launches it detached, watches pid and exit file, settles jobs on startup, kills by process group (and unit) at stop or time limit",
-        "packages/daemon/test/jobs.test.ts — job tests with stand-in systemd-run, systemctl and launchd that apply systemd's $ rewrite"
+        "packages/daemon/src/version.ts — the daemon's version string, bumped to 0.11.2",
+        "packages/daemon/test/jobs.test.ts — job tests with stand-in systemd-run, systemctl and launchd that apply systemd's $ rewrite",
+        "packages/daemon/test/daemon.test.ts — daemon tests, updated when the budget was removed"
       ],
       "rules": [
         "Bridges are opaque subprocesses talking only via the public API; never add bridge-protocol knowledge here.",
         "The /mcp route is gated by the per-run mcpToken; do not expose it to clients or bridges.",
         "Bridge supervision lives in Bridges.sync/start/stop; server.ts only re-reads config and calls reloadBridges.",
+        "A bridge reads its mode only when it starts, so a changed bridges.telegram.mode takes effect only after POST /v1/bridges/reload or a restart.",
         "Scheduler timing (tickMs, introDelayMs, coalesceMs, joinMs) and brain injection exist for tests. The tick claims wakeups as turns (claimTurns); each wakeup in a turn gets its outcome.",
         "The tick's hourly sweep also prunes inbound events older than 30 days whose wakeup is over; until then a resent id is a duplicate.",
         "Device commands come only from midna's tools behind /mcp; no /v1 route issues one, /v1/hands/* takes desktop tokens only, and nothing is queued for an offline device.",
         "A long-lived SSE route must write something at once: Bun sends the headers with the first bytes, so a silent stream leaves the client's fetch hanging.",
         "The daemon refuses approval answers made with its own host token; an answer needs a separately paired client device.",
-        "Any paired client token can answer an approval, so a client's Face ID or PIN protects only that client, not the approval itself.",
-        "An approval is decided once: a second answer gets 409, and a client must only guess its outcome while the record still says pending, so it cannot overwrite the real result.",
-        "A re-pair retires the device named by replaces only after the new device is paired, and a bad replaces token must never block the pairing.",
-        "Never auto-retire pairings by expiry or by matching kind and name: a working CLI or app token can sit unused for long stretches.",
-        "Phone reachability over Tailscale needs the live daemon's listen to include tailscale0 (a config change on the Jetson)."
+        "Any paired client token can answer an approval, so a client's Face ID or PIN protects only that client, not the approval itself."
       ],
       "edges": [
-        "Protocol — every route body and StreamEvent is typed by Zod schemas in packages/protocol/, including the approval shapes and the pair body's replaces field",
+        "Protocol — every route body and StreamEvent is typed by Zod schemas in packages/protocol/, including the approval shapes and the pair body's replaces field; Status.wakeups carries only turns and usd",
         "Core — Store supplies devices, settings, schedule, outbox, and event bus behind the API",
         "Assistant — chat, wakeup, checkModel, handleMcp, and installedBrains do the agent work",
-        "Clients — CLI, Telegram bridge, desktop app, and the iPhone app (clients/mobile) consume only this layer's HTTP/SSE API; desktop, Telegram, and phone answer approvals via POST /v1/approvals; the phone pairs with kind mobile, which needed no daemon change; the CLI and desktop app will send replaces on re-pair once Clients updates its install flows",
+        "Clients — CLI, Telegram bridge, desktop app, and the iPhone app (clients/mobile) consume only this layer's HTTP/SSE API; the Telegram bridge runs in full or alerts mode from MIDNA_BRIDGE_MODE; desktop, Telegram, and phone answer approvals via POST /v1/approvals; the phone pairs with kind mobile, which needed no daemon change; the CLI and desktop app will send replaces on re-pair once Clients updates its install flows",
         "Host — config, home directory, service install, and VERSION surround startup"
       ]
     },

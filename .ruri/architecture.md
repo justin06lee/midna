@@ -28,7 +28,8 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - clients/cli/ — terminal commands, host discovery and installation, and single-binary entry point
 - clients/telegram/ — Telegram bot API, owner-bound bridge, reply context, and una voice transcription (voice.ts)
 - clients/desktop/ — native desktop app, screens, packages, and build scripts (scripts/app.ts, signing.ts)
-- clients/mobile/ — Expo iPhone app: chat, ask buttons, attachments, Face ID approvals; v1 code done, device run pending
+- clients/mobile/ — Expo iPhone app: chat with markdown (src/markdown.tsx), inline image thumbnails and full-screen viewer, ask buttons, attachments, Face ID approvals; v1 code done, device run pending
+- clients/mobile/src/keyboard.ts — pure composer keyboard-lift math; unit test in clients/mobile/test/keyboard.test.ts
 - clients/desktop/src-tauri/src/hands/ — device hands on this computer: permissions, screenshots, input, gated commands
 - packages/protocol/ — API schemas, device wire shapes (src/hands.ts), and client
 - packages/agent/ — orchestration, brain adapter, prompts, and MCP tools
@@ -39,7 +40,7 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - test/ — tests
 - Makefile (desktop package builds, make tenet-check, make tenet-cargo-test on tenet) and package.json (Bun scripts and workspace dependencies)
 - README.md — project behavior, setup, and architecture
-- docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching; the daily budget was removed on purpose in 0.11.2)
+- docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching)
 
 ## How to run it
 
@@ -67,16 +68,16 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 - Tracks goals, tasks, commitments, people, decisions, and notes
 - Schedules follow-ups, reminders, and recurring daily and weekly reviews
 - Batches due follow-ups into one turn; skips near-duplicates
-- Tracks per-turn spend, caches prompts; no wakeup budget or warnings (removed on purpose in 0.11.2)
+- Tracks per-turn spend, caches prompts, batches wakeups
 - Delivers notifications by priority, respecting quiet hours and replay position
 - Keeps searchable conversations, episodes, and tool-call audit records
 - Recalls facts with decay, links, archival; builds bounded context
 - Runs Claude Code, Codex, and other agents through yagami
 - Holds work through outages; interrupts or queues messages; never drops
 - Autonomous and ask modes; device actions approved on Mac, chat, Telegram, iPhone
-- Chats via terminal, Telegram, desktop, iPhone; reads reply quotes
+- Chats via terminal, Telegram (alerts-only mode), desktop, iPhone; markdown, reply quotes
 - Installs, starts, pairs hosts; opt-in tailnet listen, never wildcards
-- Sends files via paste, drop, picker; previews, downloads, keeps order
+- Sends files via paste, drop, picker; previews, thumbnails, keeps order
 - Keeps unsent desktop drafts across views and restarts
 - Accepts inbound events from other programs, deduplicated, rate-limited
 - Drives paired computers: screen, input, shell, files, clipboard
