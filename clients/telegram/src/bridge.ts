@@ -36,6 +36,32 @@ export interface TelegramState {
    * (default: una's own setting, English).
    */
   una?: { url?: string; language?: string };
+  /** The local day (YYYY-MM-DD, midna's timezone) the owner was last told Telegram is for alerts only. */
+  alertsNoticeDay?: string;
+}
+
+/** What the bridge forwards: everything (default), or only what is an alert. */
+export type BridgeMode = "full" | "alerts";
+
+/** The mode a config value names; anything but "alerts" is "full", so a typo never silences Telegram. */
+export function bridgeMode(value: string | undefined): BridgeMode {
+  if (value === undefined || value === "full") return "full";
+  if (value === "alerts") return "alerts";
+  console.error(`unknown bridge mode "${value}" — using "full" (known: full, alerts)`);
+  return "full";
+}
+
+/** The line an owner gets, at most once a day, for writing to a bridge in alerts mode. */
+export const ALERTS_NOTICE = "I'm on the midna app now. Telegram is for alerts only.";
+
+/**
+ * Whether alerts mode sends an outbox item to Telegram: reminders, messages
+ * midna sends on its own (message_user, ask_user) and anything urgent or
+ * normal. A reply to the chat (kind "message") and anything fyi stay in the app.
+ */
+export function isAlert(item: Pick<OutboxItem, "kind" | "priority">): boolean {
+  if (item.priority === "fyi") return false;
+  return item.kind !== "message";
 }
 
 /** A line of the conversation, as a Telegram message stands for it. */
@@ -87,8 +113,11 @@ export class TelegramBridge {
   /** Where una is, what it hears, and how long it gets (tests point it at a fake). */
   private readonly una: { una?: string; language?: string; timeoutMs?: number };
 
-  constructor(private readonly file: string, opts: { midnaUrl?: string; una?: { url?: string; timeoutMs?: number } } = {}) {
+  readonly mode: BridgeMode;
+
+  constructor(private readonly file: string, opts: { midnaUrl?: string; mode?: string; una?: { url?: string; timeoutMs?: number } } = {}) {
     this.state = loadState(file);
+    this.mode = bridgeMode(opts.mode);
     const url = opts.una?.url ?? this.state.una?.url;
     const language = this.state.una?.language;
     this.una = { ...(url ? { una: url } : {}), ...(language ? { language } : {}), ...(opts.una?.timeoutMs ? { timeoutMs: opts.una.timeoutMs } : {}) };
@@ -180,6 +209,17 @@ export class TelegramBridge {
     const receipt = await this.midna.send({ text: said, client: "telegram", ...(q ? { replyTo: q.id } : {}), ...(ref ? { inReplyTo: ref } : {}), ...(file ? { attachments: [file.id] } : {}) });
     // A host before 0.10.1 says no id: a reply to this one is then described from Telegram's copy.
     if (receipt.messageId) this.remember([m], { message: receipt.messageId });
+    if (this.mode === "alerts") await this.noticeAlertsOnly(m.chat.id);
+  }
+
+  /** Alerts mode: the owner wrote here, and is told once a local day where midna lives now. */
+  private async noticeAlertsOnly(chat: number): Promise<void> {
+    const tz = await this.midna.status().then((s) => s.timezone, () => undefined);
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    if (this.state.alertsNoticeDay === today) return;
+    this.state.alertsNoticeDay = today;
+    this.save();
+    await this.bot.send(chat, ALERTS_NOTICE, { silent: true }).catch(() => {});
   }
 
   /**
@@ -291,10 +331,11 @@ export class TelegramBridge {
   private async onEvent(e: StreamEvent): Promise<void> {
     const chat = this.state.ownerChatId!;
     if (e.type === "status") {
-      if (e.state === "thinking") this.startTyping();
+      // In alerts mode midna is working for the app, not for this chat.
+      if (e.state === "thinking" && this.mode === "full") this.startTyping();
       else this.stopTyping();
     } else if (e.type === "outbox") {
-      await this.deliver(chat, e.item);
+      if (this.mode === "full" || isAlert(e.item)) await this.deliver(chat, e.item);
       this.state.lastSeq = e.item.seq;
       this.save();
     } else if (e.type === "approval" && e.approval.state !== "pending") {

@@ -477,7 +477,7 @@ async function main(): Promise<void> {
       if (rest[0] === "setup") return telegramSetup();
       if (rest[0] === "run") {
         const file = flag("--state") ?? join(midnaHome(), "telegram.json");
-        const bridge = new TelegramBridge(file, process.env.MIDNA_URL ? { midnaUrl: process.env.MIDNA_URL } : {});
+        const bridge = new TelegramBridge(file, { ...(process.env.MIDNA_URL ? { midnaUrl: process.env.MIDNA_URL } : {}), ...(process.env.MIDNA_BRIDGE_MODE ? { mode: process.env.MIDNA_BRIDGE_MODE } : {}) });
         process.on("SIGTERM", () => (bridge.stop(), process.exit(0)));
         return bridge.run();
       }

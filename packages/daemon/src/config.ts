@@ -19,6 +19,8 @@ export interface BridgeConfig {
   /** argv of the bridge process; it reaches midna through the public API only. */
   command: string[];
   enabled: boolean;
+  /** How much the bridge forwards, handed to it as MIDNA_BRIDGE_MODE; the bridge decides what a value means. */
+  mode?: string;
 }
 
 export interface DaemonConfig {

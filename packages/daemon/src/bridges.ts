@@ -20,7 +20,7 @@ export class Bridges {
   private start(name: string, b: BridgeConfig, backoff: number): void {
     const startedAt = Date.now();
     const proc = Bun.spawn(b.command, {
-      env: { ...process.env, ...this.env },
+      env: { ...process.env, ...this.env, ...(b.mode ? { MIDNA_BRIDGE_MODE: b.mode } : {}) },
       stdout: "pipe",
       stderr: "pipe",
     });

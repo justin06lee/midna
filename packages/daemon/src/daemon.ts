@@ -133,7 +133,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       if (!setup) throw new Error(`midna doesn't know a bridge called "${name}"`);
       const { command, result } = await setup(input, { url: base, pairingCode: store.devices.pairingCode().code, home });
       const config = loadConfig(home);
-      config.bridges[name] = { command, enabled: true };
+      // Setting a bridge up again keeps how it was told to behave.
+      config.bridges[name] = { command, enabled: true, ...(config.bridges[name]?.mode ? { mode: config.bridges[name]!.mode } : {}) };
       saveConfig(config, home);
       bridges.sync(config.bridges);
       return result;

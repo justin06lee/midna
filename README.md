@@ -76,6 +76,8 @@ A new message from any device interrupts whatever midna is doing, and the turn a
 
 **From your phone:** in the app go to Settings → Your phone, paste a bot token from @BotFather, and send the bot the `/start <code>` it shows. `midna telegram setup` does the same from a terminal. The bot answers exactly one chat, yours, and ignores everyone else. `/pause` switches to ask mode and `/resume` switches back. Telegram's Reply on any message tells midna which one you mean, and the part you highlighted. Voice notes reach midna as words, transcribed by [una](https://github.com/justin06lee/una) in English mode (`una.language` in `telegram.json` changes it), with the recording attached. Each note stays in una's history, so una can learn from it.
 
+**Telegram for alerts only.** Set `"mode": "alerts"` on the bridge in `config.json` (`"bridges": { "telegram": { …, "mode": "alerts" } }`) and reload the bridges (`POST /v1/bridges/reload`, or restart midna). Telegram then gets reminders, what midna sends on its own (`message_user`, `ask_user` with their buttons) and anything urgent or normal; replies to your chat and anything `fyi` stay in the app. What you write there still reaches midna, and once a local day (midna's timezone) the bot answers "I'm on the midna app now. Telegram is for alerts only." Tapping a button still answers. The default, `"full"`, is everything; any other value is treated as `"full"` and logged.
+
 **Another terminal:** run `midna pair` on the host, then `midna connect <url> <code>` on the other machine. Every device pairs with its own revocable token, even on a private mesh.
 
 ## How it fits together
