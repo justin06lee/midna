@@ -7,6 +7,7 @@ import { Attachments } from "../attachments";
 import type { PhoneConnection } from "../connection";
 import { draftKey, dropDraft, loadDraft, saveDraft, useDraft } from "../drafts";
 import { faceId } from "../faceid";
+import { Markdown } from "../markdown";
 import { approvalOutcome, asksApproval, size, type Line } from "../lines";
 import { useTheme } from "../theme";
 import { Problem, time } from "../ui";
@@ -265,9 +266,7 @@ function LineView({
   return (
     <View style={s.midna}>
       {l.text ? (
-        <Text selectable style={[s.midnaText, { color: t.ink }]}>
-          {l.text}
-        </Text>
+        <Markdown text={l.text} />
       ) : null}
       {l.attachments.length > 0 && <Attachments items={l.attachments} source={midna.attachmentSource} fetchAttachment={midna.fetchAttachment} />}
       {approval ? (
@@ -352,8 +351,7 @@ const s = StyleSheet.create({
   user: { alignItems: "flex-end", gap: 4 },
   bubble: { maxWidth: "82%", borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 14, paddingVertical: 9 },
   userText: { fontSize: 16, lineHeight: 22 },
-  midna: { alignItems: "flex-start", gap: 6, maxWidth: "92%" },
-  midnaText: { fontSize: 16, lineHeight: 23 },
+  midna: { alignItems: "flex-start", gap: 6, width: "92%" },
   meta: { fontSize: 11.5 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   option: { minHeight: 34, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, justifyContent: "center" },
