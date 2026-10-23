@@ -1,17 +1,15 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PhoneConnection } from "../connection";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
-import { useMidna, type Link } from "../useMidna";
+import { useMidna } from "../useMidna";
 import { Approvals } from "./Approvals";
 import { Chat } from "./Chat";
 import { Settings } from "./Settings";
 
 type Tab = "chat" | "approvals" | "settings";
-
-const LINK: Record<Link, string> = { connecting: "connecting…", live: "", lost: "can't reach midna, retrying", unpaired: "" };
 
 /** Paired: the header, and Chat, Approvals and Settings as tabs along the bottom. */
 export function Main({ connection, onPairAgain, onUnpaired }: { connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
@@ -20,7 +18,7 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
   const midna = useMidna(connection);
   const [tab, setTab] = useState<Tab>("chat");
   const waiting = [...midna.approvals.values()].filter((a) => a.state === "pending").length;
-  const line = midna.thinking ? (midna.thinking.tool ? `using ${midna.thinking.tool}…` : "thinking…") : LINK[midna.link];
+  const offline = midna.link === "lost";
 
   if (midna.link === "unpaired") {
     return (
@@ -35,15 +33,12 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
   return (
     <View style={[s.root, { backgroundColor: t.bg }]}>
       <View style={[s.header, { paddingTop: insets.top + 6, borderBottomColor: t.line }]}>
-        <View style={[s.dot, { backgroundColor: midna.link === "live" ? t.ok : midna.link === "lost" ? t.danger : t.warn }]} />
-        <Text style={[s.name, { color: t.ink }]}>{midna.status?.name ?? connection.name}</Text>
-        {line ? (
-          <Text numberOfLines={1} style={[s.state, { color: t.dim }]}>
-            {line}
-          </Text>
-        ) : null}
+        <View style={[s.mark, { opacity: offline ? 0.35 : 1 }]}>
+          <Image accessibilityLabel="midna" source={require("../../assets/icon.png")} style={s.icon} />
+          {midna.thinking ? <ActivityIndicator size="small" color={t.dim} style={s.spinner} /> : null}
+        </View>
       </View>
-      <View style={s.body}>
+      <View style={[s.body, { opacity: offline ? 0.45 : 1 }]}>
         {tab === "chat" && <Chat midna={midna} connection={connection} onOpenApprovals={() => setTab("approvals")} />}
         {tab === "approvals" && <Approvals midna={midna} />}
         {tab === "settings" && <Settings midna={midna} connection={connection} onPairAgain={onPairAgain} onUnpaired={onUnpaired} />}
@@ -68,10 +63,10 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  name: { fontSize: 18, fontWeight: "700", letterSpacing: -0.2 },
-  state: { fontSize: 13.5, flexShrink: 1 },
+  header: { alignItems: "center", paddingBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  mark: { alignItems: "center", justifyContent: "center", height: 30 },
+  icon: { width: 28, height: 28, borderRadius: 7 },
+  spinner: { position: "absolute", left: 38 },
   body: { flex: 1 },
   tabs: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
   tab: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 36 },
