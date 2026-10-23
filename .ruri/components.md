@@ -1,39 +1,40 @@
 # Component library
 
 Every piece of this project's interface ruri has on file: the user's own
-name for it, its handle, its files, and a picture. When the user names
-something here, this is what they mean — go straight to its files rather
-than searching for their words. Before building interface, look here
-first and reuse what exists: `ruri show <slug>` reads one with its code,
-`ruri add <slug>` copies it into place, `ruri help` says the rest.
+name for it, its handle, and its files. When the user names something
+here, this is what they mean — go straight to its files rather than
+searching for their words. Before building interface, look here first
+and reuse what exists: `ruri search <words>` finds one, `ruri show <slug>`
+reads it with its code and its pictures, `ruri add <slug>` copies it into
+place, `ruri help` says the rest.
 
 ruri maintains this file. Don't edit it by hand; it is rewritten whenever
 the library changes.
 
 ## helmet-mark — the helmet mark
 midna's logo: Midna's Twilight Princess helmet as a flat black silhouette on a flat white card. One outline (helmet.ts) feeds the app icon, the macOS 26 Icon Composer icon (icons/midna.icon → Assets.car; white helmet in the dark, clear and tinted styles, shown left to right), tray icon, in-app <Mark> and the README banner; rerun `bun run icons` after changing it.
-Its files: clients/desktop/src/helmet.ts, clients/desktop/src/ui.tsx, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon
-Reaches into: assets/midna.svg
+Its files: clients/desktop/src/ui.tsx, clients/desktop/src/helmet.ts
+Reaches into: assets/midna.svg, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon
 Tags: logo, icon, brand
-Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/68ff780c-a51a-4df5-a8eb-855b8b99c4b7-sheet.png, /Users/huiyunlee/.config/ruri/uploads/3c2ba7a5-69be-410c-a014-bc4bc1a90ee7-midna-helmet-sheet.png
-Its code has changed since that picture — if you change it, `ruri edit helmet-mark --shot <new picture>`
 
 ## title-bar — the title bar
 midna's helmet mark beside the macOS traffic lights (18px, centred with them at y≈22), with 'midna on <host>' as its tooltip, in a 44px drag strip. Its 92px left padding is tied to trafficLightPosition in tauri.conf.json; change one, re-measure the other.
 Its files: clients/desktop/src/screens/Main.tsx
 Reaches into: clients/desktop/src-tauri/tauri.conf.json, clients/desktop/src/host.ts
 Tags: window, nav, header
-Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/fac55f25-2fbd-4b89-9ac5-bbd74b44a34c-titlebar.png, /Users/huiyunlee/.config/ruri/uploads/e032f092-4953-4611-b1b8-f3a7a38fc4c5-midna-titlebar.png
 
 ## chat-images — the chat images
 Images and files in the chat, in the order they were sent: attachments fetched with the device token and drawn at their own size (one up to 440×320, a run of several in a 150px row), file chips that open on click (a PDF in the viewer) with a save-to-Downloads button, captions under each, Markdown web images, and the full-size viewer for images and PDFs with Download and Open.
 Its files: clients/desktop/src/media.tsx
 Reaches into: clients/desktop/src/screens/Chat.tsx, clients/desktop/src/markdown.tsx, clients/desktop/src/ui.tsx, clients/desktop/src-tauri/tauri.conf.json
 Tags: chat, image, attachment, viewer, lightbox
-Screenshots, newest first (read them if you need to see it): /Users/huiyunlee/.config/ruri/uploads/8af92063-d162-4716-9475-4aa0ceca4172-chat-attachments.png, /Users/huiyunlee/.config/ruri/uploads/20e7aa34-95bb-44e7-bb07-2eb939f31894-shot-10.png
 
 ## composer-files — composer files
 The composer's pending files: pasted, dropped or picked files as thumbnails and chips above the message box, each with upload progress, a cross to remove it and Try again when it failed; the paperclip opens the picker and a drop shows a 'Drop to attach' overlay.
 Its files: clients/desktop/src/attach.tsx, clients/desktop/src/screens/Chat.tsx
-Screenshot (read it if you need to see it): /Users/huiyunlee/.config/ruri/uploads/8bd192d4-81bb-4d2e-ba2b-e5a05383936a-composer-files.png
-Its code has changed since that picture — if you change it, `ruri edit composer-files --shot <new picture>`
+
+## this-computer — the This computer screen
+What midna may do on this computer: connection and Pause card (with the trusted daemon key's fingerprint), Off/Ask/On per capability, live macOS permission rows with Ask, Settings and Relaunch, and the last commands. State comes from the Rust hands module via host.ts (hands_status, polled every 2 s while shown).
+Its files: clients/desktop/src/screens/Computer.tsx
+Reaches into: clients/desktop/src/host.ts, clients/desktop/src/screens/Main.tsx, clients/desktop/src-tauri/src/hands/mod.rs, clients/desktop/src/useHands.ts
+Tags: screen, settings, permissions, hands

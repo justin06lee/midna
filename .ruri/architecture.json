@@ -3,19 +3,19 @@
   "features": [
     "Tracks goals, tasks, commitments, people, decisions, and notes",
     "Schedules follow-ups, reminders, and recurring daily and weekly reviews",
+    "Batches due follow-ups into one turn; skips near-duplicates",
+    "Tracks per-turn spend, caches prompts; no wakeup budget or warnings (removed on purpose in 0.11.2)",
     "Delivers notifications by priority, respecting quiet hours and replay position",
     "Keeps searchable conversations, episodes, and tool-call audit records",
-    "Recalls facts with decay, renewal, links, and archival",
-    "Builds bounded working context from current stored state",
+    "Recalls facts with decay, links, archival; builds bounded context",
     "Runs Claude Code, Codex, and other agents through yagami",
-    "Holds work through outages; interrupts or queues new messages; never drops",
-    "Autonomous and ask modes; device actions approved on Mac, chat, Telegram, or iPhone",
-    "Supports terminal, Telegram (replies, voice notes via una), desktop, and iPhone chat",
-    "Reads Telegram and app replies to earlier lines, quotes included",
+    "Holds work through outages; interrupts or queues messages; never drops",
+    "Autonomous and ask modes; device actions approved on Mac, chat, Telegram, iPhone",
+    "Chats via terminal, Telegram, desktop, iPhone; reads reply quotes",
     "Installs, starts, pairs hosts; opt-in tailnet listen, never wildcards",
-    "Sends files via paste, drop, picker with previews, downloads, opens, keeps order",
-    "Keeps unsent drafts in every desktop text field across views and restarts",
-    "Accepts inbound events from other programs, deduplicated and rate-limited",
+    "Sends files via paste, drop, picker; previews, downloads, keeps order",
+    "Keeps unsent desktop drafts across views and restarts",
+    "Accepts inbound events from other programs, deduplicated, rate-limited",
     "Drives paired computers: screen, input, shell, files, clipboard"
   ],
   "layers": [
@@ -113,7 +113,7 @@
       "steps": [
         "scheduler loop (packages/daemon/src/daemon.ts), inbound POST /v1/inbound (packages/daemon/src/server.ts), or a detached job's exit (job registry in the daemon, pids reconciled on startup)",
         "Core: wakeups, with inbound dedup and rate limit (packages/core/src/schedule.ts)",
-        "Assistant (packages/agent/src/assistant.ts)",
+        "Assistant (packages/agent/src/assistant.ts; joins due wakeups into one turn)",
         "yagami brain (packages/agent/src/brain.ts)",
         "outbox and event stream (packages/core/src/schedule.ts, packages/daemon/src/server.ts)"
       ]
@@ -141,20 +141,19 @@
   "layout": [
     "clients/cli/ — terminal commands, host discovery and installation, and single-binary entry point",
     "clients/telegram/ — Telegram bot API, owner-bound bridge, reply context, and una voice transcription (voice.ts)",
-    "clients/desktop/ — native desktop app, screens, and packages",
+    "clients/desktop/ — native desktop app, screens, packages, and build scripts (scripts/app.ts, signing.ts)",
     "clients/mobile/ — Expo iPhone app: chat, ask buttons, attachments, Face ID approvals; v1 code done, device run pending",
-    "clients/desktop/scripts/ — desktop app build (app.ts) and 'midna dev' signing setup (signing.ts)",
     "clients/desktop/src-tauri/src/hands/ — device hands on this computer: permissions, screenshots, input, gated commands",
     "packages/protocol/ — API schemas, device wire shapes (src/hands.ts), and client",
     "packages/agent/ — orchestration, brain adapter, prompts, and MCP tools",
-    "packages/core/ — SQLite state, memory, scheduling, context, and inbound events",
+    "packages/core/ — SQLite state, migrations (db.ts), memory, scheduling, context, and inbound events",
     "packages/daemon/ — HTTP server, background loop, bridges, and host setup",
     "packages/daemon/src/approvals.ts — device action approvals; first answer wins",
     "scripts/ — builds, boundary checks, live smoke checks; scripts/tenet.sh ships the tree to tenet for heavy runs",
     "test/ — tests",
-    "Makefile (desktop package builds, make tenet-check) and package.json (Bun scripts and workspace dependencies)",
+    "Makefile (desktop package builds, make tenet-check, make tenet-cargo-test on tenet) and package.json (Bun scripts and workspace dependencies)",
     "README.md — project behavior, setup, and architecture",
-    "docs/ — design notes awaiting or recording decisions (device-hands.md: the desktop app as midna's hands on a machine; inbound-events.md: other programs telling midna what happened; mobile.md: iPhone app over Tailscale and attachment shape)"
+    "docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching; the daily budget was removed on purpose in 0.11.2)"
   ],
   "run": [
     "bun install — install dependencies",
@@ -177,7 +176,7 @@
   ],
   "layerSheets": {
     "assistant": {
-      "summary": "The Assistant layer turns chats and due wakeups into audited episodes and runs the selected agent through yagami. It builds prompts from current Core settings and context, keeps a brain session warm per conversation, and exposes Midna tools through an episode-bound MCP endpoint. Chat replies reach the user directly, while wakeups require the message_user tool to do so. A new user message interrupts the running chat turn and any wakeup (unless it starts with /queue), and the next turn resumes that session with a note on what was cut short; a user's message is marked seen only once a turn has answered it, and an empty or no-reply turn is retried, never silently dropped.",
+      "summary": "The Assistant layer turns chats and due wakeups into audited episodes and runs the selected agent through yagami. It builds a byte-stable system prompt and ends each turn's prompt with the current Core state, keeps a brain session warm per conversation, and exposes Midna tools through an episode-bound MCP endpoint. Chat replies reach the user directly, while wakeups require the message_user tool to do so; interrupts, /queue and reply retries are in the flows and rules.",
       "map": [
         {
           "name": "Chat and wakeup orchestration",
@@ -253,7 +252,7 @@
           "name": "Chat or wakeup",
           "steps": [
             "Assistant starts an episode using Core data",
-            "Prompt functions combine settings, environment, and fresh context, with a native reply's [Replying to …] note first, then the user's message under its own header",
+            "a byte-stable system prompt (settings, environment, pinned facts); the turn's prompt has a native reply's [Replying to …] note, the user's message under its own header, and ends with stateNote (the clock, then every context section, or for a resumed session only the changed ones)",
             "The selected yagami brain runs with an episode MCP endpoint",
             "MCP tool calls use the episode context for the audit log",
             "Assistant handles the reply and conversation session",
@@ -287,7 +286,7 @@
         "packages/agent/src/assistant.ts — orchestrates chat turns, wakeups, interrupts, inbound events (hear()), episodes, reply retries, native reply resolution, and conversation brain sessions",
         "packages/agent/src/brain.ts — selects and runs the chosen agent harness through yagami, one Claude Code process per turn",
         "packages/agent/src/tools.ts — defines Midna's MCP tools, their descriptions, and their episode context",
-        "packages/agent/src/prompt.ts — builds system and wakeup prompts, the inbound-events task (eventsTask), the native-reply note, and the turn prompt that leads with the user's message",
+        "packages/agent/src/prompt.ts — builds the byte-stable system prompt, the end-of-turn state (stateNote), wakeup prompts, the inbound-events task (eventsTask), the native-reply note, and the turn prompt that leads with the user's message",
         "packages/agent/src/mcp.ts — handles an MCP request with a fresh episode-bound server",
         "packages/agent/src/check.ts — runs a real brain turn and classifies sign-in and not-installed failures",
         "packages/agent/test/noreply.test.ts — tests swallowed replies, fallback wakeups, mid-turn messages, and failed turns",
@@ -299,16 +298,16 @@
       "rules": [
         "Bind tool calls to the correct episode ID so they appear under the right audit entry.",
         "Use the store's timezone when converting model-facing local times; the store uses epoch milliseconds.",
-        "A wakeup reaches the user only through message_user.",
+        "A wakeup reaches the user only through message_user. One turn may carry several wakeups due together; schedule_wakeup refuses a near-twin follow-up. No wakeup budget or over-budget note, on purpose (removed 0.11.2).",
         "A chat brain session restarts after four idle hours or 40 turns.",
         "Brain mode: autonomous lets tools run; ask restricts host actions but passes midna's MCP tools, so HandsHub gates device_* tools itself.",
-        "Preserve authentication failure details from yagami so the user can be told how to sign in.",
-        "Match brain sign-in and not-installed errors against yagami's toApiError wording; hand-written error strings drift from the real contract.",
+        "Keep yagami's authentication failure details so the user can be told how to sign in; match sign-in and not-installed errors against yagami's toApiError wording, never hand-written strings, which drift from the real contract.",
         "An empty reply or a bare 'No response requested' is not an answer; retry in the same session before any fallback.",
         "Mark a user's messages seen only after a turn answers them. A new message interrupts the running chat turn and any wakeup; '/queue …' (prefix stripped) waits for the turn in progress instead. Wakeups and notifications never interrupt a chat turn.",
         "A failed or interrupted turn leaves its messages for the next turn, which answers them together. An interrupted one sends no error or fallback and keeps its session for the next turn to resume. After a restart, answerLeftovers() answers MAIN's unseen user messages from the last 6 h, once.",
         "Harness notifications such as task-notification can be merged into a turn's prompt; keep the user's message first under its own header so it is not read as automated.",
-        "Each chat turn is its own Claude Code process, so background shells and subagents die at turn end or interrupt; long work goes through job_start (the daemon's job registry), which outlives turns and restarts and wakes midna when the job ends."
+        "Each chat turn is its own Claude Code process, so background shells and subagents die at turn end or interrupt; long work goes through job_start (the daemon's job registry), which outlives turns and restarts and wakes midna when the job ends.",
+        "Nothing volatile in the system prompt (daemon.test.ts checks it stays byte-identical); state ends the turn's prompt via stateNote, and Assistant.stateSeen gives a resumed session only the changed sections."
       ],
       "edges": [
         "Core — supplies the store, settings, planning data, context, episodes, time helpers, and resolves native reply links (messages.in_reply_to, outbox ids)",
@@ -441,10 +440,10 @@
       ]
     },
     "clients": {
-      "summary": "The clients layer provides the Bun CLI, a Telegram bridge with native replies and voice-note transcription through una, a desktop app and an iPhone app. The CLI handles setup and local commands; Telegram, the desktop and the phone use the public Midna API through MidnaClient, the phone at an address it is given (Tailscale later). The desktop shell handles host operations, its web view talks to Midna over HTTP, and its Rust side is a signed device-hands endpoint that runs input, shell, AppleScript, file and clipboard operations for the daemon. Approval requests for risky actions reach the user on the Mac, in chat, on Telegram and on the phone, behind Face ID. Re-pairing retires the previous pairing: each install or reconnect names the old token it replaces.",
+      "summary": "The clients layer provides the Bun CLI, a Telegram bridge with native replies and voice-note transcription through una, a desktop app and an iPhone app. The CLI handles setup and local commands, including the spend and wakeup status lines; Telegram, the desktop and the phone use the public Midna API through MidnaClient, the phone at an address it is given (Tailscale later). The desktop shell handles host operations, its web view talks to Midna over HTTP, and its Rust side is a signed device-hands endpoint that runs input, shell, AppleScript, file and clipboard operations for the daemon. Approval requests for risky actions reach the user on the Mac, in chat, on Telegram and on the phone, behind Face ID. Re-pairing retires the previous pairing: each install or reconnect names the old token it replaces.",
       "map": [
         {
-          "name": "CLI commands",
+          "name": "CLI commands (status spend and wakeup lines)",
           "files": [
             "clients/cli/src/main.ts"
           ]
@@ -527,13 +526,6 @@
             "clients/desktop/src/screens/Chat.tsx",
             "clients/desktop/src/useMidna.ts"
           ]
-        },
-        {
-          "name": "Desktop settings and today screen",
-          "files": [
-            "clients/desktop/src/screens/Settings.tsx",
-            "clients/desktop/src/screens/Today.tsx"
-          ]
         }
       ],
       "flows": [
@@ -597,8 +589,7 @@
         "clients/mobile/src/useMidna.ts — phone connection: history, event stream through expo/fetch, foreground reconnect, approvals, uploads",
         "clients/mobile/app.json — App Transport Security exceptions for plain HTTP to the phone's address",
         "clients/desktop/src/useMidna.ts — desktop connection, conversation state, and approval answers",
-        "clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition",
-        "clients/desktop/src/host.ts — browser and Tauri host operations"
+        "clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition"
       ],
       "rules": [
         "The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.",
@@ -610,11 +601,11 @@
         "A tap on a closed approval gets a 409: say so (Telegram: the tap's toast, buttons cleared), and guess its outcome only while its record still reads pending, or the guess overwrites the stream's real answer.",
         "The daemon refuses approval answers sent with the host's own token, so any client that answers must be paired separately.",
         "midna's input stops only when the user touches the mouse or keyboard within the last 2 s and the event did not come from midna.",
-        "app.ts never installs an ad-hoc midna.app where \"midna dev\" exists or the installed app is signed (MIDNA_ALLOW_ADHOC=1 overrides); signing and app:build are clients/desktop scripts, make signing works from the root."
+        "A version bump is five places, all matching: clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/Cargo.lock, clients/desktop/src-tauri/tauri.conf.json and packages/daemon/src/version.ts."
       ],
       "edges": [
         "Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal; hands wire shapes, including approval events and every op's arguments and results, are in packages/protocol/src/hands.ts; pair takes an optional replaces token and returns the retired device id; SendMessage.inReplyTo names a native reply's target (messageId, outboxId, quote, fallback), POST /v1/messages returns messageId in MessageReceipt, and HistoryItem and user_message carry inReplyTo",
-        "Daemon — the CLI manages the host service; desktop, Telegram and the phone use its public API; the desktop is also a hands device over /v1/hands (hello, SSE stream, state, results), trusting the daemon key from pairing or its first hello; approval requests arrive on that stream and answers go to POST /v1/approvals/:id; pairing with replaces retires the named device, whatever its kind",
+        "Daemon — the CLI manages the host service and shows its spend and wakeup status; desktop, Telegram and the phone use its public API; the desktop is also a hands device over /v1/hands (hello, SSE stream, state, results), trusting the daemon key from pairing or its first hello; approval requests arrive on that stream and answers go to POST /v1/approvals/:id; pairing with replaces retires the named device, whatever its kind",
         "Host — CLI setup uses host configuration and service operations from the daemon package",
         "una — speech-to-text for Telegram voice notes; the Telegram bridge sends the downloaded audio and receives the transcript"
       ]
@@ -730,7 +721,8 @@
         "A hands command is signed as text: signed = canonicalJson(HandsCommand), sig = Ed25519 over its UTF-8 bytes; the device verifies the bytes as received, then parses, and checks its nonce, a rising seq and a new id. Keep fixtures/hands.json in step (HANDS_FIXTURE=write bun test packages/protocol).",
         "Attachments: any type up to MAX_ATTACHMENT_BYTES (100 MB; POST /v1/attachments?name=… with a raw body and Content-Type answers 413 above it), at most MAX_ATTACHMENTS_PER_MESSAGE (20) per message, in the sender's order, which every client keeps. Unsent uploads: DELETE /v1/attachments/:id (409 once sent), and the daemon sweeps them hourly after UNSENT_ATTACHMENT_TTL_MS (24h). Attachment.caption (0.5+) and kind 'file' for an image sent as a file are the sender's choice; older hosts omit caption (0.4) or attachments (<0.4): read ?? null / ?? [].",
         "Inbound events go to POST /v1/inbound (GET /v1/events is the outbound SSE stream). The contract with ruri is fixed: midna event --source --title [--json -|file]; id defaults to data.id, the rate-limit subject is data.project.id (else path, name). docs/inbound-events.md documents it.",
-        "A client that cannot use the global fetch passes its own as the third argument, `new MidnaClient(url, token, { fetch })`; the iPhone app needs this for its event stream."
+        "A client that cannot use the global fetch passes its own as the third argument, `new MidnaClient(url, token, { fetch })`; the iPhone app needs this for its event stream.",
+        "Status.spend (SpendDay[]: 7 local days, today first, byKind chat|followup|event|job|ritual) and Status.wakeups {turns, usd} (a count, no limit) are from 0.11; older hosts omit them. There is no wakeupBudget setting since 0.11.2; 0.11.0/0.11.1 hosts still send wakeups.budget."
       ],
       "edges": [
         "Clients — the Bun CLI, the Telegram bridge, and the iPhone app (clients/mobile) use only the public API these schemas and MidnaClient define; the iPhone app injects its own fetch into MidnaClient. The Clients teammate builds the desktop app side of device hands against hands.ts",
@@ -792,6 +784,13 @@
           "files": [
             "packages/daemon/src/server.ts",
             "packages/daemon/test/daemon.test.ts"
+          ]
+        },
+        {
+          "name": "Status spend and wakeup counts (no limit or warning)",
+          "files": [
+            "packages/daemon/src/server.ts",
+            "packages/daemon/src/daemon.ts"
           ]
         }
       ],
@@ -983,7 +982,7 @@
         "Bridges are opaque subprocesses talking only via the public API; never add bridge-protocol knowledge here.",
         "The /mcp route is gated by the per-run mcpToken; do not expose it to clients or bridges.",
         "Bridge supervision lives in Bridges.sync/start/stop; server.ts only re-reads config and calls reloadBridges.",
-        "Scheduler timing (tickMs, introDelayMs, coalesceMs) and brain injection exist for tests; keep defaults safe for production.",
+        "Scheduler timing (tickMs, introDelayMs, coalesceMs, joinMs) and brain injection exist for tests. The tick claims wakeups as turns (claimTurns); each wakeup in a turn gets its outcome.",
         "The tick's hourly sweep also prunes inbound events older than 30 days whose wakeup is over; until then a resent id is a duplicate.",
         "Device commands come only from midna's tools behind /mcp; no /v1 route issues one, /v1/hands/* takes desktop tokens only, and nothing is queued for an offline device.",
         "A long-lived SSE route must write something at once: Bun sends the headers with the first bytes, so a silent stream leaves the client's fetch hanging.",
@@ -992,7 +991,7 @@
         "An approval is decided once: a second answer gets 409, and a client must only guess its outcome while the record still says pending, so it cannot overwrite the real result.",
         "A re-pair retires the device named by replaces only after the new device is paired, and a bad replaces token must never block the pairing.",
         "Never auto-retire pairings by expiry or by matching kind and name: a working CLI or app token can sit unused for long stretches.",
-        "Phone reachability over Tailscale needs the live daemon's listen to include tailscale0; that option is not yet in a release, so it needs a release and a config change."
+        "Phone reachability over Tailscale needs the live daemon's listen to include tailscale0 (a config change on the Jetson)."
       ],
       "edges": [
         "Protocol — every route body and StreamEvent is typed by Zod schemas in packages/protocol/, including the approval shapes and the pair body's replaces field",
@@ -1003,7 +1002,7 @@
       ]
     },
     "core": {
-      "summary": "Core is midna's SQLite-backed state and memory: goals/tasks/commitments/calendar/people/decisions/notes, decaying semantic facts, conversation/message/episode history, devices, wakeups, outbox, jobs, inbound events, and an in-process event bus. Store composes the modules over one Bun SQLite database opened by openDatabase; context.ts renders a fresh capped working context from that state each session. Newcomer idea: durable structured record never decays or silently rewrites, while recall strength and delivery timing are computed, not stored as truth.",
+      "summary": "Core is midna's SQLite-backed state and memory: goals/tasks/commitments/calendar/people/decisions/notes, decaying semantic facts, conversation/message/episode history, devices, wakeups, outbox, jobs, inbound events, and an in-process event bus. Store composes the modules over one Bun SQLite database opened by openDatabase; context.ts renders the capped working context fresh each turn, pinned facts apart for the stable system prompt. Newcomer idea: durable structured record never decays or silently rewrites, while recall strength and delivery timing are computed, not stored as truth.",
       "map": [
         {
           "name": "Goals, tasks, commitments, calendar, people, decisions, notes",
@@ -1021,7 +1020,7 @@
           ]
         },
         {
-          "name": "Conversations, messages, episodes, history",
+          "name": "Conversations, messages, episodes (per-turn cost and tokens), spend by day and kind, history",
           "files": [
             "packages/core/src/log.ts",
             "packages/core/src/attachments.ts"
@@ -1036,9 +1035,10 @@
           ]
         },
         {
-          "name": "Wakeups, rituals, reminders, quiet-hours outbox delivery",
+          "name": "Wakeups (claimed as turns, a follow-up's twin), rituals, reminders, quiet-hours outbox delivery",
           "files": [
             "packages/core/src/schedule.ts",
+            "packages/core/src/store.ts",
             "packages/core/src/time.ts",
             "packages/core/src/bus.ts"
           ]
@@ -1135,7 +1135,7 @@
         "packages/core/src/memory.ts — semantic facts with importance-weighted decay, recall scoring, archive/supersede",
         "packages/core/src/log.ts — conversations, messages, episodes, actions, native reply fields and history replay",
         "packages/core/src/schedule.ts — wakeups with cron, rituals/reminders, and quiet-hours outbox release",
-        "packages/core/src/context.ts — renders fresh capped working context from the database each session",
+        "packages/core/src/context.ts — the capped working context, per turn: renderNow, contextSections (fixed order, unpinned facts), pinnedFacts",
         "packages/core/src/attachments.ts — message file bytes stored beside their conversation with MIME detection",
         "packages/core/src/devices.ts — device registration, hashed tokens, pairing codes; pairing again with the old token (replaces) revokes that device",
         "packages/core/src/bus.ts — in-process fan-out of stream events to listeners",
@@ -1155,17 +1155,17 @@
         "Bus listeners must never throw; emit already isolates failures but a broken listener still blinds live clients.",
         "Only the device token hash is stored; the plain token is visible once at creation.",
         "An attachment's place in its message is attachments.position, set by link() from the order of the ids it is given; read them ORDER BY position, rowid — rowid is creation order, which is not the sender's order.",
-        "An inbound event is delivered by a followup wakeup created_by 'event:<source>' (wakeups.kind has a CHECK, so no new kind); inbound_events.wakeup_id links it, and Assistant.wakeup() builds the prompt from forWakeup(). Merging updates that wakeup's reason.",
+        "Inbound events and job ends arrive as follow-up wakeups created_by 'event:<source>' / 'job:<id>' (no new wakeups.kind: it has a CHECK). Due follow-ups are claimed as turns (Schedule.claimTurns: 5 min, 8 max); wakeups.joined_to (migration 11) names the lead.",
         "device_commands rows are an audit log: record() once when a command is decided (refused and denied end then), finish() takes only the first ending. Attachments.copy() sends a file already kept (a device screenshot) on as a new loose attachment, so it stages in call order.",
         "A stale pairing is retired by its token (PairRequest.replaces), never by name or kind: this Mac's CLI host-install pairing and the desktop app share kind desktop and the same hostname name, and macOS hostname suffixes drift (-3, -1332).",
-        "A job's end is first-ending-wins: Jobs.end() queues a followup wakeup created_by 'job:<id>' linked by jobs.wakeup_id (none for stopped, or quiet when it never started); Assistant.wakeup() builds the prompt from forWakeup().",
-        "Jobs are launched as transient user units (systemd-run --user --unit midna-job-<id>) outside midna.service's cgroup, so they are meant to survive a service restart; this is untested on real systemd and must be reported as such until verified.",
+        "A job's end is first-ending-wins: Jobs.end() queues its wakeup (none for stopped, or quiet when it never started).",
+        "episodes.cost_usd is the turn's own cost (migration 10); session_cost_usd is the running total Claude Code reports across resumed turns, and endEpisode() subtracts the session's previous one. Never sum session_cost_usd.",
         "messages.reply_to answers a question (an outbox id); messages.in_reply_to is a native reply (a message id) with reply_quote and reply_fallback (JSON, kept only when no id resolved). Keep them apart."
       ],
       "edges": [
         "Protocol — Attachment, OutboxItem, Priority, HistoryItem, StreamEvent, and Mode types shape Core's interfaces, including the native reply shape",
         "Daemon — drives Store/Schedule/Outbox/Bus for HTTP API, event stream, scheduler loop, and bridge supervision",
-        "Assistant — reads renderContext and calls Planning/Memory/Log/Schedule tools for chat and wakeup orchestration"
+        "Assistant — reads renderNow, contextSections and pinnedFacts for its prompts and calls Planning/Memory/Log/Schedule tools for chat and wakeup orchestration"
       ]
     }
   }

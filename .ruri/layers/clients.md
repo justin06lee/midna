@@ -3,70 +3,60 @@
 One layer of midna's stack, owning `clients/`. The whole stack, and how the layers connect, is in `.ruri/architecture.md`.
 Don't edit this file: ruri writes it. `ruri layer clients` prints it with every line numbered, what git says changed in this layer lately and what sessions learned working here; once you have read it that way, put right what your work changed — `ruri layer clients add|set|drop <section> …`. Where it and the code disagree, the code is right.
 
-The clients layer provides the Bun CLI, a Telegram bridge, and a desktop app. The CLI handles setup and local commands; Telegram and the desktop app use the public Midna API through MidnaClient. The desktop shell handles host operations while its web view talks to Midna over HTTP.
+The clients layer provides the Bun CLI, a Telegram bridge with native replies and voice-note transcription through una, a desktop app and an iPhone app. The CLI handles setup and local commands, including the spend and wakeup status lines; Telegram, the desktop and the phone use the public Midna API through MidnaClient, the phone at an address it is given (Tailscale later). The desktop shell handles host operations, its web view talks to Midna over HTTP, and its Rust side is a signed device-hands endpoint that runs input, shell, AppleScript, file and clipboard operations for the daemon. Approval requests for risky actions reach the user on the Mac, in chat, on Telegram and on the phone, behind Face ID. Re-pairing retires the previous pairing: each install or reconnect names the old token it replaces.
 
 ## Where to change what
 
-- **CLI commands:** clients/cli/src/main.ts
+- **CLI commands (status spend and wakeup lines):** clients/cli/src/main.ts
 - **Machine discovery and installation:** clients/cli/src/discover.ts, clients/cli/src/install.ts, clients/cli/src/main.ts
-- **Telegram pairing and delivery:** clients/telegram/src/bridge.ts, clients/telegram/src/bot.ts
+- **Retiring the previous pairing on reinstall or reconnect:** clients/cli/src/install.ts, clients/cli/src/main.ts, clients/desktop/src-tauri/src/lib.rs, test/hosting.e2e.test.ts
+- **Telegram pairing, commands, delivery and approval buttons:** clients/telegram/src/bridge.ts, clients/telegram/src/bot.ts
+- **Telegram native replies (Telegram reply threads mapped to midna message ids):** clients/telegram/src/bridge.ts, clients/telegram/src/bot.ts, test/telegram.e2e.test.ts
+- **Telegram voice notes (download, transcription through una, duration marker):** clients/telegram/src/voice.ts, clients/telegram/src/bridge.ts, clients/telegram/src/index.ts, clients/telegram/src/bot.ts
+- **iPhone app (pairing, chat, attachments, approvals behind Face ID, drafts):** clients/mobile/src/screens/Pair.tsx, clients/mobile/src/screens/Chat.tsx, clients/mobile/src/screens/Approvals.tsx, clients/mobile/src/useMidna.ts
+- **iPhone plain-HTTP addresses (App Transport Security exceptions):** clients/mobile/app.json, docs/mobile.md
 - **Desktop connection and live conversation state:** clients/desktop/src/useMidna.ts, clients/desktop/src/screens/Main.tsx
 - **Desktop onboarding:** clients/desktop/src/screens/Welcome.tsx, clients/desktop/src/screens/Install.tsx, clients/desktop/src/host.ts
-- **Desktop chat:** clients/desktop/src/screens/Chat.tsx, clients/desktop/src/useMidna.ts
-- **Desktop settings:** clients/desktop/src/screens/Settings.tsx
-- **Desktop today screen:** clients/desktop/src/screens/Today.tsx
-- **Desktop host integration:** clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs, clients/desktop/vite.config.ts
-- **Desktop appearance (light/dark/system switch) and shared controls:** clients/desktop/src/style.css, clients/desktop/src/appearance.ts, clients/desktop/src/ui.tsx
-- **Desktop version and packaging:** clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/tauri.conf.json
-- **midna's mark: app icon (and the macOS 26 Icon Composer icon), tray icon, in-app mark, README banner:** clients/desktop/src/helmet.ts, clients/desktop/scripts/icons.ts, clients/desktop/src-tauri/icons/midna.icon, assets/midna.svg
-- **Desktop attachments: paste/drag/picker uploads, download and open, PDFs in the viewer, rendered in the order given:** clients/desktop/src/attach.tsx, clients/desktop/src/media.tsx, clients/desktop/src/screens/Chat.tsx, clients/desktop/src/host.ts, clients/desktop/src-tauri/src/lib.rs
-- **Kept drafts in every text field:** clients/desktop/src/drafts.ts, clients/desktop/src/screens/Chat.tsx, clients/desktop/src/screens/Settings.tsx, clients/desktop/src/App.tsx
+- **Desktop chat (including the composer hint line and approval buttons):** clients/desktop/src/screens/Chat.tsx, clients/desktop/src/useMidna.ts
 
 ## How it works
 
 - **Desktop installation:** Welcome discovers and ranks machines → Install displays installation events → host runs the CLI through Tauri or the development server → the CLI installs and pairs the machine → the desktop app receives a Connection
 - **Desktop conversation:** Main creates useMidna with a Connection → useMidna uses MidnaClient for history and live events → Chat renders every midna line as a plain message, whatever its kind (questions add option buttons), and sends
-- **Telegram bridge:** A one-time /start code binds the owner chat → Telegram messages, photos and files pass through the bridge to MidnaClient (files uploaded first) → the bridge delivers outbox items to Telegram, attachments as photos or documents → saved offsets and sequence positions support restart
+- **Telegram voice note:** bot.ts takes the voice message → voice.ts downloads the audio → una transcribes it → bridge.ts sends the transcript to Midna with its duration marker
+- **iPhone:** Pair takes an address (now the makima one, http://10.77.0.1:7717, from the simulator; a tailnet name later) and a code → pairs as kind mobile, naming the old token as replaces only to the same host → token in the Keychain → useMidna streams /v1/events through expo/fetch, refetching history on return to the foreground → approval buttons ask Face ID, then POST /v1/approvals/:id
+- **Re-pairing:** hostInstall reads the token saved in client.json → install.ts sends it as replaces only when the saved address matches the host and port being paired → the daemon pairs the new device and retires the replaced one → the CLI saves the new client.json as kind cli → the desktop app keeps the old connection as connection.previous.json and passes its token to the bundled CLI through an environment variable → saving the new connection deletes connection.previous.json
 
 ## Key files
 
-- clients/cli/src/main.ts — CLI entry point and commands
-- clients/cli/src/install.ts — machine installation, pairing, and progress events
+- clients/cli/src/main.ts — CLI entry point, commands, and hostInstall reuse of the saved token
+- clients/cli/src/install.ts — machine installation, pairing with replaces, and progress events
 - clients/cli/src/discover.ts — machine discovery with a timeout on health checks
-- clients/telegram/src/bridge.ts — owner pairing, API exchange, and persistent delivery positions
-- clients/desktop/src/useMidna.ts — desktop connection and conversation state
+- clients/telegram/src/bridge.ts — owner pairing, API exchange, /queue handling, approval buttons, persistent delivery positions, native reply context and id mapping
+- clients/telegram/src/bot.ts — the bot's command menu, Telegram API wiring, and reply and voice message intake
+- clients/telegram/src/voice.ts — voice note download, una transcription and duration marker
+- clients/telegram/src/index.ts — Telegram bridge entry point
+- clients/mobile/src/useMidna.ts — phone connection: history, event stream through expo/fetch, foreground reconnect, approvals, uploads
+- clients/mobile/app.json — App Transport Security exceptions for plain HTTP to the phone's address
+- clients/desktop/src/useMidna.ts — desktop connection, conversation state, and approval answers
 - clients/desktop/src/screens/Main.tsx — connected desktop navigation and screen composition
-- clients/desktop/src/host.ts — browser and Tauri host operations
-- clients/desktop/src-tauri/src/lib.rs — sidecar execution, connection storage, terminal, and tray integration
-- clients/desktop/src/screens/Welcome.tsx — machine selection
-- clients/desktop/src/screens/Install.tsx — installation progress
-- clients/desktop/src/screens/Chat.tsx — conversation display and input
-- clients/desktop/src/helmet.ts — the helmet outline every icon and the in-app mark are drawn from
-- clients/desktop/src/appearance.ts — the light/dark/system choice, kept in localStorage and applied to <html> and the window
-- clients/desktop/scripts/icons.ts — renders every icon from the helmet and compiles the macOS 26 Assets.car from icons/midna.icon
-- clients/desktop/src/media.tsx — attachments in the order given (image runs share a row, files are chips that open or save), captions, web images, and the viewer for images and PDFs
-- clients/desktop/src/attach.tsx — the composer's pending files: uploaded at once (XMLHttpRequest, for progress; two at a time), removable (DELETE takes the upload back) and retryable, sent in the order added
 
 ## Rules and traps
 
 - The Telegram bridge accepts only the owner chat bound by a one-time /start code; other chats are ignored.
 - Persist Telegram update offsets and Midna outbox sequence positions so restarts do not replay or miss deliveries.
-- The desktop web view calls the Midna HTTP API with a device token; host-only operations go through host.ts.
-- The desktop can connect to an older host; normalizeStatus supplies fields that host does not report.
-- Discovery, the installer's wait loop and the CLI's local wait must pass a cancel signal to MidnaClient.health(), or a dead machine can hang them.
-- A desktop version bump must change all five places together: clients/desktop/package.json, src-tauri/Cargo.toml, src-tauri/Cargo.lock, src-tauri/tauri.conf.json and packages/daemon/src/version.ts.
-- The installer's SSH ControlPath stays under /tmp (sshControlPath): macOS's os.tmpdir() is long enough that ssh's socket path passes the 104-byte Unix socket limit.
-- Don't iterate a fetch body with for await in code the desktop runs: the system WebKit's ReadableStream isn't async-iterable. Use getReader() and close the response — WebKit allows 6 connections per host, and leaked event streams starve every other request.
-- Window dragging needs data-tauri-drag-region ("deep" on a strip holding text) plus the core:window:allow-start-dragging permission; -webkit-app-region is Electron-only and Tauri ignores it.
-- trafficLightPosition y=24 puts the traffic lights' centre at 22 (mid 44px title bar), ending ~80px in, so the title bar's 18px helmet mark sits at 92px (macTitleBar in host.ts), measured centred with the lights. Change one, re-measure the other.
-- macOS 26 lightens and shades an app icon that has no Assets.car: bun run icons compiles src-tauri/icons/midna.icon into the committed icons/Assets.car with Xcode's actool run by path (xcrun refuses: Xcode isn't selected, its licence unaccepted). bundle.icon lists it; icon.icns stays for older macOS.
-- An <img> can't send the device token: attachments come through MidnaClient.attachment() and are drawn from cached blob: URLs (the CSP's img-src keeps blob:, and https:/http: for Markdown images). Size an image from its natural dimensions (loadImage): CSS max sizes inside a shrink-to-fit button leave the frame too wide.
-- Telegram bot limits: uploads up to 50 MB (bigger attachments get a note pointing to the app), photos up to 10 MB (bigger images go as documents), downloads via getFile up to 20 MB (bigger incoming files are refused with a reason). The bridge sends text first, then attachments in order; a question sends its files first so its buttons stay last.
-- Files in: dragDropEnabled is false so WebKit hands drops to the page as File objects (main.tsx refuses a drop outside the chat, or WebKit opens the file in the window). WebKit gives a paste of several Finder files only the first; Rust (copied_files, read_copied: NSPasteboard) reads them all. Uploads use XMLHttpRequest for progress.
-- Nothing typed is lost (drafts.ts): Chat stays mounted hidden; the composer, Settings' model, timezone and quiet hours keep drafts in localStorage (midna.draft:<url>#<device>[:field]; setup choices midna.draft:setup), dropped only once the send or save works. A saved value or handed-over draft never replaces what's typed. The Telegram bot token stays in memory only.
+- Bridge state must be loaded before any handler reads it; reading it earlier yields stale or empty values.
+- Pass PATH explicitly to Bun.which or child lookups; the ambient PATH may not reflect later changes.
+- una forces English by default, so Korean speech comes back translated; language=ko keeps Korean but writes English words in Hangul, and the per-bridge language override is the only control.
+- The bridge must not delete voice notes from una's history; kept notes may be learned from, and only test clips are deleted.
+- A tap on a closed approval gets a 409: say so (Telegram: the tap's toast, buttons cleared), and guess its outcome only while its record still reads pending, or the guess overwrites the stream's real answer.
+- The daemon refuses approval answers sent with the host's own token, so any client that answers must be paired separately.
+- midna's input stops only when the user touches the mouse or keyboard within the last 2 s and the event did not come from midna.
+- A version bump is five places, all matching: clients/desktop/package.json, clients/desktop/src-tauri/Cargo.toml, clients/desktop/src-tauri/Cargo.lock, clients/desktop/src-tauri/tauri.conf.json and packages/daemon/src/version.ts.
 
 ## What it talks to
 
-- Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal
-- Daemon — the CLI manages the host service; desktop and Telegram connect to its public API
+- Protocol — clients use MidnaClient and shared API types; health() takes a cancel signal; hands wire shapes, including approval events and every op's arguments and results, are in packages/protocol/src/hands.ts; pair takes an optional replaces token and returns the retired device id; SendMessage.inReplyTo names a native reply's target (messageId, outboxId, quote, fallback), POST /v1/messages returns messageId in MessageReceipt, and HistoryItem and user_message carry inReplyTo
+- Daemon — the CLI manages the host service and shows its spend and wakeup status; desktop, Telegram and the phone use its public API; the desktop is also a hands device over /v1/hands (hello, SSE stream, state, results), trusting the daemon key from pairing or its first hello; approval requests arrive on that stream and answers go to POST /v1/approvals/:id; pairing with replaces retires the named device, whatever its kind
 - Host — CLI setup uses host configuration and service operations from the daemon package
+- una — speech-to-text for Telegram voice notes; the Telegram bridge sends the downloaded audio and receives the transcript

@@ -19,7 +19,7 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 ## How it flows
 
 - **Chat turn:** CLI (clients/cli/src/main.ts), Telegram bridge (clients/telegram/src/bridge.ts; adds reply context and una voice transcripts), desktop app (clients/desktop/src/), or iPhone app (clients/mobile/src/) → MidnaClient (packages/protocol/src/index.ts) → HTTP API (packages/daemon/src/server.ts) → Assistant (packages/agent/src/assistant.ts), which re-asks or falls back when a turn is silent → yagami brain (packages/agent/src/brain.ts) → episode log and outbox (packages/core/src/log.ts, packages/core/src/schedule.ts)
-- **Wakeup: scheduled, inbound, or job exit:** scheduler loop (packages/daemon/src/daemon.ts), inbound POST /v1/inbound (packages/daemon/src/server.ts), or a detached job's exit (job registry in the daemon, pids reconciled on startup) → Core: wakeups, with inbound dedup and rate limit (packages/core/src/schedule.ts) → Assistant (packages/agent/src/assistant.ts) → yagami brain (packages/agent/src/brain.ts) → outbox and event stream (packages/core/src/schedule.ts, packages/daemon/src/server.ts)
+- **Wakeup: scheduled, inbound, or job exit:** scheduler loop (packages/daemon/src/daemon.ts), inbound POST /v1/inbound (packages/daemon/src/server.ts), or a detached job's exit (job registry in the daemon, pids reconciled on startup) → Core: wakeups, with inbound dedup and rate limit (packages/core/src/schedule.ts) → Assistant (packages/agent/src/assistant.ts; joins due wakeups into one turn) → yagami brain (packages/agent/src/brain.ts) → outbox and event stream (packages/core/src/schedule.ts, packages/daemon/src/server.ts)
 - **Agent tool call:** yagami brain (packages/agent/src/brain.ts) → MCP endpoint (packages/agent/src/mcp.ts) → Midna tools (packages/agent/src/tools.ts) → Store (packages/core/src/store.ts) → episode audit log (packages/core/src/log.ts)
 - **Host setup:** CLI (clients/cli/src/) or desktop app (clients/desktop/src/) → machine discovery through makima → host installer over SSH or locally → service start and device pairing, which retires the replaced pairing when one is passed
 
@@ -27,20 +27,19 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 
 - clients/cli/ — terminal commands, host discovery and installation, and single-binary entry point
 - clients/telegram/ — Telegram bot API, owner-bound bridge, reply context, and una voice transcription (voice.ts)
-- clients/desktop/ — native desktop app, screens, and packages
+- clients/desktop/ — native desktop app, screens, packages, and build scripts (scripts/app.ts, signing.ts)
 - clients/mobile/ — Expo iPhone app: chat, ask buttons, attachments, Face ID approvals; v1 code done, device run pending
-- clients/desktop/scripts/ — desktop app build (app.ts) and 'midna dev' signing setup (signing.ts)
 - clients/desktop/src-tauri/src/hands/ — device hands on this computer: permissions, screenshots, input, gated commands
 - packages/protocol/ — API schemas, device wire shapes (src/hands.ts), and client
 - packages/agent/ — orchestration, brain adapter, prompts, and MCP tools
-- packages/core/ — SQLite state, memory, scheduling, context, and inbound events
+- packages/core/ — SQLite state, migrations (db.ts), memory, scheduling, context, and inbound events
 - packages/daemon/ — HTTP server, background loop, bridges, and host setup
 - packages/daemon/src/approvals.ts — device action approvals; first answer wins
 - scripts/ — builds, boundary checks, live smoke checks; scripts/tenet.sh ships the tree to tenet for heavy runs
 - test/ — tests
-- Makefile (desktop package builds, make tenet-check) and package.json (Bun scripts and workspace dependencies)
+- Makefile (desktop package builds, make tenet-check, make tenet-cargo-test on tenet) and package.json (Bun scripts and workspace dependencies)
 - README.md — project behavior, setup, and architecture
-- docs/ — design notes awaiting or recording decisions (device-hands.md: the desktop app as midna's hands on a machine; inbound-events.md: other programs telling midna what happened; mobile.md: iPhone app over Tailscale and attachment shape)
+- docs/ — design notes awaiting or recording decisions (device-hands.md, inbound-events.md, mobile.md, token-efficiency.md: per-turn cost, cache-stable prompts, wakeup batching; the daily budget was removed on purpose in 0.11.2)
 
 ## How to run it
 
@@ -67,17 +66,17 @@ Midna is a proactive personal assistant that runs on a computer you own and reac
 
 - Tracks goals, tasks, commitments, people, decisions, and notes
 - Schedules follow-ups, reminders, and recurring daily and weekly reviews
+- Batches due follow-ups into one turn; skips near-duplicates
+- Tracks per-turn spend, caches prompts; no wakeup budget or warnings (removed on purpose in 0.11.2)
 - Delivers notifications by priority, respecting quiet hours and replay position
 - Keeps searchable conversations, episodes, and tool-call audit records
-- Recalls facts with decay, renewal, links, and archival
-- Builds bounded working context from current stored state
+- Recalls facts with decay, links, archival; builds bounded context
 - Runs Claude Code, Codex, and other agents through yagami
-- Holds work through outages; interrupts or queues new messages; never drops
-- Autonomous and ask modes; device actions approved on Mac, chat, Telegram, or iPhone
-- Supports terminal, Telegram (replies, voice notes via una), desktop, and iPhone chat
-- Reads Telegram and app replies to earlier lines, quotes included
+- Holds work through outages; interrupts or queues messages; never drops
+- Autonomous and ask modes; device actions approved on Mac, chat, Telegram, iPhone
+- Chats via terminal, Telegram, desktop, iPhone; reads reply quotes
 - Installs, starts, pairs hosts; opt-in tailnet listen, never wildcards
-- Sends files via paste, drop, picker with previews, downloads, opens, keeps order
-- Keeps unsent drafts in every desktop text field across views and restarts
-- Accepts inbound events from other programs, deduplicated and rate-limited
+- Sends files via paste, drop, picker; previews, downloads, keeps order
+- Keeps unsent desktop drafts across views and restarts
+- Accepts inbound events from other programs, deduplicated, rate-limited
 - Drives paired computers: screen, input, shell, files, clipboard
