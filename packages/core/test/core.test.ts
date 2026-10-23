@@ -625,6 +625,8 @@ describe("wakeup guardrails", () => {
       s.log.endEpisode(s.log.startEpisode({ kind, model: "claude:opus" }, at), { sessionCostUsd: usd });
     }
     expect(s.log.wakeupsToday(TZ, now)).toEqual({ turns: 2, usd: 0.5 });
-    expect(s.settings().wakeupBudget).toEqual({ turns: 60, usd: 20 });
+    // a wakeupBudget stored by 0.11.0/0.11.1 is neither read nor reported
+    s.db.query("INSERT INTO settings (key, value) VALUES ('wakeupBudget', '{\"turns\":1,\"usd\":1}')").run();
+    expect(s.settings()).not.toHaveProperty("wakeupBudget");
   });
 });

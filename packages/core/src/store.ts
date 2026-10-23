@@ -26,8 +26,6 @@ export interface Settings {
   rituals: { morning: string | null; evening: string | null; weekly: string | null };
   /** "paused" stops every device's hands at once, whatever each app says. */
   hands: "on" | "paused";
-  /** Past this many wakeup turns, or this much spent on them, in a local day, midna is told it's over; null for no budget. */
-  wakeupBudget: { turns: number; usd: number } | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,7 +36,6 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },
   hands: "on",
-  wakeupBudget: { turns: 60, usd: 20 },
 };
 
 /** Everything midna knows, in one SQLite file. */
@@ -74,7 +71,8 @@ export class Store {
 
   settings(): Settings {
     const rows = this.db.query("SELECT key, value FROM settings").all() as Array<{ key: string; value: string }>;
-    const stored = Object.fromEntries(rows.filter((r) => !r.key.includes(":")).map((r) => [r.key, JSON.parse(r.value)]));
+    // Only keys that are settings: a stale one (wakeupBudget, removed in 0.11.2) stays in the table, unread.
+    const stored = Object.fromEntries(rows.filter((r) => r.key in DEFAULT_SETTINGS).map((r) => [r.key, JSON.parse(r.value)]));
     return { ...DEFAULT_SETTINGS, ...stored } as Settings;
   }
 

@@ -749,30 +749,23 @@ describe("midnad", () => {
     expect(eps).toEqual([{ wakeup_id: a.id }]);
   });
 
-  test("past the day's wakeup budget midna is told so, and a follow-up it already has isn't scheduled twice", async () => {
-    let prompt = "";
+  test("a follow-up midna already has isn't scheduled twice, and a stored wakeupBudget is ignored", async () => {
     const answers: string[] = [];
     script = async (run, tools) => {
-      if (!run.prompt.includes("budget check")) return "ok";
-      prompt = run.prompt;
-      answers.push(await call(tools, "schedule_wakeup", { reason: "Look at the budget check results tomorrow", when: "+2h" }));
-      answers.push(await call(tools, "schedule_wakeup", { reason: "look at the budget check results tomorrow.", when: "+150m" }));
+      if (!run.prompt.includes("twin check")) return "ok";
+      expect(run.prompt).not.toContain("budget");
+      answers.push(await call(tools, "schedule_wakeup", { reason: "Look at the twin check results tomorrow", when: "+2h" }));
+      answers.push(await call(tools, "schedule_wakeup", { reason: "look at the twin check results tomorrow.", when: "+150m" }));
       return "done";
     };
-    await client.updateSettings({ wakeupBudget: { turns: 1, usd: 100 } });
-    try {
-      const w = daemon.store.schedule.add({ dueAt: Date.now() + 100, reason: "budget check", tz: daemon.store.settings().timezone });
-      await until("ran", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
-      expect(prompt).toContain("[midna] You're over today's wakeup budget:");
-      expect(prompt).toContain("against 1 turns or $100.00 a day");
-      expect(answers[0]).toMatch(/^scheduled #\d+ for .*\n\[midna\] You're over today's wakeup budget/);
-      expect(answers[1]).toMatch(/^not scheduled: #\d+, for .* already says nearly this: "Look at the budget check results tomorrow"/);
-      const status = await client.status();
-      expect(status.wakeups).toMatchObject({ budget: { turns: 1, usd: 100 } });
-      expect(status.wakeups!.turns).toBeGreaterThan(1);
-    } finally {
-      await client.updateSettings({ wakeupBudget: { turns: 60, usd: 20 } });
-    }
+    daemon.store.db.query("INSERT OR REPLACE INTO settings (key, value) VALUES ('wakeupBudget', '{\"turns\":1,\"usd\":100}')").run();
+    const w = daemon.store.schedule.add({ dueAt: Date.now() + 100, reason: "twin check", tz: daemon.store.settings().timezone });
+    await until("ran", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
+    expect(answers[0]).toMatch(/^scheduled #\d+ for [^\n]*$/);
+    expect(answers[1]).toMatch(/^not scheduled: #\d+, for .* already says nearly this: "Look at the twin check results tomorrow"/);
+    const status = await client.status();
+    expect(Object.keys(status.wakeups!).sort()).toEqual(["turns", "usd"]);
+    expect(JSON.stringify(status).toLowerCase()).not.toContain("budget");
   });
 
   test("a source gets one wakeup per project per window; the rest are merged into it", async () => {

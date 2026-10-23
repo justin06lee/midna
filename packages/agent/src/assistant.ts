@@ -5,7 +5,7 @@ import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
-import { INTRODUCTION, devicesSection, eventsTask, jobTask, overBudget, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, devicesSection, eventsTask, jobTask, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -465,12 +465,11 @@ export class Assistant {
       }
       this.wakeups.set(w.id, turn);
       if (rest.length) store.schedule.joined(w.id, rest.map((x) => x.id));
-      const budget = this.overBudget(tz);
       const prompt = (resume?: string) => {
         const resumed = paused ? { resumed: { doing: paused.doing, transcript: !!resume } } : {};
         if (!rest.length) {
           const task = this.taskOf(w, tz);
-          return wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), { ...(task ? { task } : {}), ...resumed, ...(budget ? { budget } : {}) });
+          return wakeupPrompt(w.reason, w.kind, fmt(w.due_at, tz), { ...(task ? { task } : {}), ...resumed });
         }
         const items = all.map((x) => ({
           id: x.id,
@@ -478,7 +477,7 @@ export class Assistant {
           early: x.fired_at !== null && x.due_at > x.fired_at ? took(x.due_at - x.fired_at) : null,
           task: this.taskOf(x, tz) ?? ownTask(x.reason, x.kind, fmt(x.due_at, tz)),
         }));
-        return wakeupsPrompt(items, { ...resumed, ...(budget ? { budget } : {}) });
+        return wakeupsPrompt(items, { ...resumed });
       };
       const run = (resume?: string) => this.episode({ kind: "wakeup", wakeupId: w.id, prompt: prompt(resume), resume, turn });
       let result: Awaited<ReturnType<typeof run>>;
@@ -524,14 +523,6 @@ export class Assistant {
       tail: logTail(job.log_path),
       result: job.result_path && existsSync(job.result_path) ? resultOf(job.result_path) : null,
     });
-  }
-
-  /** The note every wakeup carries once today's wakeups are past the budget, or undefined. */
-  private overBudget(tz: string): string | undefined {
-    const budget = this.store.settings().wakeupBudget;
-    if (!budget) return undefined;
-    const today = this.store.log.wakeupsToday(tz);
-    return today.turns >= budget.turns || today.usd >= budget.usd ? overBudget(today, budget) : undefined;
   }
 
   /**

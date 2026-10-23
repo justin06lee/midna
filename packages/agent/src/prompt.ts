@@ -126,12 +126,12 @@ export function wakeupPrompt(
   reason: string,
   kind: string,
   scheduledFor: string,
-  opts: { task?: string; resumed?: { doing: string | null; transcript: boolean }; budget?: string } = {},
+  opts: { task?: string; resumed?: { doing: string | null; transcript: boolean } } = {},
 ): string {
   const task = opts.task ?? ownTask(reason, kind, scheduledFor);
   return `[Wakeup — the user did not send this; you are running on your own.]
 
-${task}${resumedNote(opts.resumed)}${opts.budget ? `\n\n${opts.budget}` : ""}
+${task}${resumedNote(opts.resumed)}
 
 ${WAKEUP_CLOSE}`;
 }
@@ -143,7 +143,7 @@ ${WAKEUP_CLOSE}`;
  */
 export function wakeupsPrompt(
   items: Array<{ id: number; scheduledFor: string; early: string | null; task: string }>,
-  opts: { resumed?: { doing: string | null; transcript: boolean }; budget?: string } = {},
+  opts: { resumed?: { doing: string | null; transcript: boolean } } = {},
 ): string {
   const list = items
     .map((it, i) => `## ${i + 1}. Wakeup #${it.id}, set for ${it.scheduledFor}${it.early ? ` (taken ${it.early} early, to run with the rest)` : ""}\n\n${it.task}`)
@@ -152,7 +152,7 @@ export function wakeupsPrompt(
 
 ${items.length} wakeups came due within minutes of each other, so they run as one turn. Handle each one; where they overlap, do the shared work once.
 
-${list}${resumedNote(opts.resumed)}${opts.budget ? `\n\n${opts.budget}` : ""}
+${list}${resumedNote(opts.resumed)}
 
 ${WAKEUP_CLOSE}`;
 }
@@ -169,11 +169,6 @@ function resumedNote(resumed: { doing: string | null; transcript: boolean } | un
   return resumed.transcript
     ? `\n\n[midna] You set this aside part-way through${resumed.doing ? `, in the middle of ${resumed.doing},` : ""} to answer a message from the user. What your tools already did is done, and it's in your transcript above; background shells you'd started were stopped (jobs from job_start keep running). Carry on from where you were, without redoing finished work.`
     : `\n\n[midna] You started this before and set it aside part-way through to answer a message from the user; that session is gone. Check what's already done before redoing any of it.`;
-}
-
-/** Said in every wakeup, and when midna schedules one, once a day's wakeups are past the budget. */
-export function overBudget(today: { turns: number; usd: number }, budget: { turns: number; usd: number }): string {
-  return `[midna] You're over today's wakeup budget: ${today.turns} wakeup turns and $${today.usd.toFixed(2)} so far, against ${budget.turns} turns or $${budget.usd.toFixed(2)} a day. Every wakeup costs money: do only what can't wait, fold checks into one, schedule fewer follow-ups, and let events (ruri, a job's end) tell you when something happened instead of checking back.`;
 }
 
 /** At most this much of an event's JSON goes in the prompt, and this many events. */

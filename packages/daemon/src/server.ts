@@ -142,7 +142,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       brain: assistant.brainHealth,
       hands: s.hands,
       spend: store.log.spendByDay(7, s.timezone),
-      wakeups: { ...store.log.wakeupsToday(s.timezone), budget: s.wakeupBudget },
+      wakeups: store.log.wakeupsToday(s.timezone),
     };
   };
 

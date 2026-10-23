@@ -90,12 +90,7 @@ So a WebSocket bridge would duplicate idle and blocked, and would put a key that
   - Rituals, reminders and system upkeep keep running alone.
   - A set-aside or failed group retries as a group.
 - **De-duplication:** `schedule_wakeup` doesn't add a follow-up that's nearly the same as a pending one due within an hour of it. It answers with the existing one's id and time instead.
-- **A daily budget:**
-  - a setting, default 60 wakeup turns or $20 a day, whichever comes first;
-  - past it, every wakeup prompt and every `schedule_wakeup` answer says how far over midna is, and asks it to fold checks together and rely on events;
-  - `midna status` shows today against the budget;
-  - it warns and never blocks;
-  - reminders stay free and outside it.
+- **No daily budget, on purpose:** 0.11.0 and 0.11.1 had a wakeup budget (default 60 turns or $20 a day) that told midna it was over. Justin decided against it in 0.11.2: efficiency comes from the design (events instead of polling, coalescing, de-duplication, a cache-stable prompt), and the cost left is an investment. `midna status` still counts "wakeups N today, $X", with no limit or warning. A `wakeupBudget` left in an old settings table is ignored.
 - **Saves:** coalescing pays the fresh session's cache write once for the whole group. With half of the wakeups bunched, expect 40–50% fewer wakeup turns, −$10 to −$20/day. De-duplication covers part of the 59 repeats.
 
 ### 4. A model per wakeup or job (after midna's review)
@@ -141,7 +136,7 @@ Four chat turns in one session, 20 s apart, the state changed before the fourth:
 
 The "after" numbers can only come from the live database after a rollout. To compare them with the baseline:
 
-- `midna status`: the spend lines (today by kind, last 7 days) and the wakeup budget line.
+- `midna status`: the spend lines (today by kind, last 7 days) and the wakeups line (a count, no limit).
 - **In SQL, read-only:**
   ```sql
   -- real spend and turns, last 24 h, by kind (after migration 10, cost_usd is per turn)
