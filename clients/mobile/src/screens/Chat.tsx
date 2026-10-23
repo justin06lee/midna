@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
-import { ActionSheetIOS, ActivityIndicator, Animated, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActionSheetIOS, ActivityIndicator, Animated, AppState, Dimensions, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, MidnaError, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
 import { Attachments } from "../attachments";
+import { keyboardLift } from "../keyboard";
 import type { PhoneConnection } from "../connection";
 import { draftKey, dropDraft, loadDraft, saveDraft, useDraft } from "../drafts";
 import { faceId } from "../faceid";
@@ -29,22 +30,34 @@ type Measurable = ComponentRef<typeof View>;
 
 function useKeyboardLift(ref: RefObject<Measurable | null>) {
   const lift = useRef(new Animated.Value(0)).current;
-  const applied = useRef(0);
-  const move = (to: number, ms: number) => {
-    applied.current = to;
+  const move = (to: number, ms: number) =>
     Animated.timing(lift, { toValue: to, duration: ms || 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
-  };
   useEffect(() => {
-    const sub = Keyboard.addListener("keyboardWillChangeFrame", (e) => {
-      ref.current?.measureInWindow((_x, y, _w, h) => {
-        // The view's bottom without the lift already applied.
-        move(Math.max(0, y + h + applied.current - e.endCoordinates.screenY), e.duration);
-      });
+    // The lift is worked out afresh from the view's frame and the keyboard's
+    // each time: padding doesn't move the frame, so nothing already applied
+    // is added to it. A frame that is off screen, or measured while the app
+    // isn't active, lifts nothing.
+    const place = (top: number, height: number, ms: number) => {
+      const { height: windowHeight } = Dimensions.get("window");
+      ref.current?.measureInWindow((_x, y, _w, h) => move(keyboardLift({ viewTop: y, viewBottom: y + h, keyboardTop: top, keyboardHeight: height, windowHeight }), ms));
+    };
+    const frame = Keyboard.addListener("keyboardWillChangeFrame", (e) => {
+      if (AppState.currentState === "active") place(e.endCoordinates.screenY, e.endCoordinates.height, e.duration);
     });
     const hide = Keyboard.addListener("keyboardWillHide", (e) => move(0, e.duration));
+    const done = Keyboard.addListener("keyboardDidHide", () => lift.setValue(0));
+    // Back from the background: whatever the keyboard is now decides.
+    const app = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      const k = Keyboard.metrics();
+      if (k) place(k.screenY, k.height, 0);
+      else lift.setValue(0);
+    });
     return () => {
-      sub.remove();
+      frame.remove();
       hide.remove();
+      done.remove();
+      app.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, lift]);
