@@ -3,7 +3,7 @@ import { ActionSheetIOS, ActivityIndicator, Animated, AppState, Dimensions, Easi
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, MidnaError, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
-import { Attachments } from "../attachments";
+import { Attachments, Thumb } from "../attachments";
 import { keyboardLift } from "../keyboard";
 import type { PhoneConnection } from "../connection";
 import { draftKey, dropDraft, loadDraft, saveDraft, useDraft } from "../drafts";
@@ -193,6 +193,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
           <View style={s.staged}>
             {files.map((a) => (
               <View key={a.id} style={[s.chip, { backgroundColor: t.panel, borderColor: t.line2 }]}>
+                {a.kind === "image" ? <Thumb a={a} source={midna.attachmentSource} width={22} height={22} radius={6} /> : null}
                 <Text numberOfLines={1} style={[s.chipText, { color: t.ink }]}>
                   {a.name}
                 </Text>
