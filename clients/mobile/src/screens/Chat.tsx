@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { ActionSheetIOS, ActivityIndicator, FlatList, KeyboardAvoidingView, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
+import { ActionSheetIOS, ActivityIndicator, Animated, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, MidnaError, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
@@ -16,6 +16,38 @@ import type { Midna } from "../useMidna";
 interface Uploading {
   key: string;
   name: string;
+}
+
+/**
+ * How far the keyboard covers the bottom of the view `ref` holds, animated
+ * with the keyboard. KeyboardAvoidingView measures its frame against its
+ * parent, not the window, so under a header and above a tab bar it never
+ * lifts; this measures the window.
+ */
+type Measurable = ComponentRef<typeof View>;
+
+function useKeyboardLift(ref: RefObject<Measurable | null>) {
+  const lift = useRef(new Animated.Value(0)).current;
+  const applied = useRef(0);
+  const move = (to: number, ms: number) => {
+    applied.current = to;
+    Animated.timing(lift, { toValue: to, duration: ms || 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+  };
+  useEffect(() => {
+    const sub = Keyboard.addListener("keyboardWillChangeFrame", (e) => {
+      ref.current?.measureInWindow((_x, y, _w, h) => {
+        // The view's bottom without the lift already applied.
+        move(Math.max(0, y + h + applied.current - e.endCoordinates.screenY), e.duration);
+      });
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", (e) => move(0, e.duration));
+    return () => {
+      sub.remove();
+      hide.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ref, lift]);
+  return lift;
 }
 
 /**
@@ -43,6 +75,8 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
   const [uploading, setUploading] = useState<Uploading[]>([]);
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState("");
+  const root = useRef<Measurable>(null);
+  const lift = useKeyboardLift(root);
 
   const byOutbox = useMemo(() => new Map([...midna.approvals.values()].flatMap((a) => (a.outboxId === null ? [] : [[a.outboxId, a] as const]))), [midna.approvals]);
   const data = useMemo(() => [...midna.lines].reverse(), [midna.lines]);
@@ -108,7 +142,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0} style={s.root}>
+    <Animated.View ref={root} style={[s.root, { paddingBottom: lift }]}>
       <FlatList
         testID="chat-lines"
         inverted
@@ -190,7 +224,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
           </Pressable>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </Animated.View>
   );
 }
 
