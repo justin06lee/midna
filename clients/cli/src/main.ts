@@ -153,11 +153,11 @@ function spendLines(days: SpendDay[] | undefined): string {
   const week = days.reduce((n, d) => n + d.usd, 0);
   return (
     `\n  spent     today ${usd(today.usd)} in ${today.turns} turn(s)${kinds.length ? `: ${kinds.join(" · ")}` : ""}` +
+    (today.unpriced ? `\n            ${today.unpriced} of them on a plan with no price per turn (Codex)` : "") +
     `\n            ${days.length} days ${usd(week)}: ${days.map((d) => `${d.date.slice(5)} ${usd(d.usd)}`).join(" · ")}`
   );
 }
 
-/** Today's wakeup turns and what they cost. */
 /** The model, its fallbacks, and which one is thinking while another is out of usage. Hosts before 0.12 say only the model. */
 function modelLines(s: Status): string[] {
   const lines = [`model     ${s.model}`];
@@ -173,6 +173,7 @@ function modelReport(s: Status): string {
   return lines.length === 1 ? s.model : lines.join("\n");
 }
 
+/** Today's wakeup turns and what they cost. */
 function wakeupLine(w: Status["wakeups"]): string {
   if (!w) return "";
   return `\n  wakeups   ${w.turns} today, $${w.usd.toFixed(2)}`;

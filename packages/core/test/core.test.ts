@@ -569,6 +569,20 @@ describe("spend", () => {
     expect(days[1]).toEqual({ date: "2026-10-21", usd: 1.01, turns: 2, byKind: { followup: { usd: 1, turns: 1 }, chat: { usd: 0.01, turns: 1 } } });
     expect(days[2]).toEqual({ date: "2026-10-20", usd: 0, turns: 0, byKind: {} });
   });
+
+  test("a turn that finished with no price is counted as unpriced, not as free", () => {
+    const s = fresh();
+    const now = Date.parse("2026-10-22T20:00:00Z");
+    s.log.endEpisode(ep(s, "chat", now - HOUR), { sessionCostUsd: 0.2 });
+    // Codex on a ChatGPT plan: tokens, no price.
+    s.log.endEpisode(ep(s, "chat", now - HOUR), { tokens: { input: 900, cacheRead: 0, cacheWrite: 0, output: 40 } });
+    // Cut off: no price because it failed, not because the plan has none.
+    s.log.endEpisode(ep(s, "chat", now - HOUR), { error: "interrupted by a message from the user" });
+    // Still running.
+    ep(s, "chat", now - HOUR);
+    const [today] = s.log.spendByDay(1, TZ, now);
+    expect(today).toMatchObject({ usd: 0.2, turns: 4, unpriced: 1 });
+  });
 });
 
 describe("wakeup guardrails", () => {

@@ -290,6 +290,8 @@ export interface SpendDay {
   usd: number;
   turns: number;
   byKind: Partial<Record<SpendKind, { usd: number; turns: number }>>;
+  /** Turns that finished without a price, such as Codex on a ChatGPT plan; counted in turns, not usd. Absent when none, and from hosts before 0.12. */
+  unpriced?: number;
 }
 
 export interface BrainHealth {

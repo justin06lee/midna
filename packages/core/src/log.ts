@@ -265,10 +265,11 @@ export class Log {
     const byDate = new Map(out.map((d) => [d.date, d]));
     const rows = this.db
       .query(
-        `SELECT e.started_at AS at, e.kind AS kind, e.cost_usd AS usd, w.kind AS wkind, w.created_by AS by
+        `SELECT e.started_at AS at, e.kind AS kind, e.cost_usd AS usd, w.kind AS wkind, w.created_by AS by,
+           e.ended_at IS NOT NULL AND e.error IS NULL AND e.cost_usd IS NULL AS unpriced
          FROM episodes e LEFT JOIN wakeups w ON w.id = e.wakeup_id WHERE e.started_at >= $s`,
       )
-      .all({ s: startOfLocalDay(today + 12 * HOUR - (days - 1) * DAY, tz) }) as Array<{ at: number; kind: string; usd: number | null; wkind: string | null; by: string | null }>;
+      .all({ s: startOfLocalDay(today + 12 * HOUR - (days - 1) * DAY, tz) }) as Array<{ at: number; kind: string; usd: number | null; wkind: string | null; by: string | null; unpriced: number }>;
     for (const r of rows) {
       const d = byDate.get(fmtDate(r.at, tz).slice(0, 10));
       if (!d) continue;
@@ -278,6 +279,8 @@ export class Log {
       b.turns++;
       d.usd += r.usd ?? 0;
       d.turns++;
+      // A harness with no price per turn (Codex on a ChatGPT plan) reports none; say so rather than pass it off as free.
+      if (r.unpriced) d.unpriced = (d.unpriced ?? 0) + 1;
     }
     const cents = (n: number) => Math.round(n * 10_000) / 10_000;
     for (const d of out) {
