@@ -49,7 +49,7 @@ describe("a brain at its usage limit", () => {
     // Held: the next one doesn't run the brain at all.
     expect(await a.wakeup(w)).toEqual({ retryAt: until });
     expect(runs.length).toBe(1);
-    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit is reached until \d+:\d\d [ap]m; I'll pick up what's waiting then\.$/)]);
+    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit is reached until (?:\w{3} )?\d+:\d\d [ap]m; I'll pick up what's waiting then\.$/)]);
   });
 
   test("a cap that doesn't say when holds a while, not forever", async () => {
