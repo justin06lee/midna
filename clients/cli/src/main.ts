@@ -41,6 +41,7 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna status                    mode, model, what it's doing
   midna mode [autonomous|ask]     show or switch the permission mode
   midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, …
+    --fallback codex[,…]|none     what to think with while the brain is out of usage
   midna pair                      a one-time code for adding another device
   midna connect <url> <code>      point this machine's CLI at a midna elsewhere
   midna devices                   machines midna could live on (this one, makima, Tailscale)
@@ -157,6 +158,21 @@ function spendLines(days: SpendDay[] | undefined): string {
 }
 
 /** Today's wakeup turns and what they cost. */
+/** The model, its fallbacks, and which one is thinking while another is out of usage. Hosts before 0.12 say only the model. */
+function modelLines(s: Status): string[] {
+  const lines = [`model     ${s.model}`];
+  if (s.fallback?.length) lines.push(`fallback  ${s.fallback.join(", ")}`);
+  for (const [provider, until] of Object.entries(s.caps ?? {})) lines.push(`capped    ${provider} until ${new Date(until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`);
+  if (s.activeModel && s.activeModel !== s.model) lines.push(`thinking  with ${s.activeModel} meanwhile`);
+  return lines;
+}
+
+/** `midna model`: the bare model as before, or every line once there's more to say. */
+function modelReport(s: Status): string {
+  const lines = modelLines(s);
+  return lines.length === 1 ? s.model : lines.join("\n");
+}
+
 function wakeupLine(w: Status["wakeups"]): string {
   if (!w) return "";
   return `\n  wakeups   ${w.turns} today, $${w.usd.toFixed(2)}`;
@@ -409,7 +425,7 @@ async function main(): Promise<void> {
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);
-      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  model     ${s.model}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
+      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  ${modelLines(s).join("\n  ")}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
     }
     case "version":
     case "--version":
@@ -431,8 +447,11 @@ async function main(): Promise<void> {
     }
     case "model": {
       const c = client();
-      if (!rest[0]) return console.log((await reach(() => c.status())).model);
-      return console.log(`model: ${(await reach(() => c.updateSettings({ model: rest[0] }))).model}`);
+      const model = rest[0]?.startsWith("--") ? undefined : rest[0];
+      const fallback = flag("--fallback");
+      if (!model && fallback === undefined) return console.log(modelReport(await reach(() => c.status())));
+      const list = fallback === undefined || fallback === "none" ? [] : fallback.split(",").map((m) => m.trim()).filter(Boolean);
+      return console.log(modelReport(await reach(() => c.updateSettings({ ...(model ? { model } : {}), ...(fallback !== undefined ? { fallback: list } : {}) }))));
     }
     case "pair": {
       const { code, expiresAt } = await reach(() => client().pairingCode());

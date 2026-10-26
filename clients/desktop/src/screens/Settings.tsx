@@ -7,6 +7,16 @@ import { Button, Icon, Section, Segmented, StateMark } from "../ui";
 
 const SUGGESTED = ["claude:opus", "claude:sonnet", "claude:haiku", "codex", "gemini", "opencode"];
 
+/** "codex, claude:sonnet" as the list it names. */
+const models = (text: string): string[] => text.split(",").map((m) => m.trim()).filter(Boolean);
+
+/** " until 4:00 PM" for the model's provider's reset, when the host says. */
+function capUntil(status: Status): string {
+  const provider = status.model.includes(":") ? status.model.slice(0, status.model.indexOf(":")) : "claude";
+  const until = status.caps?.[provider];
+  return until ? ` until ${new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
+}
+
 /** Saves a change; says whether it took, so a draft goes only then. */
 type Save = (what: string, patch: Parameters<MidnaClient["updateSettings"]>[0]) => Promise<boolean>;
 
@@ -33,6 +43,7 @@ export function Settings({
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const drafts = draftKey(connection);
   const model = useDraft(`${drafts}:model`, status?.model ?? "");
+  const fallback = useDraft(`${drafts}:fallback`, status?.fallback?.join(", ") ?? "");
   const timezone = useDraft(`${drafts}:timezone`, status?.timezone ?? "");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,10 +96,33 @@ export function Settings({
               Use this
             </Button>
           </div>
+          {status?.fallback && (
+            <>
+              <p className="mt-4 text-[12.5px] text-dim">While it's out of usage, think with these instead, in order — e.g. <span className="font-mono text-[11.5px]">codex</span>. Empty for none: midna waits for the reset.</p>
+              <div className="mt-2 flex items-center gap-2">
+                <input list="models" className="field h-8 w-56 px-2.5 font-mono text-[12px]" value={fallback.value} onChange={(e) => fallback.set(e.target.value)} placeholder="none" spellCheck={false} />
+                <Button
+                  onClick={async () => (await save("fallback", { fallback: models(fallback.value) })) && fallback.clear()}
+                  busy={saving === "fallback"}
+                  disabled={models(fallback.value).join(",") === status.fallback.join(",")}
+                >
+                  Use these
+                </Button>
+              </div>
+            </>
+          )}
           <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12.5px]">
             <StateMark state={brain?.ok === false ? "offline" : brain?.ok ? "running" : "online"} />
             <span className="flex-1 text-ink-2">
-              {brain?.ok === false ? (brain.reason === "signed_out" ? `Not signed in on ${status?.host.name}` : brain.message) : brain?.ok ? "Answering" : "Not tried yet"}
+              {brain?.ok === false
+                ? brain.reason === "signed_out"
+                  ? `Not signed in on ${status?.host.name}`
+                  : brain.message
+                : status?.activeModel && status.activeModel !== status.model
+                  ? `${status.model} is out of usage${capUntil(status)}; thinking with ${status.activeModel} meanwhile`
+                  : brain?.ok
+                    ? "Answering"
+                    : "Not tried yet"}
             </span>
             {brain?.ok === false && brain.reason === "signed_out" && (
               <Button size="sm" variant="primary" onClick={onSignIn} icon={<Icon name="terminal" className="size-3.5" />}>

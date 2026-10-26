@@ -272,6 +272,12 @@ export interface Status {
   spend?: SpendDay[];
   /** Today's wakeup turns and what they cost; a count, no limit. From 0.11. */
   wakeups?: { turns: number; usd: number };
+  /** Models to think with, in order, while the one before is out of usage. From 0.12. */
+  fallback?: string[];
+  /** The model midna thinks with right now: `model`, or a fallback while it's capped. From 0.12. */
+  activeModel?: string;
+  /** Providers out of usage, and when each resets (epoch ms). From 0.12. */
+  caps?: Record<string, number>;
 }
 
 /** What started a turn: a chat, or a wakeup — midna's own follow-up, an event from another program, a job's end, a ritual. */
@@ -300,6 +306,8 @@ export interface BrainHealth {
 export const SettingsPatch = z.object({
   mode: Mode.optional(),
   model: z.string().min(1).optional(),
+  /** Models to fall back to, in order, while the one before is out of usage; [] for none. */
+  fallback: z.array(z.string().min(1)).max(4).optional(),
   timezone: z.string().min(1).optional(),
   quietHours: z.object({ start: z.string(), end: z.string() }).nullable().optional(),
   /** "paused" stops every device's hands at once, whatever each app says. */

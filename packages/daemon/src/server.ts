@@ -143,6 +143,9 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       hands: s.hands,
       spend: store.log.spendByDay(7, s.timezone),
       wakeups: store.log.wakeupsToday(s.timezone),
+      fallback: s.fallback,
+      activeModel: assistant.activeModel() ?? s.model,
+      caps: assistant.caps(),
     };
   };
 
@@ -151,8 +154,8 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.patch("/v1/settings", async (c) => {
     const patch = SettingsPatch.safeParse(await c.req.json().catch(() => null));
     if (!patch.success) return c.json({ error: patch.error.message }, 400);
-    if (patch.data.model) {
-      const problem = checkModel(patch.data.model);
+    for (const model of [patch.data.model ?? [], patch.data.fallback ?? []].flat()) {
+      const problem = checkModel(model);
       if (problem) return c.json({ error: problem }, 400);
     }
     if (patch.data.timezone) {

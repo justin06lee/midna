@@ -229,6 +229,11 @@ describe("midnad", () => {
   test("settings are validated and reach the brain", async () => {
     await expect(client.updateSettings({ model: "nosuchprovider:x" })).rejects.toThrow(/unknown provider/);
     await expect(client.updateSettings({ timezone: "Mars/Olympus" })).rejects.toThrow(/timezone/);
+    await expect(client.updateSettings({ fallback: ["nosuchprovider:x"] })).rejects.toThrow(/unknown provider/);
+    const none = await client.updateSettings({ fallback: [] });
+    expect(none.fallback).toEqual([]);
+    expect(none.activeModel).toBe(none.model);
+    expect(none.caps).toEqual({});
     const s = await client.updateSettings({ mode: "ask", timezone: "Asia/Seoul" });
     expect(s.mode).toBe("ask");
     script = async (run) => {
