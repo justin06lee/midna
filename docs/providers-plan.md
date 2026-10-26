@@ -1,6 +1,6 @@
 # Providers: Claude, Codex, and falling back when Claude is capped
 
-*A plan, written 2026-10-26 against 0.11.3. Nothing here is built yet. Which option to take, and the settings in it, is Justin's call.*
+*A plan, written 2026-10-26 against 0.11.3. Justin chose option B, and it is built: see [providers.md](providers.md) for what it does and how to turn it on.*
 
 Justin wants midna to think with either Claude (his Claude subscription, through Claude Code) or his $20 ChatGPT plan (through the Codex CLI). When Claude's usage limit is reached, midna should carry on with Codex on its own.
 
