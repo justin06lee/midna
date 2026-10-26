@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { platform } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
 import type { Job, JobStatus, Store } from "@midna/core";
-import type { JobStart, JobsHandle } from "@midna/agent";
+import { resolveModel, type JobStart, type JobsHandle } from "@midna/agent";
 
 /**
  * Jobs: long work midna starts from a turn, run detached so it outlives
@@ -66,8 +66,13 @@ export interface JobRunnerOptions {
   pollMs?: number;
   /** After SIGTERM, how long a job gets before SIGKILL. */
   killGraceMs?: number;
-  /** The `claude` a prompt job runs; found on PATH by default. */
+  /** The `claude` and `codex` a prompt job runs; found on PATH by default. */
   claudeBin?: string | null;
+  codexBin?: string | null;
+  /** The model midna thinks with now (a capped provider's fallback meanwhile); a prompt job runs on its harness. By default the setting. */
+  model?: () => string | null;
+  /** Providers out of usage, with when each resets; a prompt job naming one runs on the active model instead. */
+  caps?: () => Record<string, number>;
   /** With no pid yet and no unit or process to show it running, how long a job may take to start before it counts as never started. */
   startGraceMs?: number;
   /** A job ended and its wakeup is due: run the scheduler now rather than at its next tick. */
@@ -93,6 +98,23 @@ export class JobRunner implements JobsHandle {
         console.error("[midna] jobs: couldn't look at the running jobs:", (err as Error).message);
       }
     }, opts.pollMs ?? 2_000);
+  }
+
+  /** Which harness and model a prompt job runs on: a model named with its
+   *  provider ("codex:gpt-5.5") is that provider's; a bare one ("opus") is the
+   *  active model's provider's; none, or one whose provider is capped, is the
+   *  active model. */
+  private promptModel(asked: string | undefined, active: string): { provider: "claude" | "codex"; model?: string } {
+    const now = resolveModel(active);
+    let named = asked && /^(claude|codex)(:|$)/.test(asked) ? resolveModel(asked) : undefined;
+    if (named && named.provider !== now.provider && this.opts.caps?.()[named.provider]) {
+      named = undefined;
+      asked = undefined;
+    }
+    const provider = named?.provider ?? now.provider;
+    if (provider !== "claude" && provider !== "codex") throw new Error(`a prompt job runs on Claude or Codex, not ${provider}; run it through a command instead`);
+    const model = named ? named.model : (asked ?? (provider === now.provider ? now.model : undefined));
+    return { provider, ...(model ? { model } : {}) };
   }
 
   /**
@@ -129,12 +151,18 @@ export class JobRunner implements JobsHandle {
     let command = req.command?.trim() ?? "";
     let resultPath = req.resultFile ?? null;
     if (req.prompt?.trim()) {
-      const claude = this.opts.claudeBin === undefined ? Bun.which("claude") : this.opts.claudeBin;
-      if (!claude) throw new Error("claude isn't on midna's PATH on this machine; run it through a command instead");
+      const { provider, model } = this.promptModel(req.model, this.opts.model?.() ?? settings.model);
+      const bin = provider === "codex" ? this.opts.codexBin : this.opts.claudeBin;
+      const exe = bin === undefined ? Bun.which(provider) : bin;
+      if (!exe) throw new Error(`${provider} isn't on midna's PATH on this machine; run it through a command instead`);
       writeFileSync(join(dir, "prompt.md"), req.prompt);
       resultPath ??= join(dir, "result.md");
-      const model = req.model ?? (settings.model.startsWith("claude:") ? settings.model.slice("claude:".length) : undefined);
-      command = [shq(claude), "-p", "--output-format", "text", ...(model ? ["--model", shq(model)] : []), "--dangerously-skip-permissions", `< "$MIDNA_JOB_DIR/prompt.md"`, `> ${shq(resultPath)}`].join(" ");
+      const m = model ? ["--model", shq(model)] : [];
+      command = (
+        provider === "codex"
+          ? [shq(exe), "exec", ...m, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--ephemeral", "--color", "never", "-o", shq(resultPath), `< "$MIDNA_JOB_DIR/prompt.md"`]
+          : [shq(exe), "-p", "--output-format", "text", ...m, "--dangerously-skip-permissions", `< "$MIDNA_JOB_DIR/prompt.md"`, `> ${shq(resultPath)}`]
+      ).join(" ");
     }
     writeFileSync(join(dir, "run.sh"), command + "\n");
     const logPath = join(dir, "log");

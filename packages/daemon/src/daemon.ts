@@ -37,7 +37,7 @@ export interface DaemonOptions {
   approvalMs?: number;
   handsGraceMs?: number;
   /** How jobs are launched, and how often they're looked at; tests set both. */
-  jobs?: { launcher?: "systemd" | "setsid"; pollMs?: number; claudeBin?: string | null };
+  jobs?: { launcher?: "systemd" | "setsid"; pollMs?: number; claudeBin?: string | null; codexBin?: string | null };
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
   /**
@@ -101,6 +101,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     store,
     root: join(home, "jobs"),
     workspace: p.workspace,
+    model: () => assistant.activeModel(),
+    caps: () => assistant.caps(),
     ...opts.jobs,
     onEnded: () => tickSoon(),
   });

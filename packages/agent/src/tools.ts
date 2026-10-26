@@ -389,12 +389,12 @@ export function createToolServer(ctx: ToolContext): McpServer {
     });
     tool(
       "job_start",
-      "Start long work that must outlive this turn — a render, a build, a big download, a test suite, a `claude -p` run — as a job: midna runs it detached on this machine, so it keeps going after your turn ends and through midna's own restarts. Give `command` (bash) or `prompt` (a task for a fresh `claude -p` run, without your tools or this conversation; its answer goes to the result file). When it ends you are woken with its exit code, the end of its log and its result file, without this conversation: say in when_done what to do then (whom to tell, what they asked for). End your turn rather than wait for it, and tell the user it's under way. In the command, $MIDNA_JOB_DIR is the job's own folder. Background shells you start yourself die with your turn; jobs don't.",
+      "Start long work that must outlive this turn — a render, a build, a big download, a test suite, an agent run — as a job: midna runs it detached on this machine, so it keeps going after your turn ends and through midna's own restarts. Give `command` (bash) or `prompt` (a task for a fresh agent run — `claude -p`, or `codex exec` while you think with Codex — without your tools or this conversation; its answer goes to the result file). When it ends you are woken with its exit code, the end of its log and its result file, without this conversation: say in when_done what to do then (whom to tell, what they asked for). End your turn rather than wait for it, and tell the user it's under way. In the command, $MIDNA_JOB_DIR is the job's own folder. Background shells you start yourself die with your turn; jobs don't.",
       {
         label: z.string().min(1).max(80).describe('A few words saying what it is, e.g. "render the Q4 deck"'),
         command: z.string().optional().describe("A bash command, run in cwd; its output goes to the job's log"),
-        prompt: z.string().optional().describe("Instead of command: the task for a `claude -p` run"),
-        model: z.string().optional().describe('For prompt: the Claude model, e.g. "opus" or "sonnet" (default: yours)'),
+        prompt: z.string().optional().describe("Instead of command: the task for a fresh agent run"),
+        model: z.string().optional().describe('For prompt: the model, e.g. "opus", or "codex:gpt-5.5" for another harness (default: yours)'),
         cwd: z.string().optional().describe("Absolute folder to run in (default: your workspace)"),
         timeout_minutes: z.number().int().min(1).max(1440).optional().describe("Stopped, with everything it started, after this long (default 120)"),
         result_file: z.string().optional().describe("Absolute path where it leaves its result, named when you're woken (a prompt's answer goes to result.md in its folder by default)"),

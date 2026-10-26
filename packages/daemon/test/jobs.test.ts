@@ -116,6 +116,23 @@ describe("the runner", () => {
     r.shutdown();
   });
 
+  test("a prompt runs codex exec while midna thinks with Codex, and a capped provider's model moves to it", async () => {
+    const bin = join(tmp, "fake-codex");
+    writeFileSync(bin, '#!/bin/sh\nfor a; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done\n{ echo "args: $*"; cat; } > "$out"\n');
+    chmodSync(bin, 0o755);
+    const { r, ended } = runner({ codexBin: bin, model: () => "codex:gpt-5.5", caps: () => ({ claude: Date.now() + 3_600_000 }) });
+    const flags = "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --ephemeral --color never";
+    const job = await r.start({ label: "think", prompt: "what's 2+2?", episodeId: null });
+    const capped = await r.start({ label: "think", prompt: "and 3+3?", model: "claude:opus", episodeId: null });
+    await until("both ends", () => ended.length === 2);
+    expect(readFileSync(job.result_path!, "utf8")).toBe(`args: exec --model gpt-5.5 ${flags} -o ${job.result_path}\nwhat's 2+2?`);
+    expect(readFileSync(capped.result_path!, "utf8")).toBe(`args: exec --model gpt-5.5 ${flags} -o ${capped.result_path}\nand 3+3?`);
+    const { r: none } = runner({ codexBin: null, model: () => "codex" });
+    await expect(none.start({ label: "x", prompt: "hi", episodeId: null })).rejects.toThrow("codex isn't on");
+    r.shutdown();
+    none.shutdown();
+  });
+
   test("restarts: what ended meanwhile is settled from its exit file, a job killed meanwhile failed, a live one is kept", async () => {
     const first = runner();
     const quick = await start(first.r, "exit 0");

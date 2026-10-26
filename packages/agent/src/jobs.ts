@@ -18,9 +18,9 @@ export interface JobStart {
   label: string;
   /** A bash command; or */
   command?: string;
-  /** a task for a fresh `claude -p` run, whose answer goes to the result file. */
+  /** a task for a fresh agent run (`claude -p`, or `codex exec` while midna thinks with Codex), whose answer goes to the result file. */
   prompt?: string;
-  /** For a prompt: the Claude model; by default the one midna thinks with, when that is Claude. */
+  /** For a prompt: the model, bare for the harness midna thinks with or "codex:…" for another; by default the one midna thinks with now. */
   model?: string;
   /** Absolute; midna's workspace when left out. */
   cwd?: string;
