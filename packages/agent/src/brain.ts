@@ -111,6 +111,9 @@ const ASK_MODE_DENIAL =
 const MCP_TOOL_TIMEOUT = 15 * 60_000;
 /** How Claude Code words a reached usage limit ("Claude AI usage limit reached|…", "You've hit your limit · resets 4pm"). */
 export const USAGE_LIMIT_TEXT = /\busage limit reached\b|\bhit your (?:usage )?limit\b/i;
+/** How long one midna tool call may run under Codex: a device action can wait
+ *  on the user's approval, which Codex's 60 s default would cut off. */
+const TOOL_TIMEOUT_SEC = 15 * 60;
 /** How long an interrupted harness may take to wind down before its process is closed. */
 const INTERRUPT_GRACE = 10_000;
 /** After a background-task notice's empty turn, how long to wait for the prompt's own turn to start. */
@@ -277,7 +280,8 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
     parity: "isolated",
     appName: "midna",
     permissions,
-    mcpServers: { midna: { url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` } } },
+    // device_* and job tools can outlast Codex's 60 s default per tool call
+    mcpServers: { midna: { url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, toolTimeoutSec: TOOL_TIMEOUT_SEC } },
     ...(providerId === "codex" && run.mode === "autonomous"
       ? { native: { sandbox: "danger-full-access", approvalPolicy: "never" } }
       : {}),
