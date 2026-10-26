@@ -19,6 +19,8 @@ export interface Settings {
   mode: Mode;
   /** yagami model ref: "claude:opus", "codex:gpt-5.6-sol", "gemini", … */
   model: string;
+  /** Models to think with, in order, while the model's provider is at its usage limit: ["codex"]. None by default. */
+  fallback: string[];
   timezone: string;
   /** Non-urgent notifications wait until this window ends. */
   quietHours: { start: string; end: string } | null;
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   name: "midna",
   mode: "autonomous",
   model: "claude:opus",
+  fallback: [],
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },

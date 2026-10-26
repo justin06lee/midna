@@ -2,8 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { MAIN, HOUR, contextSections, fmt, logTail, pinnedFacts, renderNow, type ContextSection, type Message, type Store, type Wakeup } from "@midna/core";
 import { EVENT_WINDOW_MS, type Attachment, type BrainHealth, type EventReceipt, type InReplyTo, type ReplyFallback, type ReplyRef } from "@midna/protocol";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
-import { BrainError, yagamiBrain, type Brain } from "./brain.ts";
-import { brainProblem, checkBrainLive, howToSignIn } from "./check.ts";
+import { BrainCappedError, BrainError, resolveModel, yagamiBrain, type Brain } from "./brain.ts";
+import { brainProblem, checkBrainLive, howToSignIn, type BrainProblem } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
 import { INTRODUCTION, devicesSection, eventsTask, jobTask, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 
@@ -278,11 +278,15 @@ export class Assistant {
     const previous = store.log.recent(conv, 1, unseen[0]!.id)[0];
     const now = Date.now();
     const notes = this.interruptions.get(conv) ?? [];
+    // The model, or while its provider is at its usage limit a fallback; none while every one is.
+    const active = this.activeModel(now);
+    if (!active) return this.capOut(conv, unseen, notes);
+    let model = active;
     // A turn the user cut short a moment ago carries on in its own session, whose transcript holds what it did.
     const carryOn = notes.some((n) => n.by === "user" && n.kept);
     const stale =
       !convo.brain_session ||
-      convo.brain_model !== settings.model ||
+      convo.brain_model !== model ||
       (!carryOn && (convo.brain_turns >= SESSION_TURNS || !previous || now - previous.created_at > SESSION_IDLE));
 
     const turn: Turn = { abort: new AbortController(), startedAt: now, ran: false, doing: null, tools: 0 };
@@ -291,27 +295,40 @@ export class Assistant {
     let fresh = stale;
     let turns = fresh ? 0 : convo.brain_turns;
     const keep = (session: string | null | undefined) => {
-      store.log.setBrain(conv, { model: settings.model, session: session ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
+      store.log.setBrain(conv, { model, session: session ?? null, startedAt: fresh ? now : convo.brain_started_at, turns });
     };
     store.bus.emit({ type: "status", conversationId: conv, state: "thinking" });
+    // A brain cut off by its limit after it had used tools: the one taking over checks before redoing them.
+    let cutOff: string | undefined;
     try {
       const run = async (fresh: boolean) => {
         const history = fresh ? store.log.recent(conv, HISTORY_ON_FRESH, unseen[0]!.id) : [];
         const sent = store.attachments.forMessages([...history, ...unseen].filter((m) => m.role === "user").map((m) => m.id));
         const files = (m: Message) => (sent.get(m.id) ?? []).map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) }));
-        const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, (m) => this.replied(m, settings.timezone), notes.map((n) => interruptionNote(n, !fresh)));
-        return this.episode({ kind: "chat", conversationId: conv, prompt, resume: fresh ? undefined : convo.brain_session!, turn });
+        const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, (m) => this.replied(m, settings.timezone), [...notes.map((n) => interruptionNote(n, !fresh)), ...(cutOff ? [cutOff] : [])]);
+        return this.episode({ kind: "chat", conversationId: conv, prompt, model, resume: fresh ? undefined : convo.brain_session!, turn });
       };
       let result: Awaited<ReturnType<typeof run>>;
-      try {
-        result = await run(fresh);
-      } catch (err) {
-        if (fresh || turn.abort.signal.aborted) throw err;
-        // The saved session may be gone (harness updated, cache cleared): start over with history.
-        console.error(`[midna] resuming ${conv} failed, starting fresh:`, (err as Error).message);
-        fresh = true;
-        turns = 0;
-        result = await run(true);
+      for (;;) {
+        try {
+          result = await run(fresh);
+          break;
+        } catch (err) {
+          if (turn.abort.signal.aborted) throw err;
+          const p = brainProblem(err);
+          if (p?.reason === "capped") {
+            // At its limit: the same turn again at once on the fallback, fresh with history, as a model change does.
+            const next = this.capped(p, "chat");
+            if (!next || next === model) throw err;
+            cutOff = capNote(model, err) ?? cutOff;
+            console.log(`[midna] ${model} is at its usage limit; ${conv} carries on with ${next}`);
+            model = next;
+          } else if (fresh) throw err;
+          // The saved session may be gone (harness updated, cache cleared): start over with history.
+          else console.error(`[midna] resuming ${conv} failed, starting fresh:`, (err as Error).message);
+          fresh = true;
+          turns = 0;
+        }
       }
       turns++;
       keep(result.sessionId);
@@ -323,7 +340,7 @@ export class Assistant {
       if (!answered(reply)) {
         console.error(`[midna] chat turn in ${conv} ended without a reply to the user (${JSON.stringify(result.text.trim().slice(0, 80))}); asking again`);
         const session = result.sessionId ?? convo.brain_session ?? undefined;
-        const again = await this.episode({ kind: "chat", conversationId: conv, prompt: askAgainPrompt(asked, settings.timezone), resume: session, turn });
+        const again = await this.episode({ kind: "chat", conversationId: conv, prompt: askAgainPrompt(asked, settings.timezone), model, resume: session, turn });
         turns++;
         keep(again.sessionId ?? session);
         reply = replyOf(again);
@@ -353,11 +370,16 @@ export class Assistant {
         return "interrupted";
       }
       const p = brainProblem(err);
+      if (p?.reason === "capped") {
+        this.capped(p, "chat");
+        this.capOut(conv, unseen, notes);
+        return;
+      }
       const why =
         p?.reason === "signed_out"
-          ? `my brain (${settings.model}) isn't signed in on ${this.opts.env.hostName}. To sign in, ${howToSignIn(p.loginCommand)} — then ask me again.`
+          ? `my brain (${model}) isn't signed in on ${this.opts.env.hostName}. To sign in, ${howToSignIn(p.loginCommand)} — then ask me again.`
           : p?.reason === "not_installed"
-            ? `my brain (${settings.model}) isn't installed on ${this.opts.env.hostName}: ${p.installHint}`
+            ? `my brain (${model}) isn't installed on ${this.opts.env.hostName}: ${p.installHint}`
             : err instanceof BrainError
               ? err.message
               : String(err);
@@ -377,7 +399,7 @@ export class Assistant {
   }
 
   /** One model session, start to finish, recorded as an episode. */
-  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; resume?: string; turn?: Turn }) {
+  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; model: string; resume?: string; turn?: Turn }) {
     const { store, opts } = this;
     return this.slot(async () => {
       const abort = e.turn?.abort ?? new AbortController();
@@ -385,7 +407,7 @@ export class Assistant {
       if (abort.signal.aborted) throw new BrainError("interrupted before it started");
       if (e.turn) e.turn.ran = true;
       const settings = store.settings();
-      const episodeId = store.log.startEpisode({ kind: e.kind, conversationId: e.conversationId, wakeupId: e.wakeupId, model: settings.model });
+      const episodeId = store.log.startEpisode({ kind: e.kind, conversationId: e.conversationId, wakeupId: e.wakeupId, model: e.model });
       // The system prompt stays byte for byte the same, so the prompt cache keeps it and the session's
       // transcript after it; what changes turn by turn ends the turn's prompt instead.
       const now = Date.now();
@@ -396,7 +418,7 @@ export class Assistant {
         const result = await this.brain({
           prompt: `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
           systemPrompt: systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0 }),
-          model: settings.model,
+          model: e.model,
           resume: e.resume,
           cwd: opts.env.workspace,
           mcp: { url: opts.mcp.url(episodeId), token: opts.mcp.token },
@@ -420,6 +442,8 @@ export class Assistant {
         if (result.sessionId) this.sawState(result.sessionId, state);
         return { ...result, episodeId };
       } catch (err) {
+        // What the cut-off turn had already done, for the brain that takes over.
+        if (err instanceof BrainCappedError) err.tools = store.log.toolsUsed(episodeId);
         const why = !abort.signal.aborted ? String((err as Error).message ?? err) : this.stopping ? "interrupted: midna stopped" : "interrupted by a message from the user";
         store.log.endEpisode(episodeId, { session: (err as BrainError).sessionId, error: why });
         throw err;
@@ -463,6 +487,10 @@ export class Assistant {
         this.maintenance(w.reason);
         return "done";
       }
+      // While every model is at its usage limit, it waits for the first to reset rather than failing.
+      const active = this.activeModel();
+      if (!active) return { retryAt: this.capsUntil() };
+      let model = active;
       this.wakeups.set(w.id, turn);
       if (rest.length) store.schedule.joined(w.id, rest.map((x) => x.id));
       const prompt = (resume?: string) => {
@@ -479,13 +507,27 @@ export class Assistant {
         }));
         return wakeupsPrompt(items, { ...resumed });
       };
-      const run = (resume?: string) => this.episode({ kind: "wakeup", wakeupId: w.id, prompt: prompt(resume), resume, turn });
-      let result: Awaited<ReturnType<typeof run>>;
-      try {
-        result = await run(paused?.session);
-      } catch (err) {
-        if (!paused?.session || turn.abort.signal.aborted) throw err;
-        result = await run(); // its session is gone: start it over
+      // A brain cut off by its limit after it had used tools: the one taking over checks before redoing them.
+      let cutOff: string | undefined;
+      const run = (resume?: string) => this.episode({ kind: "wakeup", wakeupId: w.id, prompt: `${cutOff ? `${cutOff}\n\n` : ""}${prompt(resume)}`, model, resume, turn });
+      let result: Awaited<ReturnType<typeof run>> | undefined;
+      let resume = paused?.session;
+      while (!result) {
+        try {
+          result = await run(resume);
+        } catch (err) {
+          if (turn.abort.signal.aborted) throw err;
+          const p = brainProblem(err);
+          if (p?.reason === "capped") {
+            // At its limit: the same wakeup again at once on the fallback, in a session of its own.
+            const next = this.capped(p, "wakeup");
+            if (!next || next === model) throw err;
+            cutOff = capNote(model, err) ?? cutOff;
+            console.log(`[midna] ${model} is at its usage limit; wakeup #${w.id} carries on with ${next}`);
+            model = next;
+          } else if (!resume) throw err;
+          resume = undefined; // its session is gone, or belongs to another model: start it over
+        }
       }
       const with_ = rest.length ? ` with ${rest.map((x) => `#${x.id}`).join(", ")}` : "";
       if (result.text) console.log(`[midna] wakeup #${w.id}${with_} (${w.reason.slice(0, 60)}): ${result.text.slice(0, 200)}`);
@@ -499,6 +541,11 @@ export class Assistant {
         return { retryAt: Date.now() + (this.stopping ? 0 : WAKEUP_RESUME) };
       }
       console.error(`[midna] wakeup #${w.id} failed:`, (err as Error).message);
+      const p = brainProblem(err);
+      if (p?.reason === "capped") {
+        this.capped(p, "wakeup");
+        return { retryAt: this.activeModel() ? Date.now() + 5_000 : this.capsUntil() };
+      }
       if (this.brainTrouble(err)) {
         for (const x of all) this.blocked.add(x.id);
         return { retryAt: Date.now() + BRAIN_RETRY };
@@ -531,7 +578,7 @@ export class Assistant {
    */
   private brainTrouble(err: unknown): boolean {
     const p = brainProblem(err);
-    if (!p) return false;
+    if (!p || p.reason === "capped") return false;
     this.health = {
       ok: false,
       checkedAt: Date.now(),
@@ -546,11 +593,77 @@ export class Assistant {
       const s = store.settings();
       const fix = p.reason === "signed_out" ? `it isn't signed in on ${this.opts.env.hostName}. To sign in, ${howToSignIn(p.loginCommand)}` : `it isn't installed on ${this.opts.env.hostName} (${p.installHint})`;
       store.say(
-        { kind: "notification", priority: "urgent", conversationId: MAIN, text: `I can't think right now: my brain (${s.model}) can't be reached — ${fix}. I'll pick up what I was doing as soon as it works.` },
+        { kind: "notification", priority: "urgent", conversationId: MAIN, text: `I can't think right now: my brain (${this.activeModel() ?? s.model}) can't be reached — ${fix}. I'll pick up what I was doing as soon as it works.` },
         { client: "system", seenByBrain: false },
       );
     }
     return true;
+  }
+
+  /** Providers at their usage limit, and when each resets (epoch ms); ones that reset within the hour stay, so a renewed cap isn't news. */
+  private capsKept(now = Date.now()): Record<string, number> {
+    const caps = this.store.state<Record<string, number>>("brainCaps") ?? {};
+    return Object.fromEntries(Object.entries(caps).filter(([, until]) => until > now - HOUR));
+  }
+
+  /** Providers at their usage limit right now, and when each resets. */
+  caps(now = Date.now()): Record<string, number> {
+    return Object.fromEntries(Object.entries(this.capsKept(now)).filter(([, until]) => until > now));
+  }
+
+  /** The model to think with: the setting's, or while its provider is at its limit the first fallback whose isn't; none while all are. */
+  activeModel(now = Date.now()): string | null {
+    const s = this.store.settings();
+    const caps = this.caps(now);
+    return [s.model, ...s.fallback].find((m) => !caps[resolveModel(m).provider]) ?? null;
+  }
+
+  /** When the first capped provider resets. */
+  private capsUntil(now = Date.now()): number {
+    const until = Object.values(this.caps(now));
+    return until.length ? Math.min(...until) : now;
+  }
+
+  /**
+   * A provider hit its usage limit: hold it until it resets (or a while, when
+   * it didn't say), tell the user once, and give the model to carry on with.
+   */
+  private capped(p: Extract<BrainProblem, { reason: "capped" }>, where: "chat" | "wakeup"): string | null {
+    const { store } = this;
+    const now = Date.now();
+    const until = p.until && p.until > now ? p.until : now + BRAIN_RETRY;
+    const kept = this.capsKept(now);
+    const news = !kept[p.provider];
+    store.setState("brainCaps", { ...kept, [p.provider]: until });
+    const next = this.activeModel(now);
+    const s = store.settings();
+    const limit = `${title(p.provider)}'s usage limit is reached until ${clock(until, s.timezone, now)}`;
+    if (news || kept[p.provider] !== until) console.log(`[midna] ${p.provider} is at its usage limit until ${new Date(until).toISOString()}; ${next ? `thinking with ${next}` : "nothing to think with"}`);
+    if (!next) this.health = { ok: false, checkedAt: now, reason: "capped", until: this.capsUntil(now), message: `${limit}.` };
+    // With nothing to fall back on, a chat's own reply says it.
+    if (news && (next || where === "wakeup")) {
+      store.say(
+        { kind: "notification", conversationId: MAIN, text: next ? `${limit}; I'm thinking with ${next} till then.` : `${limit}; I'll pick up what's waiting then.` },
+        { client: "system", seenByBrain: false },
+      );
+    }
+    return next;
+  }
+
+  /** Every model is at its usage limit: say when it answers, and come back to the messages then. */
+  private capOut(conv: string, unseen: Message[], notes: Interruption[]): void {
+    const { store } = this;
+    const s = store.settings();
+    const now = Date.now();
+    const asked = unseen.filter((m) => m.role === "user");
+    const caps = Object.entries(this.caps(now)).sort((a, b) => a[1] - b[1]);
+    const back = this.capsUntil(now);
+    const which = caps.length > 1 ? `${caps.map(([p]) => title(p)).join(" and ")} are ${caps.length === 2 ? "both" : "all"} at their usage limits; the first resets at ${clock(back, s.timezone, now)}` : `${title(caps[0]?.[0] ?? resolveModel(s.model).provider)}'s usage limit is reached until ${clock(back, s.timezone, now)}`;
+    store.say({ kind: "message", conversationId: conv, text: `${which}. I'll answer you then.` }, { client: "error", seenByBrain: false });
+    const quoted = asked.map((m) => `[${fmt(m.created_at, s.timezone)}${m.client ? ` via ${m.client}` : ""}] "${m.text.slice(0, 1500)}"`).join("\n");
+    store.schedule.add({ dueAt: back + 60_000, reason: `Answer the user: you were at your usage limit when they wrote, and told them you'd answer once it reset. They wrote:\n${quoted}`, kind: "followup", createdBy: "system", tz: s.timezone });
+    store.log.markSeen(unseen.map((m) => m.id));
+    this.heard(conv, notes);
   }
 
   get brainHealth(): BrainHealth {
@@ -570,7 +683,9 @@ export class Assistant {
 
   /** A tiny real turn through the brain, to know rather than guess. */
   async checkBrain(): Promise<BrainHealth> {
-    const r = await checkBrainLive(this.store.settings().model);
+    const model = this.activeModel();
+    if (!model) return this.health; // every model is at its limit: a check would only spend what's left
+    const r = await checkBrainLive(model);
     if (r.ok) this.healthy();
     else this.health = { ok: false, checkedAt: Date.now(), reason: r.reason, message: r.message, ...(r.loginCommand ? { loginCommand: r.loginCommand } : {}), ...(r.installHint ? { installHint: r.installHint } : {}) };
     return this.health;
@@ -661,6 +776,22 @@ export class Assistant {
 }
 
 /** The second ask, when a turn carrying the user's message ended without a word to them. */
+/** For the brain taking over a turn its limit cut short after it had used tools. */
+function capNote(model: string, err: unknown): string | undefined {
+  if (!(err instanceof BrainCappedError) || err.toolCalls < 1) return undefined;
+  const tools = [...new Set(err.tools)];
+  return `Your previous brain (${model}) hit its usage limit partway through this turn, after ${err.toolCalls} tool call${err.toolCalls === 1 ? "" : "s"}${tools.length ? ` (midna tools: ${tools.join(", ")})` : ""}. It may already have done part of it — sent a message, run a device command, written a file: check before you redo anything with a side effect.`;
+}
+
+const title = (provider: string) => provider.charAt(0).toUpperCase() + provider.slice(1);
+
+/** A time for the user: "4:00 pm", or "Tue 4:00 pm" when it isn't today. */
+function clock(ms: number, tz: string, now = Date.now()): string {
+  const day = (t: number) => new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(t);
+  const time = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(ms).toLowerCase();
+  return day(ms) === day(now) ? time : `${new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(ms)} ${time}`;
+}
+
 function askAgainPrompt(asked: Message[], tz: string): string {
   return `[midna] Your last turn ended without a reply to the user — perhaps a system or background-task notification arrived with their message and you answered that instead. The user is waiting. Reply to them now:\n${asked.map((m) => `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] User: ${m.text}`).join("\n")}`;
 }

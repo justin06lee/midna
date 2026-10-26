@@ -289,10 +289,12 @@ export interface SpendDay {
 export interface BrainHealth {
   ok: boolean | null;
   checkedAt: number | null;
-  reason?: "signed_out" | "not_installed" | "unusable";
+  reason?: "signed_out" | "not_installed" | "unusable" | "capped";
   message?: string;
   loginCommand?: string;
   installHint?: string;
+  /** When "capped": the provider's usage limit resets then (epoch ms). */
+  until?: number;
 }
 
 export const SettingsPatch = z.object({

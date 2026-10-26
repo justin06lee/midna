@@ -75,6 +75,31 @@ export class BrainError extends Error {
   }
 }
 
+/**
+ * The provider's usage limit is reached (Claude's 5-hour or weekly cap, the ChatGPT plan's): it can
+ * think again from `until` (epoch ms), when the provider says. The message has a fixed shape —
+ * "claude usage limit reached until 2026-10-26T23:00:00.000Z" — so a wakeup's stored error still
+ * reads as a cap after a restart (brainProblem).
+ */
+export class BrainCappedError extends BrainError {
+  /** midna's tools the turn called before it was cut off: a rerun must check before redoing them. */
+  tools: string[] = [];
+  constructor(readonly provider: string, readonly until: number | undefined, sessionId?: string, readonly toolCalls = 0, options?: { cause?: unknown }) {
+    super(`${provider} usage limit reached${until ? ` until ${new Date(until).toISOString()}` : ""}`, sessionId, options);
+  }
+}
+
+/** A reset time as Claude Code or Codex gives it — epoch seconds or ms — in ms; nothing for nonsense. */
+export function resetTime(at: unknown): number | undefined {
+  const n = typeof at === "string" && /^\d+$/.test(at) ? Number(at) : at;
+  if (typeof n === "number" && Number.isFinite(n) && n > 0) return n < 1e12 ? n * 1000 : n;
+  if (typeof at === "string") {
+    const t = Date.parse(at);
+    if (Number.isFinite(t)) return t;
+  }
+  return undefined;
+}
+
 /** Tools allowed in "ask" mode without the user: they only read, or only touch midna's own state. */
 const ASK_MODE_SAFE = new Set(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "TodoWrite", "LS", "NotebookRead"]);
 const ASK_MODE_DENIAL =
@@ -84,6 +109,8 @@ const ASK_MODE_DENIAL =
  * (2 min) and then run for up to its cap (a shell command, 10 min).
  */
 const MCP_TOOL_TIMEOUT = 15 * 60_000;
+/** How Claude Code words a reached usage limit ("Claude AI usage limit reached|…", "You've hit your limit · resets 4pm"). */
+export const USAGE_LIMIT_TEXT = /\busage limit reached\b|\bhit your (?:usage )?limit\b/i;
 /** How long an interrupted harness may take to wind down before its process is closed. */
 const INTERRUPT_GRACE = 10_000;
 /** After a background-task notice's empty turn, how long to wait for the prompt's own turn to start. */
@@ -166,17 +193,31 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
   // call, an empty result — and only then the prompt. That result is not the reply: wait for the next.
   let notice: { sessionCostUsd: number } | null = null;
   let waiting: ReturnType<typeof setTimeout> | undefined;
+  // Claude Code says it's capped in typed form: a rate_limit_event "rejected" (with when it resets)
+  // and an assistant message whose error is "rate_limit". No message text is read for it.
+  let capped: { until?: number } | null = null;
+  let resetsAt: number | undefined;
+  let toolCalls = 0;
   try {
     session.send(run.prompt);
     for await (const msg of session) {
       if ("session_id" in msg && msg.session_id) sessionId = msg.session_id;
+      if (msg.type === "rate_limit_event") {
+        const info = msg.rate_limit_info;
+        resetsAt = resetTime(info.resetsAt) ?? resetsAt;
+        if (info.status === "rejected") capped = { until: resetsAt };
+      }
+      if (msg.type === "assistant" && msg.error === "rate_limit") capped = { until: resetsAt };
       if (waiting && (msg.type === "assistant" || (msg.type === "system" && msg.subtype === "init"))) {
         clearTimeout(waiting);
         waiting = undefined;
       }
       if (msg.type === "assistant") {
         for (const block of msg.message.content) {
-          if (block.type === "tool_use") run.onActivity?.(block.name.replace(/^mcp__midna__/, ""), toolDetail(block.input));
+          if (block.type === "tool_use") {
+            toolCalls++;
+            run.onActivity?.(block.name.replace(/^mcp__midna__/, ""), toolDetail(block.input));
+          }
         }
       }
       if (msg.type === "result") {
@@ -190,16 +231,21 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
           return { text: msg.result, sessionId, sessionCostUsd: msg.total_cost_usd, usage: turnUsage(msg.usage) };
         }
         if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
+        if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls);
         const why = msg.subtype === "success" ? msg.result : msg.subtype;
+        // Last resort, should the typed signals ever go missing: the limit's own wording.
+        if (USAGE_LIMIT_TEXT.test(why)) throw new BrainCappedError("claude", resetsAt, sessionId, toolCalls);
         throw new BrainError(`claude turn failed: ${why}`, sessionId);
       }
     }
     if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
+    if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls);
     // The prompt's turn never came: say nothing, and let the caller ask again.
     if (notice) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw new BrainError("claude session ended without a result", sessionId);
   } catch (err) {
     if (run.signal?.aborted && !(err instanceof BrainError)) throw new BrainError("claude turn interrupted", sessionId, { cause: err });
+    if (capped && !(err instanceof BrainError)) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { cause: err });
     if (notice && !(err instanceof BrainError)) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw err;
   } finally {
@@ -241,10 +287,12 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
   let reply = "";
   let sessionCostUsd: number | undefined;
   let usage: TurnUsage | undefined;
+  let toolCalls = 0;
   try {
     for await (const ev of session.send(run.prompt)) {
       if (ev.type === "text" && !ev.thread) reply += ev.text;
       else if (ev.type === "tool_call" && !ev.thread && ev.status === "started") {
+        toolCalls++;
         run.onActivity?.(ev.name.replace(/^(mcp__midna__|midna[.:/])/, ""), ev.title ?? toolDetail(ev.input));
         reply = ""; // the reply is what comes after the last tool call
       } else if (ev.type === "done") {
@@ -257,6 +305,9 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
     return { text: reply.trim(), sessionId: session.id, ...(sessionCostUsd !== undefined ? { sessionCostUsd } : {}), ...(usage ? { usage } : {}) };
   } catch (err) {
     if (err instanceof BrainError) throw err;
+    // yagami's typed UsageLimitError; the code matches even where two copies of yagami defeat instanceof.
+    const limit = err as { code?: string; resetsAt?: unknown };
+    if (!run.signal?.aborted && limit?.code === "usage_limit") throw new BrainCappedError(providerId, resetTime(limit.resetsAt), session.id, toolCalls, { cause: err });
     throw new BrainError(`${providerId} turn ${run.signal?.aborted ? "interrupted" : `failed: ${(err as Error).message}`}`, session.id, { cause: err });
   } finally {
     run.signal?.removeEventListener("abort", onAbort);
