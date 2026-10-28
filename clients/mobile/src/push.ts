@@ -1,9 +1,9 @@
 import * as Application from "expo-application";
 import * as Notifications from "expo-notifications";
 import { MidnaError, type MidnaClient } from "@midna/protocol";
+import { pushRegistration, type PushSetup } from "./pushRegistration";
 
-/** Where push notifications stand on this phone. */
-export type PushSetup = "unknown" | "on" | "denied" | "unsupported" | "failed";
+export type { PushSetup } from "./pushRegistration";
 
 // While the app is open the chat already shows what arrives: keep it in the list, no banner or sound.
 Notifications.setNotificationHandler({
@@ -11,30 +11,40 @@ Notifications.setNotificationHandler({
 });
 
 /**
- * Ask for notifications (iOS asks only the first time), get this phone's
- * Apple push token and give it to midna. Again on every launch and return to
- * the foreground: the token can change, and registering twice is harmless.
+ * This phone's Apple push token, given to midna: asked for notifications
+ * (iOS asks only the first time), then the token, on launch and on returns
+ * to the foreground, at most once at a time and not the same one twice an
+ * hour (pushRegistration.ts).
  */
-export async function registerForPush(client: MidnaClient): Promise<PushSetup> {
-  try {
-    let { status } = await Notifications.getPermissionsAsync();
-    if (status === "undetermined") ({ status } = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } }));
-    if (status !== "granted") return "denied";
-    const { data: token } = await Notifications.getDevicePushTokenAsync();
+export function phonePush(client: MidnaClient) {
+  return pushRegistration({
+    permitted: async () => {
+      let { status } = await Notifications.getPermissionsAsync();
+      if (status === "undetermined") ({ status } = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } }));
+      return status === "granted";
+    },
+    token: async () => String((await Notifications.getDevicePushTokenAsync()).data),
     // TestFlight and App Store builds talk to production; a build run from Xcode to development. The host corrects a wrong guess.
-    const env = await Application.getIosPushNotificationServiceEnvironmentAsync().catch(() => null);
-    await client.registerPush({ token: String(token), environment: env === "development" || (env === null && __DEV__) ? "development" : "production" });
-    return "on";
-  } catch (err) {
-    // A host before 0.13 has no push.
-    if (err instanceof MidnaError && err.status === 404) return "unsupported";
-    console.warn(`push registration failed: ${(err as Error).message}`);
-    return "failed";
-  }
+    environment: async () => {
+      const env = await Application.getIosPushNotificationServiceEnvironmentAsync().catch(() => null);
+      return env === "development" || (env === null && __DEV__) ? "development" : "production";
+    },
+    send: async (token, environment): Promise<PushSetup> => {
+      try {
+        await client.registerPush({ token, environment });
+        return "on";
+      } catch (err) {
+        // A host before 0.13 has no push.
+        if (err instanceof MidnaError && err.status === 404) return "unsupported";
+        console.warn(`push registration failed: ${(err as Error).message}`);
+        return "failed";
+      }
+    },
+  });
 }
 
 /** The app is open: what the notifications said is in the chat now. */
 export const clearDelivered = () => void Notifications.dismissAllNotificationsAsync().catch(() => {});
 
-/** Re-register whenever iOS hands the app a new token. */
-export const onTokenChange = (fn: () => void) => Notifications.addPushTokenListener(fn);
+/** iOS handed the app a token: a new one, or the same again after any ask for it. */
+export const onTokenChange = (fn: (token: string) => void) => Notifications.addPushTokenListener((t) => fn(String(t.data)));
