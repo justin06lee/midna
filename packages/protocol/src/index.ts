@@ -452,14 +452,14 @@ export class MidnaClient {
   pairingCode(): Promise<{ code: string; expiresAt: number }> {
     return this.call("POST", "/v1/pairing-codes");
   }
-  status(signal?: AbortSignal): Promise<Status> {
-    return this.call("GET", "/v1/status", undefined, signal);
+  status(signal?: AbortSignal, timeoutMs?: number): Promise<Status> {
+    return this.call("GET", "/v1/status", undefined, signal, undefined, timeoutMs);
   }
   updateSettings(patch: SettingsPatch): Promise<Status> {
     return this.call("PATCH", "/v1/settings", patch);
   }
-  send(msg: SendMessage): Promise<MessageReceipt> {
-    return this.call("POST", "/v1/messages", msg);
+  send(msg: SendMessage, timeoutMs?: number): Promise<MessageReceipt> {
+    return this.call("POST", "/v1/messages", msg, undefined, undefined, timeoutMs);
   }
   /** Every paired device that has said hello to hands, online or not. */
   handsDevices(): Promise<HandsDevice[]> {

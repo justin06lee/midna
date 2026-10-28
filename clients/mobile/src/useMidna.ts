@@ -13,6 +13,15 @@ export type Link = "connecting" | "live" | "lost" | "unpaired";
 /** Silence on the event stream this long means the connection is dead; midna writes a keepalive every 25 s. */
 const STREAM_IDLE_MS = 40_000;
 
+/**
+ * Back from the background, the first request often goes out on a connection
+ * kept from before, whose path has since died (another network, the VPN
+ * re-formed): it never answers. midna answers a status or a message in well
+ * under a second, so past these it's that, and a fresh connection is tried.
+ */
+const STATUS_TIMEOUT_MS = 10_000;
+const SEND_TIMEOUT_MS = 15_000;
+
 /** What of a line this phone sent must outlive the app until midna has it. */
 type Outgoing = Pick<Line, "key" | "text" | "at" | "attachments" | "replyTo">;
 
@@ -70,7 +79,10 @@ export function useMidna(connection: PhoneConnection) {
 
   // What this phone said that midna hasn't taken yet survives the app being closed: back as "not sent", to retry.
   const outgoingKey = `${draftKey(connection)}:outgoing`;
+  // Not before they're read back: this runs first, with no lines yet, and would drop them.
+  const restored = useRef<string | null>(null);
   useEffect(() => {
+    if (restored.current !== outgoingKey) return;
     const out: Outgoing[] = lines.filter((l) => l.pending && l.state !== "sent").map(({ key, text, at, attachments, replyTo }) => ({ key, text, at, attachments, ...(replyTo ? { replyTo } : {}) }));
     if (out.length) saveDraft(outgoingKey, out);
     else dropDraft(outgoingKey);
@@ -104,6 +116,7 @@ export function useMidna(connection: PhoneConnection) {
       wakeUp?.();
     };
     const unsent = loadDraft<Outgoing[]>(outgoingKey) ?? [];
+    restored.current = outgoingKey;
     setLines(unsent.map((o) => ({ ...o, role: "user" as const, client: "mobile", pending: true, state: "failed" as const })));
     setApprovals(new Map());
     setOlderExhausted(false);
@@ -127,7 +140,7 @@ export function useMidna(connection: PhoneConnection) {
         abort.signal.addEventListener("abort", stop, { once: true });
         try {
           // Every step can be cut short: coming back to the foreground or onto another network aborts this attempt.
-          const s = await client.status(attempt.signal);
+          const s = await client.status(attempt.signal, STATUS_TIMEOUT_MS);
           setStatus(s);
           // The first time from where midna is now; after, from the last line seen, so nothing is missed.
           if (since === null) since = s.outboxSeq;
@@ -194,8 +207,9 @@ export function useMidna(connection: PhoneConnection) {
   /**
    * Say something, with files uploaded first; a reply to a question names it.
    * The line shows at once as sending, then sent (✓) once midna has taken it,
-   * or not sent, to tap and retry; it never waits on the event stream. What
-   * goes wrong comes back as a sentence, for the composer to show.
+   * or not sent, to tap and retry; it never waits on the event stream. When a
+   * retry can't help — midna refused it — why comes back as a sentence, for
+   * the composer to show; a line that just didn't get through says so itself.
    */
   const send = useCallback(
     async (text: string, replyTo?: number, attachments: Attachment[] = [], retry?: Line): Promise<string | null> => {
@@ -204,7 +218,7 @@ export function useMidna(connection: PhoneConnection) {
       setLines((cur) => byTime(mergeLines(cur.filter((l) => l.key !== key), [line])));
       if (replyTo) setLines((cur) => cur.map((l) => (l.outboxId === replyTo ? { ...l, answered: true } : l)));
       try {
-        const r = await client.send({ text, client: "mobile", ...(replyTo ? { replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((a) => a.id) } : {}) });
+        const r = await client.send({ text, client: "mobile", ...(replyTo ? { replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((a) => a.id) } : {}) }, SEND_TIMEOUT_MS);
         // Taken: the line becomes the message it is, which its echo and history then update in place.
         // A host that names no message id (before 0.6) leaves it pending, for its echo to settle.
         const id = r.messageId;
@@ -213,7 +227,8 @@ export function useMidna(connection: PhoneConnection) {
       } catch (err) {
         setLines((cur) => cur.map((l) => (l.key === key ? { ...l, state: "failed" } : replyTo && l.outboxId === replyTo ? { ...l, answered: false } : l)));
         const gone = err instanceof MidnaError && /^no attachment (\S+)/.exec(err.message)?.[1];
-        return gone ? "A file had expired on midna's side. Remove it and add it again, then retry." : `Not sent: ${(err as Error).message}`;
+        if (gone) return "A file in it had expired on midna's side, so it can't go as it is. Add the file again in a new message.";
+        return err instanceof MidnaError && err.status >= 400 ? `Not sent: ${err.message}` : null;
       }
     },
     [client],
