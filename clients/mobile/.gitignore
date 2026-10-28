@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# make testflight: archives, exports and Xcode's build cache
+/build

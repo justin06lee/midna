@@ -71,7 +71,7 @@ interface Annotation {
 - **Team** 65UN46K6FA ("Huiyun Lee"), set by `expo.ios.appleTeamId` in `app.json`. **Bundle id** `sh.midna.mobile`, registered on that team with Push Notifications. **App Store Connect app** "midna" (id 6827804165, SKU `midna-ios`).
 - **TestFlight, internal only:** the group "Justin" (Justin alone) gets every build. No App Store review.
 - **`ios/` is generated** by `expo prebuild` from `app.json` and ignored by git; signing, the push entitlement and versions all come from `app.json`. Never hand-edit `ios/`.
-- **A new build:** raise `expo.ios.buildNumber` in `app.json`, then `make testflight` with `ASC_KEY_ID` and `ASC_ISSUER_ID` set (the App Store Connect API key; its `.p8` stays in `~/.appstoreconnect/private_keys`, never in the repo). The script runs prebuild, archives with automatic signing through that key, and uploads. Everything Xcode writes stays in `clients/mobile/ios/build` on the T7.
+- **A new build:** raise `expo.ios.buildNumber` in `app.json`, then `make testflight` with `ASC_KEY_ID` and `ASC_ISSUER_ID` set (the App Store Connect API key; its `.p8` stays in `~/.appstoreconnect/private_keys`, never in the repo). The script runs prebuild, archives with automatic signing through that key, and uploads. Everything Xcode writes stays in `clients/mobile/build` on the T7, outside `ios/`, so the build cache survives prebuild.
 - **On the phone:** install TestFlight from the App Store, accept the invitation, install midna. TestFlight updates it; a build lasts 90 days.
 
 ## 5. Free sideloading, before the paid team

@@ -23,8 +23,9 @@ export DEVELOPER_DIR
 build=$(bun -e 'console.log(require("./app.json").expo.ios.buildNumber ?? "")')
 [ -n "$build" ] || { echo "app.json has no expo.ios.buildNumber" >&2; exit 1; }
 
-# Everything Xcode writes stays beside the project (ios/ is generated and ignored), not on the system disk.
-out=ios/build
+# Everything Xcode writes stays beside the project, not on the system disk, and outside ios/,
+# which prebuild --clean deletes: the build cache survives from one build to the next.
+out=build
 auth="-allowProvisioningUpdates -authenticationKeyPath $ASC_KEY_PATH -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
 
 CI=1 bunx expo prebuild -p ios --clean
