@@ -1,6 +1,6 @@
 # midna on the iPhone
 
-*v1 is built at `clients/mobile`: an Expo (SDK 58) + TypeScript app, iOS only, sideloaded with a free Apple account. Justin's answers of 2026-10-20 are below. The options weighed before them (makima on the phone, a relay, Telegram only) are in this file's history at 6150bfd.*
+*v1 is built at `clients/mobile`: an Expo (SDK 58) + TypeScript app, iOS only. Since 2026-10-27 it is signed by the paid team (65UN46K6FA), ships through TestFlight to Justin alone, and gets push notifications (docs/push.md). Justin's answers of 2026-10-20 are below. The options weighed before them (makima on the phone, a relay, Telegram only) are in this file's history at 6150bfd.*
 
 ## 1. Decisions (Justin, 2026-10-20)
 
@@ -16,9 +16,9 @@
     - Everything else stays HTTPS-only (`NSAllowsArbitraryLoads` is false).
     - Expo replaces the whole dictionary, not merging it, so `NSAllowsLocalNetworking` must stay listed there.
   - makima is not involved.
-- **Notifications are Telegram's** for now. The app has no push; revisit with the paid ($99) account.
+- **Notifications are Telegram's** for now. The app has no push; revisit with the paid ($99) account. *Done 2026-10-27: push notifications, with Telegram kept as the fallback (docs/push.md).*
 - **Face ID before any approval** is answered from the phone: Face ID only, with no passcode fallback, so a phone picked up unlocked can't say yes. This guards the phone, not midna's side: any paired token can still answer through `/v1/approvals` (the forgery item already with Justin).
-- **Reinstalling every 7 days** (free provisioning) is accepted.
+- **Reinstalling every 7 days** (free provisioning) is accepted. *Over 2026-10-27: TestFlight builds last 90 days and update themselves.*
 
 ## 2. What v1 does
 
@@ -66,32 +66,18 @@ interface Annotation {
 - **Building it** needs a migration (an annotations column on messages and outbox items), and history must carry the annotations so clients can redraw them.
 - **On the phone,** `Line.attachments` stays as it is; marks attach beside it, keyed by attachment id.
 
-## 4. Free sideloading: what it allows
+## 4. Signing and TestFlight (paid team, from 2026-10-27)
+
+- **Team** 65UN46K6FA ("Huiyun Lee"), set by `expo.ios.appleTeamId` in `app.json`. **Bundle id** `sh.midna.mobile`, registered on that team with Push Notifications. **App Store Connect app** "midna" (id 6827804165, SKU `midna-ios`).
+- **TestFlight, internal only:** the group "Justin" (Justin alone) gets every build. No App Store review.
+- **`ios/` is generated** by `expo prebuild` from `app.json` and ignored by git; signing, the push entitlement and versions all come from `app.json`. Never hand-edit `ios/`.
+- **A new build:** raise `expo.ios.buildNumber` in `app.json`, then `make testflight` with `ASC_KEY_ID` and `ASC_ISSUER_ID` set (the App Store Connect API key; its `.p8` stays in `~/.appstoreconnect/private_keys`, never in the repo). The script runs prebuild, archives with automatic signing through that key, and uploads. Everything Xcode writes stays in `clients/mobile/ios/build` on the T7.
+- **On the phone:** install TestFlight from the App Store, accept the invitation, install midna. TestFlight updates it; a build lasts 90 days.
+
+## 5. Free sideloading, before the paid team
 
 - **No APNs push, and no Network Extension.**
 - **A dev build, not Expo Go:** `expo prebuild`, signed in Xcode with the Personal Team. A Release build carries its own JavaScript.
 - **The profile expires after 7 days;** the app then stops launching until it's reinstalled from the Mac.
 - **Limits:** 3 sideloaded apps per phone, and 10 new app ids a week.
-
-## 5. Onto Justin's iPhone
-
-1. **On the Mac:**
-   - Accept Xcode's licence once (`sudo xcodebuild -license accept`).
-   - Add the Apple ID in Xcode → Settings → Accounts; this creates the Personal Team.
-2. **Generate the native project:** `cd clients/mobile && bunx expo prebuild -p ios`. Open `ios/midna.xcworkspace`.
-3. **Set signing:**
-   - Under Signing & Capabilities, pick the Personal Team.
-   - If Xcode says the id is taken, change the bundle id from `sh.midna.mobile` to something unique to him, e.g. `dev.justin06lee.midna`.
-4. **Get the phone ready:**
-   - Connect it by cable and trust the Mac.
-   - Turn on Settings → Privacy & Security → Developer Mode (it restarts).
-5. **Build and run:**
-   - Choose the iPhone as the destination.
-   - Set Product → Scheme → Edit Scheme → Run → Build Configuration to Release, so the JavaScript is bundled and no Metro is needed.
-   - Run.
-   - Or, in one command: `bunx expo run:ios --device --configuration Release`.
-6. **Trust the developer on the phone:** Settings → General → VPN & Device Management → his Apple ID → Trust.
-7. **Pair:**
-   - Open midna and pair with `http://midna:7717` and a code from `midna pair`, run on the host or on the Mac (its CLI is paired).
-   - This waits for the Tailscale switch-over: Tailscale on the phone, and `tailscale0` in the daemon's `listen`.
-8. **Every 7 days,** repeat step 5. The pairing and the drafts survive a reinstall over the same app id.
+- The steps that were used to put it on the phone are in this file's history before 2026-10-27.

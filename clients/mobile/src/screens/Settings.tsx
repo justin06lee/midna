@@ -16,6 +16,7 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
     ["Version", midna.status?.version ?? "—"],
     ["Lives on", midna.status?.host.name || "—"],
     ["Mode", midna.status?.mode ?? "—"],
+    ["Notifications", notifications(midna)],
     ["This phone", connection.device],
   ];
 
@@ -51,12 +52,30 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
           </View>
         ))}
       </Card>
-      <Text style={[s.note, { color: t.dim }]}>midna's messages reach you on Telegram while this app is closed.</Text>
+      <Text style={[s.note, { color: t.dim }]}>{whereAlertsGo(midna)}</Text>
       <Problem text={problem} />
       <Button label="Pair again" onPress={onPairAgain} disabled={busy} />
       <Button label="Unpair this phone" kind="danger" busy={busy} onPress={unpair} />
     </ScrollView>
   );
+}
+
+/** Whether this phone gets notifications, and if not, why. */
+function notifications(midna: Midna): string {
+  if (midna.push === "denied") return "Off in iPhone Settings";
+  if (midna.push === "unsupported") return "Needs midna 0.12";
+  if (midna.push === "failed") return "Not registered yet";
+  if (midna.push === "unknown") return "—";
+  if (midna.status?.push && !midna.status.push.configured) return "Not set up on midna";
+  return "On";
+}
+
+/** Where reminders and questions reach the user while the app is closed. */
+function whereAlertsGo(midna: Midna): string {
+  const pushes = midna.push === "on" && midna.status?.push?.configured;
+  if (pushes && midna.status?.alerts === "push") return "Reminders, questions and notifications reach you here; Telegram gets one only when a notification can't.";
+  if (pushes && midna.status?.alerts === "both") return "Reminders, questions and notifications reach you here and on Telegram.";
+  return "midna's messages reach you on Telegram while this app is closed.";
 }
 
 const s = StyleSheet.create({

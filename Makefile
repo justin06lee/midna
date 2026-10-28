@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BIN    := $(PREFIX)/bin/midna
 
-.PHONY: all build install app app-dev signing check tenet-check tenet-cargo-test update
+.PHONY: all build install app app-dev signing check tenet-check tenet-cargo-test update testflight
 
 # The golden path: the CLI on your PATH, and the desktop app built for this machine.
 all: build install app
@@ -33,6 +33,11 @@ app-dev:
 
 check:
 	bun run check
+
+# The iPhone app to TestFlight (internal testing). Needs ASC_KEY_ID and ASC_ISSUER_ID, with the key's
+# .p8 in ~/.appstoreconnect/private_keys; raise expo.ios.buildNumber in clients/mobile/app.json first.
+testflight:
+	clients/mobile/scripts/testflight.sh
 
 # The same on tenet, so this 8 GB Mac stays free: any other heavy step is scripts/tenet.sh <command>.
 tenet-check:

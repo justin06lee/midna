@@ -27,7 +27,9 @@
           }
         },
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "1",
+      "appleTeamId": "65UN46K6FA"
     },
     "plugins": [
       "expo-secure-store",
@@ -46,6 +48,12 @@
           "photosPermission": "midna sends the photos and videos you pick to your midna.",
           "cameraPermission": false,
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": false
         }
       ]
     ]

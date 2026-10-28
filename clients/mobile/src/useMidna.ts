@@ -4,6 +4,7 @@ import { Directory, File, Paths } from "expo-file-system";
 import { MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Status, type StreamEvent, type UploadInfo } from "@midna/protocol";
 import { clientFor, type PhoneConnection } from "./connection";
 import { fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
+import { clearDelivered, onTokenChange, registerForPush, type PushSetup } from "./push";
 
 export type Link = "connecting" | "live" | "lost" | "unpaired";
 
@@ -48,6 +49,24 @@ export function useMidna(connection: PhoneConnection) {
     const sub = AppState.addEventListener("change", (s) => s === "active" && kick.current());
     return () => sub.remove();
   }, []);
+
+  // Push notifications: registered now, again on each return to the foreground and when iOS changes the token.
+  const [push, setPush] = useState<PushSetup>("unknown");
+  useEffect(() => {
+    let live = true;
+    const register = () => {
+      clearDelivered();
+      void registerForPush(client).then((p) => live && setPush(p));
+    };
+    register();
+    const fg = AppState.addEventListener("change", (s) => s === "active" && register());
+    const token = onTokenChange(register);
+    return () => {
+      live = false;
+      fg.remove();
+      token.remove();
+    };
+  }, [client]);
 
   // History, then the stream from where it left off; reconnecting with backoff, or at once when the app comes back.
   useEffect(() => {
@@ -180,7 +199,7 @@ export function useMidna(connection: PhoneConnection) {
     [attachmentSource, auth],
   );
 
-  return { client, status, lines, link, thinking, send, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
+  return { client, status, push, lines, link, thinking, send, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
 }
 
 export type Midna = ReturnType<typeof useMidna>;
