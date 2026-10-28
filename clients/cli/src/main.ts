@@ -42,6 +42,9 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna mode [autonomous|ask]     show or switch the permission mode
   midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, …
     --fallback codex[,…]|none     what to think with while the brain is out of usage
+  midna alerts [telegram|both|push]
+                                  where reminders, questions and notifications go:
+                                  push to the phone, Telegram, or both (push falls back to Telegram)
   midna pair                      a one-time code for adding another device
   midna connect <url> <code>      point this machine's CLI at a midna elsewhere
   midna devices                   machines midna could live on (this one, makima, Tailscale)
@@ -171,6 +174,14 @@ function modelLines(s: Status): string[] {
 function modelReport(s: Status): string {
   const lines = modelLines(s);
   return lines.length === 1 ? s.model : lines.join("\n");
+}
+
+/** Where alerts go, and whether push can carry them. Hosts before 0.12 say nothing. */
+function alertsLine(s: Status): string {
+  if (!s.alerts) return "";
+  const phones = s.push?.phones ?? 0;
+  const push = !s.push?.configured ? "push not set up (no APNs key)" : `${phones} phone${phones === 1 ? "" : "s"} for push`;
+  return `alerts    ${s.alerts === "push" ? "push, Telegram when a push fails" : s.alerts === "both" ? "push and Telegram" : "Telegram"} · ${push}`;
 }
 
 /** Today's wakeup turns and what they cost. */
@@ -426,7 +437,7 @@ async function main(): Promise<void> {
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);
-      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  ${modelLines(s).join("\n  ")}\n  timezone  ${s.timezone}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
+      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  ${modelLines(s).join("\n  ")}\n  timezone  ${s.timezone}${alertsLine(s) ? `\n  ${alertsLine(s)}` : ""}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
     }
     case "version":
     case "--version":
@@ -453,6 +464,13 @@ async function main(): Promise<void> {
       if (!model && fallback === undefined) return console.log(modelReport(await reach(() => c.status())));
       const list = fallback === undefined || fallback === "none" ? [] : fallback.split(",").map((m) => m.trim()).filter(Boolean);
       return console.log(modelReport(await reach(() => c.updateSettings({ ...(model ? { model } : {}), ...(fallback !== undefined ? { fallback: list } : {}) }))));
+    }
+    case "alerts": {
+      const c = client();
+      const channel = rest[0];
+      if (!channel) return console.log(alertsLine(await reach(() => c.status())) || "this midna is older than 0.12: alerts go to Telegram");
+      if (channel !== "telegram" && channel !== "both" && channel !== "push") die("alerts go to `telegram`, `both` or `push`");
+      return console.log(alertsLine(await reach(() => c.updateSettings({ alerts: channel }))));
     }
     case "pair": {
       const { code, expiresAt } = await reach(() => client().pairingCode());

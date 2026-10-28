@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Mode } from "@midna/protocol";
+import type { AlertChannel, Mode } from "@midna/protocol";
 import { Attachments } from "./attachments.ts";
 import { Bus } from "./bus.ts";
 import { openDatabase } from "./db.ts";
@@ -10,6 +10,7 @@ import { Jobs } from "./jobs.ts";
 import { Log, MAIN } from "./log.ts";
 import { Memory } from "./memory.ts";
 import { Planning } from "./planning.ts";
+import { Push } from "./push.ts";
 import { Outbox, Schedule } from "./schedule.ts";
 
 export interface Settings {
@@ -28,6 +29,8 @@ export interface Settings {
   rituals: { morning: string | null; evening: string | null; weekly: string | null };
   /** "paused" stops every device's hands at once, whatever each app says. */
   hands: "on" | "paused";
+  /** Where alerts go: "telegram", "both" (push and Telegram) or "push" (Telegram only when no push got through). */
+  alerts: AlertChannel;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -39,6 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },
   hands: "on",
+  alerts: "both",
 };
 
 /** Everything midna knows, in one SQLite file. */
@@ -54,6 +58,7 @@ export class Store {
   readonly inbound: Inbound;
   readonly hands: Hands;
   readonly jobs: Jobs;
+  readonly push: Push;
 
   constructor(readonly db: Database) {
     this.planning = new Planning(db);
@@ -66,6 +71,7 @@ export class Store {
     this.inbound = new Inbound(db, this.schedule);
     this.hands = new Hands(db);
     this.jobs = new Jobs(db, this.schedule);
+    this.push = new Push(db);
   }
 
   static open(path: string): Store {

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, renameSync, writeFileSync, chmodSync } from "node:fs";
-import { APPROVAL_OPTIONS, MidnaClient, MidnaError, type Approval, type InReplyTo, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MidnaClient, MidnaError, isAlert, type Approval, type InReplyTo, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { Bot, DOWNLOAD_MAX, UPLOAD_MAX, type InlineKeyboard, type Media, type TgCallbackQuery, type TgMessage } from "./bot.ts";
 import { marker, transcribe } from "./voice.ts";
 
@@ -54,15 +54,11 @@ export function bridgeMode(value: string | undefined): BridgeMode {
 /** The line an owner gets, at most once a day, for writing to a bridge in alerts mode. */
 export const ALERTS_NOTICE = "I'm on the midna app now. Telegram is for alerts only.";
 
-/**
- * Whether alerts mode sends an outbox item to Telegram: reminders, messages
- * midna sends on its own (message_user, ask_user) and anything urgent or
- * normal. A reply to the chat (kind "message") and anything fyi stay in the app.
- */
-export function isAlert(item: Pick<OutboxItem, "kind" | "priority">): boolean {
-  if (item.priority === "fyi") return false;
-  return item.kind !== "message";
-}
+/** Whether alerts mode sends an outbox item to Telegram; the rule lives in the protocol, shared with push. */
+export { isAlert };
+
+/** How long the bridge waits on an alert's push before sending it itself. */
+export const PUSH_WAIT_MS = 12_000;
 
 /** A line of the conversation, as a Telegram message stands for it. */
 export type Line = { outbox: number } | { message: number };
@@ -335,11 +331,27 @@ export class TelegramBridge {
       if (e.state === "thinking" && this.mode === "full") this.startTyping();
       else this.stopTyping();
     } else if (e.type === "outbox") {
-      if (this.mode === "full" || isAlert(e.item)) await this.deliver(chat, e.item);
+      if ((this.mode === "full" || isAlert(e.item)) && (await this.ours(e.item))) await this.deliver(chat, e.item);
       this.state.lastSeq = e.item.seq;
       this.save();
     } else if (e.type === "approval" && e.approval.state !== "pending") {
       await this.approvalOver(chat, e.approval);
+    }
+  }
+
+  /**
+   * Whether Telegram sends this item. Alerts follow midna's alert channel:
+   * with "push", Telegram is the fallback and sends only what no push carried.
+   * Any doubt (an older host, an error) sends it: Telegram is never silenced
+   * by a push it can't see.
+   */
+  private async ours(item: OutboxItem): Promise<boolean> {
+    if (!isAlert(item)) return true;
+    try {
+      return (await this.midna.delivery(item.id, PUSH_WAIT_MS, this.abort.signal)).bridges;
+    } catch (err) {
+      if (!(err instanceof MidnaError && err.status === 404)) console.error(`delivery of outbox #${item.id} unknown (${(err as Error).message}); sending it`);
+      return true;
     }
   }
 

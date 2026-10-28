@@ -77,6 +77,45 @@ export const OutboxItem = z.object({
 });
 export type OutboxItem = z.infer<typeof OutboxItem>;
 
+/**
+ * Whether an outbox item is an alert: reminders, messages midna sends on its
+ * own (message_user, ask_user) and anything urgent or normal. A reply to the
+ * chat (kind "message") and anything fyi stay in the app. Telegram's alerts
+ * mode and push notifications carry alerts.
+ */
+export function isAlert(item: Pick<OutboxItem, "kind" | "priority">): boolean {
+  if (item.priority === "fyi") return false;
+  return item.kind !== "message";
+}
+
+/**
+ * Where alerts go. "telegram": Telegram only. "both": a push to each phone
+ * and Telegram. "push": a push, and Telegram only when no push got through
+ * (none set up, no phone registered, or Apple refused it). From 0.12.
+ */
+export const AlertChannel = z.enum(["telegram", "both", "push"]);
+export type AlertChannel = z.infer<typeof AlertChannel>;
+
+/** A phone's Apple push token, sent by the app once notifications are allowed. From 0.12. */
+export const PushRegistration = z.object({
+  /** The APNs device token, hex. */
+  token: z.string().regex(/^[0-9a-fA-F]{32,200}$/),
+  /** "production" for TestFlight and App Store builds, "development" for one run from Xcode. */
+  environment: z.enum(["production", "development"]),
+});
+export type PushRegistration = z.infer<typeof PushRegistration>;
+
+/** What became of an alert's push: "pending" while Apple hasn't answered, "none" when nothing was tried. */
+export type PushState = "pending" | "sent" | "failed" | "none";
+
+/** How an outbox item is being delivered, for a bridge deciding whether it should send it too. From 0.12. */
+export interface Delivery {
+  channel: AlertChannel;
+  push: PushState;
+  /** Whether bridges (Telegram) deliver it: always for "telegram" and "both", for "push" only when its push failed. */
+  bridges: boolean;
+}
+
 /** Live events on GET /v1/events. Only `outbox` events carry a replay id. */
 export type StreamEvent =
   | { type: "outbox"; item: OutboxItem }
@@ -278,6 +317,10 @@ export interface Status {
   activeModel?: string;
   /** Providers out of usage, and when each resets (epoch ms). From 0.12. */
   caps?: Record<string, number>;
+  /** Where alerts go. From 0.12. */
+  alerts?: AlertChannel;
+  /** Push notifications: whether the host has an APNs key, and how many phones are registered. From 0.12. */
+  push?: { configured: boolean; phones: number };
 }
 
 /** What started a turn: a chat, or a wakeup — midna's own follow-up, an event from another program, a job's end, a ritual. */
@@ -314,6 +357,8 @@ export const SettingsPatch = z.object({
   quietHours: z.object({ start: z.string(), end: z.string() }).nullable().optional(),
   /** "paused" stops every device's hands at once, whatever each app says. */
   hands: z.enum(["on", "paused"]).optional(),
+  /** Where alerts go: Telegram, push and Telegram, or push with Telegram as its fallback. */
+  alerts: AlertChannel.optional(),
 });
 export type SettingsPatch = z.infer<typeof SettingsPatch>;
 
@@ -466,6 +511,21 @@ export class MidnaClient {
   /** Released outbox items after stream position `since`. */
   outbox(since = 0): Promise<OutboxItem[]> {
     return this.call("GET", `/v1/outbox?since=${since}`);
+  }
+  /**
+   * How an outbox item is being delivered. While its push waits on Apple, the
+   * daemon holds the answer up to `waitMs` (at most 15 s). From 0.12.
+   */
+  delivery(outboxId: number, waitMs = 0, signal?: AbortSignal): Promise<Delivery> {
+    return this.call("GET", `/v1/outbox/${outboxId}/delivery?wait=${waitMs}`, undefined, signal);
+  }
+  /** Register this phone for push notifications; again whenever the token may have changed. From 0.12. */
+  registerPush(reg: PushRegistration): Promise<{ ok: true }> {
+    return this.call("POST", "/v1/push", reg);
+  }
+  /** Stop push notifications to this token. */
+  unregisterPush(token: string): Promise<{ ok: true }> {
+    return this.call("DELETE", `/v1/push/${encodeURIComponent(token)}`);
   }
   overview(signal?: AbortSignal): Promise<Overview> {
     return this.call("GET", "/v1/overview", undefined, signal);

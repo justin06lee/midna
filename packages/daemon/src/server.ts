@@ -13,12 +13,14 @@ import {
   MAX_ATTACHMENT_BYTES,
   MAX_EVENT_DATA_BYTES,
   PairRequest,
+  PushRegistration,
   SendEvent,
   SendMessage,
   SettingsPatch,
   SERVICE,
   type BridgeInfo,
   type BridgeSetupResult,
+  type Delivery,
   type HandsStreamEvent,
   type Health,
   type MessageReceipt,
@@ -28,6 +30,7 @@ import {
 } from "@midna/protocol";
 import { answerIn } from "./approvals.ts";
 import type { HandsHub } from "./hands.ts";
+import type { PushSender } from "./push.ts";
 import { VERSION } from "./version.ts";
 
 export interface ServerDeps {
@@ -47,6 +50,8 @@ export interface ServerDeps {
   jobs?: JobsHandle;
   /** midna's working directory, where its tools put files for the brain. */
   workspace: string;
+  /** Push notifications to the iPhone app. */
+  push?: PushSender;
 }
 
 type Env = { Variables: { device: Device } };
@@ -146,6 +151,8 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       fallback: s.fallback,
       activeModel: assistant.activeModel() ?? s.model,
       caps: assistant.caps(),
+      alerts: s.alerts,
+      push: { configured: deps.push?.configured ?? false, phones: deps.push?.phones() ?? 0 },
     };
   };
 
@@ -382,6 +389,28 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   });
 
   app.get("/v1/outbox", (c) => c.json(store.outbox.since(Number(c.req.query("since") ?? 0))));
+
+  /** Whether a bridge sends an outbox item too: under alerts "push", only what no push carried. */
+  app.get("/v1/outbox/:id/delivery", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.json({ error: "an outbox id is a positive whole number" }, 400);
+    if (!deps.push) return c.json({ channel: store.settings().alerts, push: "none", bridges: true } satisfies Delivery);
+    return c.json(await deps.push.delivery(id, Math.max(0, Number(c.req.query("wait") ?? 0) || 0)));
+  });
+
+  /** A phone's Apple push token, kept with the pairing that sent it. */
+  app.post("/v1/push", async (c) => {
+    if (c.get("device").kind === "host") return c.json({ error: "push notifications go to the user's phone, not to midna's host" }, 403);
+    const reg = PushRegistration.safeParse(await c.req.json().catch(() => null));
+    if (!reg.success) return c.json({ error: reg.error.message }, 400);
+    store.push.register(c.get("device").id, reg.data);
+    console.log(`[midna] push: ${c.get("device").name} registered for notifications (${reg.data.environment})`);
+    return c.json({ ok: true });
+  });
+  app.delete("/v1/push/:token", (c) => {
+    if (!store.push.unregister(c.req.param("token"), c.get("device").id)) return c.json({ error: "this device has no such push token" }, 404);
+    return c.json({ ok: true });
+  });
 
   /** A read-only snapshot for dashboards: objectives, today, what's open. */
   app.get("/v1/overview", (c) => {

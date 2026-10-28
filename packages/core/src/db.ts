@@ -422,6 +422,25 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE wakeups ADD COLUMN joined_to INTEGER REFERENCES wakeups(id);
   `,
+  // Push notifications: each phone's Apple push token, kept with the pairing
+  // that sent it, and what became of each alert's push, so a bridge sends what
+  // no push carried.
+  `
+  CREATE TABLE push_tokens (
+    token TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    environment TEXT NOT NULL CHECK (environment IN ('production','development')),
+    created_at INTEGER NOT NULL,
+    last_ok_at INTEGER,
+    last_error TEXT
+  );
+  CREATE TABLE push_sends (
+    outbox_id INTEGER PRIMARY KEY REFERENCES outbox(id),
+    state TEXT NOT NULL CHECK (state IN ('pending','sent','failed','none')),
+    detail TEXT,
+    at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Database {

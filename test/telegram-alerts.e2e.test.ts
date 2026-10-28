@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,6 +60,9 @@ class FakeTelegram {
 }
 
 const OWNER = 42;
+/** What the stand-in Apple answers each push, and how many it got. */
+let apple = 200;
+let pushes = 0;
 const brain: Brain = async () => ({ text: "", sessionId: "s" });
 const quiet = async () => void (await Bun.sleep(400));
 
@@ -87,7 +91,17 @@ beforeAll(async () => {
   tg = new FakeTelegram();
   process.env.TELEGRAM_API = tg.url;
   home = mkdtempSync(join(tmpdir(), "midna-tga-"));
-  daemon = await startDaemon({ home, port: 17000 + Math.floor(Math.random() * 20000), brain, tickMs: 50, introDelayMs: 0 });
+  // Push is set up but no phone registers until the alert channel tests: Telegram is unchanged before them.
+  writeFileSync(join(home, "AuthKey_K1.p8"), generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey.export({ type: "pkcs8", format: "pem" }));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ push: { apns: { keyId: "K1", teamId: "T1" } } }));
+  daemon = await startDaemon({
+    home,
+    port: 17000 + Math.floor(Math.random() * 20000),
+    brain,
+    tickMs: 50,
+    introDelayMs: 0,
+    apnsTransport: async () => (pushes++, { status: apple }),
+  });
   daemon.store.updateSettings({ quietHours: null });
   host = new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim());
   file = join(home, "telegram.json");
@@ -210,5 +224,35 @@ describe("bridge mode", () => {
     tg.say(OWNER, { text: "hello in full" });
     await quiet();
     expect(tg.texts()).not.toContain(ALERTS_NOTICE);
+  });
+});
+
+describe("alert channel", () => {
+  test("under \"push\", Telegram sends only alerts no push carried, and still every chat reply", async () => {
+    const phone = await new MidnaClient(daemon.url).pair({ code: (await host.pairingCode()).code, deviceName: "iPhone", kind: "mobile" });
+    await new MidnaClient(daemon.url, phone.token).registerPush({ token: "cd".repeat(32), environment: "production" });
+    await host.updateSettings({ alerts: "push" });
+    tg.sent.length = 0;
+    pushes = 0;
+    say("notification", "carried by push", "normal");
+    say("message", "a chat reply under push", "normal", "chat");
+    await until("the chat reply", () => tg.texts().some((t) => t.includes("a chat reply under push")));
+    await quiet();
+    expect(pushes).toBe(1);
+    expect(tg.texts().some((t) => t.includes("carried by push"))).toBe(false);
+
+    apple = 500;
+    say("question", "Apple refused this one", "urgent", "question", ["Yes", "No"]);
+    await until("the fallback", () => tg.texts().some((t) => t.includes("Apple refused this one")));
+    expect(pushes).toBe(2);
+  });
+
+  test("under \"both\", Telegram sends what a push carried too", async () => {
+    apple = 200;
+    await host.updateSettings({ alerts: "both" });
+    tg.sent.length = 0;
+    say("notification", "on both", "normal");
+    await until("Telegram's copy", () => tg.texts().some((t) => t.includes("on both")));
+    expect(pushes).toBe(3);
   });
 });

@@ -6,6 +6,7 @@ import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
+import { PushSender, loadApns, type ApnsTransport } from "./push.ts";
 import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
 import { HandsHub } from "./hands.ts";
 import { JobRunner } from "./jobs.ts";
@@ -38,6 +39,8 @@ export interface DaemonOptions {
   handsGraceMs?: number;
   /** How jobs are launched, and how often they're looked at; tests set both. */
   jobs?: { launcher?: "systemd" | "setsid"; pollMs?: number; claudeBin?: string | null; codexBin?: string | null };
+  /** Stands in for Apple's push service in tests. */
+  apnsTransport?: ApnsTransport;
   /** Try the brain once at startup (a tiny real turn). Off by default when a brain is injected. */
   checkBrainOnStart?: boolean;
   /**
@@ -116,8 +119,13 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     ...(opts.coalesceMs !== undefined ? { coalesceMs: opts.coalesceMs } : {}),
   });
 
+  // Alerts go to each registered phone as they are released, beside the event stream.
+  const push = new PushSender({ store, apns: loadApns(config.push?.apns, home), ...(opts.apnsTransport ? { transport: opts.apnsTransport } : {}) });
+  const unpush = store.bus.on((e) => e.type === "outbox" && push.onOutbox(e.item));
+
   const bridges = new Bridges({ MIDNA_URL: base });
   const app = createApp({
+    push,
     store,
     assistant,
     hands,
@@ -226,6 +234,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   console.log(`  timezone  ${s.timezone}`);
   if (recovered) console.log(`  recovered ${recovered} interrupted wakeup(s)`);
   if (stillRunning) console.log(`  jobs      ${stillRunning} still running`);
+  if (push.configured) console.log(`  push      ${s.alerts === "telegram" ? "off (alerts go to Telegram)" : `${push.phones()} phone(s), alerts: ${s.alerts}`}`);
   if (Object.keys(config.bridges).length) console.log(`  bridges   ${Object.entries(config.bridges).filter(([, b]) => b.enabled).map(([n]) => n).join(", ") || "none enabled"}`);
 
   return {
@@ -241,6 +250,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       clearInterval(bindTimer);
       for (const s of extra.values()) s.stop(true);
       bridges.stopAll();
+      unpush();
+      push.close();
       hands.shutdown();
       await assistant.shutdown();
       server.stop(true);
