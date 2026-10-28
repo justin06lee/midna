@@ -21,14 +21,22 @@ export const PUSH_STALE_MS = 60_000;
 export class Push {
   constructor(private readonly db: Database) {}
 
-  /** Keep a phone's token, moving it to this pairing if another had it. */
-  register(deviceId: string, reg: PushRegistration, now = Date.now()): void {
+  /**
+   * Keep a phone's token, moving it to this pairing if another had it. False
+   * when it was kept just so already (a phone saying it again): nothing is
+   * written. One Apple refused is written again, which clears that.
+   */
+  register(deviceId: string, reg: PushRegistration, now = Date.now()): boolean {
+    const token = reg.token.toLowerCase();
+    const had = this.db.query("SELECT device_id, environment, last_error FROM push_tokens WHERE token = $token").get({ token }) as Pick<PushToken, "device_id" | "environment" | "last_error"> | null;
+    if (had && had.device_id === deviceId && had.environment === reg.environment && had.last_error === null) return false;
     this.db
       .query(
         `INSERT INTO push_tokens (token, device_id, environment, created_at) VALUES ($token, $device, $env, $now)
          ON CONFLICT(token) DO UPDATE SET device_id = $device, environment = $env, last_error = NULL`,
       )
-      .run({ token: reg.token.toLowerCase(), device: deviceId, env: reg.environment, now });
+      .run({ token, device: deviceId, env: reg.environment, now });
+    return true;
   }
 
   unregister(token: string, deviceId?: string): boolean {

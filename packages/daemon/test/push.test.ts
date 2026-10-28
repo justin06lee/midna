@@ -103,6 +103,16 @@ describe("registration", () => {
     expect(s.push).toEqual({ configured: true, phones: 1 });
     expect(s.alerts).toBe("both");
   });
+
+  test("the same token again from the same phone writes nothing; another environment does", async () => {
+    const other = "cd".repeat(32);
+    expect(daemon.store.push.register(phoneId, { token: other, environment: "production" })).toBe(true);
+    expect(daemon.store.push.register(phoneId, { token: other.toUpperCase(), environment: "production" })).toBe(false);
+    expect(daemon.store.push.register(phoneId, { token: other, environment: "development" })).toBe(true);
+    // Through the API it's still ok, as many times as a phone says it.
+    for (let i = 0; i < 3; i++) expect(await phone.registerPush({ token: other, environment: "development" })).toEqual({ ok: true });
+    daemon.store.push.unregister(other);
+  });
 });
 
 describe("alerts", () => {

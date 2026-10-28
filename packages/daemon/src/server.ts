@@ -403,8 +403,8 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     if (c.get("device").kind === "host") return c.json({ error: "push notifications go to the user's phone, not to midna's host" }, 403);
     const reg = PushRegistration.safeParse(await c.req.json().catch(() => null));
     if (!reg.success) return c.json({ error: reg.error.message }, 400);
-    store.push.register(c.get("device").id, reg.data);
-    console.log(`[midna] push: ${c.get("device").name} registered for notifications (${reg.data.environment})`);
+    // The same token again changes nothing and says nothing: a phone in a loop once logged it thousands of times a minute.
+    if (store.push.register(c.get("device").id, reg.data)) console.log(`[midna] push: ${c.get("device").name} registered for notifications (${reg.data.environment})`);
     return c.json({ ok: true });
   });
   app.delete("/v1/push/:token", (c) => {
