@@ -216,7 +216,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
             testID="chat-input"
             value={text.value}
             onChangeText={text.set}
-            placeholder={canSend ? "Message midna" : "Message midna (sends once it's back)"}
+            placeholder={midna.link === "live" ? "Message midna" : "Message midna (sends once it's back)"}
             placeholderTextColor={t.dimmer}
             multiline
             style={[s.input, { color: t.ink, backgroundColor: t.panel, borderColor: t.line2 }]}

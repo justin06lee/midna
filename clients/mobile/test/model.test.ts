@@ -62,3 +62,15 @@ test("an echo settles a line sent here as sent, even one that had failed; the sa
     ["m:9", "sent"],
   ]);
 });
+
+test("history after a reconnect settles only what midna has: the same words said twice, the second lost, stay unsent", () => {
+  const now = Date.now();
+  // The first "ok" went through (its 202 made it m:7); the second didn't, and waits to go again.
+  const first: Line = { key: "m:7", role: "user", text: "ok", client: "mobile", at: now, messageId: 7, pending: false, state: "sent", attachments: [] };
+  const second: Line = { key: "p:2", role: "user", text: "ok", client: "mobile", at: now + 1000, pending: true, state: "failed", attachments: [] };
+  const history: Line = { key: "m:7", role: "user", text: "ok", client: "mobile", at: now + 50, messageId: 7, attachments: [] };
+  expect(mergeLines([first, second], [history]).map((l) => [l.key, l.state])).toEqual([
+    ["m:7", "sent"],
+    ["p:2", "failed"],
+  ]);
+});

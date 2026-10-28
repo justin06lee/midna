@@ -5,7 +5,7 @@ import * as Network from "expo-network";
 import { MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Status, type StreamEvent, type UploadInfo } from "@midna/protocol";
 import { clientFor, type PhoneConnection } from "./connection";
 import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
-import { fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
+import { ECHO_WINDOW_MS, fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
 import { clearDelivered, onTokenChange, registerForPush, type PushSetup } from "./push";
 
 export type Link = "connecting" | "live" | "lost" | "unpaired";
@@ -21,6 +21,12 @@ const STREAM_IDLE_MS = 40_000;
  */
 const STATUS_TIMEOUT_MS = 10_000;
 const SEND_TIMEOUT_MS = 15_000;
+
+/** A reconnect this quick goes unremarked; a slower one shows "connecting…". */
+const QUIET_RECONNECT_MS = 2_000;
+
+/** How many times a line that didn't get through goes again by itself, each after a reconnect; then it waits for a tap. */
+const AUTO_RESENDS = 3;
 
 /** What of a line this phone sent must outlive the app until midna has it. */
 type Outgoing = Pick<Line, "key" | "text" | "at" | "attachments" | "replyTo">;
@@ -47,6 +53,11 @@ export function useMidna(connection: PhoneConnection) {
   const [approvals, setApprovals] = useState<Map<string, Approval>>(new Map());
   const pending = useRef(0);
   const kick = useRef<() => void>(() => {});
+  /** Bumped each time a (re)connect has caught up from history: what's still unsent then goes again. */
+  const [caughtUp, setCaughtUp] = useState(0);
+  const latest = useRef(lines);
+  latest.current = lines;
+  const resends = useRef(new Map<string, number>());
 
   const merge = useCallback((incoming: Line[], where: "append" | "prepend" = "append") => setLines((cur) => byTime(mergeLines(cur, incoming, where))), []);
   const noteApproval = useCallback((a: Approval) => setApprovals((cur) => new Map(cur).set(a.id, a)), []);
@@ -138,6 +149,8 @@ export function useMidna(connection: PhoneConnection) {
         attempt = new AbortController();
         const stop = () => attempt.abort();
         abort.signal.addEventListener("abort", stop, { once: true });
+        // Back from the background the link reads live until this attempt says otherwise; if it takes a while, say so.
+        const slow = setTimeout(() => setLink((l) => (l === "live" ? "connecting" : l)), QUIET_RECONNECT_MS);
         try {
           // Every step can be cut short: coming back to the foreground or onto another network aborts this attempt.
           const s = await client.status(attempt.signal, STATUS_TIMEOUT_MS);
@@ -149,7 +162,10 @@ export function useMidna(connection: PhoneConnection) {
           merge(history.map(fromHistory));
           setOlderExhausted((done) => done || history.length < 60);
           void loadApprovals();
+          clearTimeout(slow);
           setLink("live");
+          // Caught up: lines midna already has are settled by that history, so only the rest go again.
+          setCaughtUp((n) => n + 1);
           backoff = 1_000;
           for await (const e of client.events(since, attempt.signal, STREAM_IDLE_MS)) {
             if (e.type === "outbox") since = e.item.seq;
@@ -159,6 +175,7 @@ export function useMidna(connection: PhoneConnection) {
           if (abort.signal.aborted) return;
           if (err instanceof MidnaError && err.status === 401) return setLink("unpaired");
         } finally {
+          clearTimeout(slow);
           abort.signal.removeEventListener("abort", stop);
         }
         if (abort.signal.aborted) return;
@@ -225,10 +242,13 @@ export function useMidna(connection: PhoneConnection) {
         setLines((cur) => cur.map((l) => (l.key !== key ? l : id ? { ...l, key: `m:${id}`, messageId: id, pending: false, state: "sent" } : { ...l, state: "sent" })));
         return null;
       } catch (err) {
-        setLines((cur) => cur.map((l) => (l.key === key ? { ...l, state: "failed" } : replyTo && l.outboxId === replyTo ? { ...l, answered: false } : l)));
+        const refused = err instanceof MidnaError && err.status >= 400;
+        setLines((cur) => cur.map((l) => (l.key === key ? { ...l, state: "failed", refused } : replyTo && l.outboxId === replyTo ? { ...l, answered: false } : l)));
+        // It didn't get through: the connection is likely dead too, so reconnect now; once caught up, it goes again by itself.
+        if (!refused) kick.current();
         const gone = err instanceof MidnaError && /^no attachment (\S+)/.exec(err.message)?.[1];
         if (gone) return "A file in it had expired on midna's side, so it can't go as it is. Add the file again in a new message.";
-        return err instanceof MidnaError && err.status >= 400 ? `Not sent: ${err.message}` : null;
+        return refused ? `Not sent: ${err.message}` : null;
       }
     },
     [client],
@@ -236,6 +256,18 @@ export function useMidna(connection: PhoneConnection) {
 
   /** A line that wasn't sent, sent again as it was. */
   const retry = useCallback((l: Line) => send(l.text, l.replyTo, l.attachments, l), [send]);
+
+  // Each time the app has caught up, what didn't get through goes again by itself: recent lines, not ones midna
+  // refused, a few times at most. Older ones (kept from long ago, across a restart) wait for a tap.
+  useEffect(() => {
+    if (!caughtUp) return;
+    for (const l of latest.current) {
+      const tries = resends.current.get(l.key) ?? 0;
+      if (l.state !== "failed" || l.refused || Date.now() - l.at > ECHO_WINDOW_MS || tries >= AUTO_RESENDS) continue;
+      resends.current.set(l.key, tries + 1);
+      void retry(l);
+    }
+  }, [caughtUp, retry]);
 
   /** Put a file from this phone on the host, to send with a message. */
   const upload = useCallback(async (uri: string, info: UploadInfo) => client.upload(new Uint8Array(await new File(uri).arrayBuffer()), info), [client]);

@@ -26,6 +26,8 @@ export interface Line {
   pending?: boolean;
   /** A line this phone sent: on its way, taken by midna (✓), or not sent (tap to retry). */
   state?: "sending" | "sent" | "failed";
+  /** midna said no to it (a 4xx): sent again as it is, it would be refused again, so only a tap resends it. */
+  refused?: boolean;
   /** The question it answers, kept for a retry. */
   replyTo?: number;
 }
