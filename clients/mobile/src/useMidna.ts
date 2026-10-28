@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { Directory, File, Paths } from "expo-file-system";
+import * as Network from "expo-network";
 import { MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Status, type StreamEvent, type UploadInfo } from "@midna/protocol";
 import { clientFor, type PhoneConnection } from "./connection";
+import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
 import { fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
 import { clearDelivered, onTokenChange, registerForPush, type PushSetup } from "./push";
 
 export type Link = "connecting" | "live" | "lost" | "unpaired";
+
+/** Silence on the event stream this long means the connection is dead; midna writes a keepalive every 25 s. */
+const STREAM_IDLE_MS = 40_000;
+
+/** What of a line this phone sent must outlive the app until midna has it. */
+type Outgoing = Pick<Line, "key" | "text" | "at" | "attachments" | "replyTo">;
 
 /** Newest last; a line still sending sits where it was typed. */
 const byTime = (lines: Line[]) => [...lines].sort((a, b) => a.at - b.at);
@@ -45,10 +53,28 @@ export function useMidna(connection: PhoneConnection) {
     });
   }, [client]);
 
+  // Back in the foreground, or on another network (Wi-Fi to cellular, a VPN up or down): reconnect now, not when the old connection times out.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (s) => s === "active" && kick.current());
-    return () => sub.remove();
+    let was: string | null = null;
+    const net = Network.addNetworkStateListener((n) => {
+      const now = `${n.type}:${n.isConnected}`;
+      if (was !== null && now !== was && n.isConnected) kick.current();
+      was = now;
+    });
+    return () => {
+      sub.remove();
+      net.remove();
+    };
   }, []);
+
+  // What this phone said that midna hasn't taken yet survives the app being closed: back as "not sent", to retry.
+  const outgoingKey = `${draftKey(connection)}:outgoing`;
+  useEffect(() => {
+    const out: Outgoing[] = lines.filter((l) => l.pending && l.state !== "sent").map(({ key, text, at, attachments, replyTo }) => ({ key, text, at, attachments, ...(replyTo ? { replyTo } : {}) }));
+    if (out.length) saveDraft(outgoingKey, out);
+    else dropDraft(outgoingKey);
+  }, [lines, outgoingKey]);
 
   // Push notifications: registered now, again on each return to the foreground and when iOS changes the token.
   const [push, setPush] = useState<PushSetup>("unknown");
@@ -77,7 +103,8 @@ export function useMidna(connection: PhoneConnection) {
       attempt.abort();
       wakeUp?.();
     };
-    setLines([]);
+    const unsent = loadDraft<Outgoing[]>(outgoingKey) ?? [];
+    setLines(unsent.map((o) => ({ ...o, role: "user" as const, client: "mobile", pending: true, state: "failed" as const })));
     setApprovals(new Map());
     setOlderExhausted(false);
     setLink("connecting");
@@ -99,18 +126,19 @@ export function useMidna(connection: PhoneConnection) {
         const stop = () => attempt.abort();
         abort.signal.addEventListener("abort", stop, { once: true });
         try {
-          const s = await client.status();
+          // Every step can be cut short: coming back to the foreground or onto another network aborts this attempt.
+          const s = await client.status(attempt.signal);
           setStatus(s);
           // The first time from where midna is now; after, from the last line seen, so nothing is missed.
           if (since === null) since = s.outboxSeq;
           // Whatever was said while away — from the other clients too, which the stream doesn't replay.
-          const history = await client.history({ limit: 60 });
+          const history = await client.history({ limit: 60 }, attempt.signal);
           merge(history.map(fromHistory));
           setOlderExhausted((done) => done || history.length < 60);
           void loadApprovals();
           setLink("live");
           backoff = 1_000;
-          for await (const e of client.events(since, attempt.signal)) {
+          for await (const e of client.events(since, attempt.signal, STREAM_IDLE_MS)) {
             if (e.type === "outbox") since = e.item.seq;
             onEvent(e);
           }
@@ -136,7 +164,7 @@ export function useMidna(connection: PhoneConnection) {
       }
     })();
     return () => abort.abort();
-  }, [client, merge, noteApproval, loadApprovals]);
+  }, [client, merge, noteApproval, loadApprovals, outgoingKey]);
 
   /** Answer an approval (Face ID first — the caller's job). When it's already over, say how, unless the stream already has. */
   const answerApproval = useCallback(
@@ -163,21 +191,36 @@ export function useMidna(connection: PhoneConnection) {
     merge(page.map(fromHistory), "prepend");
   }, [client, lines, merge, olderExhausted]);
 
-  /** Say something, with files uploaded first; a reply to a question names it. */
+  /**
+   * Say something, with files uploaded first; a reply to a question names it.
+   * The line shows at once as sending, then sent (✓) once midna has taken it,
+   * or not sent, to tap and retry; it never waits on the event stream. What
+   * goes wrong comes back as a sentence, for the composer to show.
+   */
   const send = useCallback(
-    async (text: string, replyTo?: number, attachments: Attachment[] = []) => {
-      const key = `p:${++pending.current}`;
-      merge([{ key, role: "user", text, client: "mobile", at: Date.now(), pending: true, attachments }]);
+    async (text: string, replyTo?: number, attachments: Attachment[] = [], retry?: Line): Promise<string | null> => {
+      const key = retry?.key ?? `p:${Date.now()}-${++pending.current}`;
+      const line: Line = { key, role: "user", text, client: "mobile", at: retry?.at ?? Date.now(), pending: true, state: "sending", attachments, ...(replyTo ? { replyTo } : {}) };
+      setLines((cur) => byTime(mergeLines(cur.filter((l) => l.key !== key), [line])));
       if (replyTo) setLines((cur) => cur.map((l) => (l.outboxId === replyTo ? { ...l, answered: true } : l)));
       try {
-        await client.send({ text, client: "mobile", ...(replyTo ? { replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((a) => a.id) } : {}) });
+        const r = await client.send({ text, client: "mobile", ...(replyTo ? { replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((a) => a.id) } : {}) });
+        // Taken: the line becomes the message it is, which its echo and history then update in place.
+        // A host that names no message id (before 0.6) leaves it pending, for its echo to settle.
+        const id = r.messageId;
+        setLines((cur) => cur.map((l) => (l.key !== key ? l : id ? { ...l, key: `m:${id}`, messageId: id, pending: false, state: "sent" } : { ...l, state: "sent" })));
+        return null;
       } catch (err) {
-        setLines((cur) => cur.filter((l) => l.key !== key).map((l) => (replyTo && l.outboxId === replyTo ? { ...l, answered: false } : l)));
-        throw err;
+        setLines((cur) => cur.map((l) => (l.key === key ? { ...l, state: "failed" } : replyTo && l.outboxId === replyTo ? { ...l, answered: false } : l)));
+        const gone = err instanceof MidnaError && /^no attachment (\S+)/.exec(err.message)?.[1];
+        return gone ? "A file had expired on midna's side. Remove it and add it again, then retry." : `Not sent: ${(err as Error).message}`;
       }
     },
-    [client, merge],
+    [client],
   );
+
+  /** A line that wasn't sent, sent again as it was. */
+  const retry = useCallback((l: Line) => send(l.text, l.replyTo, l.attachments, l), [send]);
 
   /** Put a file from this phone on the host, to send with a message. */
   const upload = useCallback(async (uri: string, info: UploadInfo) => client.upload(new Uint8Array(await new File(uri).arrayBuffer()), info), [client]);
@@ -199,7 +242,7 @@ export function useMidna(connection: PhoneConnection) {
     [attachmentSource, auth],
   );
 
-  return { client, status, push, lines, link, thinking, send, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
+  return { client, status, push, lines, link, thinking, send, retry, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
 }
 
 export type Midna = ReturnType<typeof useMidna>;

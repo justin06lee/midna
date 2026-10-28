@@ -48,3 +48,17 @@ test("how an approval ended, in words", () => {
   expect(approvalOutcome({ ...a, state: "denied", answer: "deny" })).toBe("Denied by iPhone (mobile)");
   expect(approvalOutcome({ ...a, state: "expired", answeredBy: null })).toBe("No answer in time, so no");
 });
+
+test("an echo settles a line sent here as sent, even one that had failed; the same words said long before don't", () => {
+  const now = Date.now();
+  const sending: Line = { key: "p:1", role: "user", text: "ok", client: "mobile", at: now, pending: true, state: "failed", attachments: [] };
+  const old: Line = { key: "m:5", role: "user", text: "ok", client: "mobile", at: now - 2 * 3600_000, messageId: 5, attachments: [] };
+  const kept = mergeLines([sending], [old], "prepend");
+  expect(kept.map((l) => l.key)).toEqual(["m:5", "p:1"]);
+  expect(kept[1]!.state).toBe("failed");
+  const echoed = mergeLines(kept, [{ key: "m:9", role: "user", text: "ok", client: "mobile", at: now + 400, messageId: 9, attachments: [] }]);
+  expect(echoed.map((l) => [l.key, l.state])).toEqual([
+    ["m:5", undefined],
+    ["m:9", "sent"],
+  ]);
+});

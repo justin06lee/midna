@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, t
 import { ActionSheetIOS, ActivityIndicator, Animated, AppState, Dimensions, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, MidnaError, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
 import { Attachments, Thumb } from "../attachments";
 import { keyboardLift } from "../keyboard";
 import type { PhoneConnection } from "../connection";
@@ -87,32 +87,25 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
     [key],
   );
   const [uploading, setUploading] = useState<Uploading[]>([]);
-  const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState("");
   const root = useRef<Measurable>(null);
   const lift = useKeyboardLift(root);
 
   const byOutbox = useMemo(() => new Map([...midna.approvals.values()].flatMap((a) => (a.outboxId === null ? [] : [[a.outboxId, a] as const]))), [midna.approvals]);
   const data = useMemo(() => [...midna.lines].reverse(), [midna.lines]);
-  const canSend = midna.link === "live";
+  // Sending never waits on the connection: a line that can't go now says so, and is retried with a tap.
+  const canSend = midna.link !== "unpaired";
 
   const submit = async () => {
     const value = text.value.trim();
-    if ((!value && !files.length) || sending || uploading.length) return;
-    setSending(true);
+    if ((!value && !files.length) || uploading.length) return;
     setProblem("");
-    try {
-      await midna.send(value, undefined, files);
-      text.clear();
-      setFiles(() => []);
-    } catch (err) {
-      // An upload unsent for a day is gone from the host: drop it, keep the rest.
-      const gone = err instanceof MidnaError && /^no attachment (\S+)/.exec(err.message)?.[1];
-      if (gone) setFiles((cur) => cur.filter((f) => f.id !== gone));
-      setProblem(gone ? "A file had expired on midna's side, so it was taken off. Add it again if you still want it; your message is kept." : `Couldn't send that; it's kept here. ${(err as Error).message}`);
-    } finally {
-      setSending(false);
-    }
+    // The line takes the words now (kept until midna has them, across a restart too), so the composer is free at once.
+    const sent = files;
+    text.clear();
+    setFiles(() => []);
+    const problem = await midna.send(value, undefined, sent);
+    if (problem) setProblem(problem);
   };
 
   const add = async (picked: Array<{ uri: string; name: string; mime: string }>) => {
@@ -167,6 +160,8 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
         keyboardShouldPersistTaps="handled"
         onEndReached={() => void midna.loadOlder().catch(() => {})}
         onEndReachedThreshold={0.4}
+        // Inverted, so the header sits at the bottom, under the newest line: a quiet word while the app isn't live.
+        ListHeaderComponent={midna.link === "connecting" || midna.link === "lost" ? <Text style={[s.connecting, { color: t.dimmer }]}>connecting…</Text> : undefined}
         renderItem={({ item }) => (
           <LineView
             line={item}
@@ -176,7 +171,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
             onAnswer={(option) => {
               if (item.outboxId === undefined) return;
               setProblem("");
-              midna.send(option, item.outboxId).catch((err) => setProblem(`Couldn't answer: ${(err as Error).message}`));
+              void midna.send(option, item.outboxId).then((p) => p && setProblem(p));
             }}
             onOpenApprovals={onOpenApprovals}
           />
@@ -214,28 +209,27 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
           </View>
         )}
         <View style={s.row}>
-          <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" onPress={attach} disabled={sending} style={({ pressed }) => [s.round, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.6 : 1 }]}>
+          <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.6 : 1 }]}>
             <Text style={[s.plus, { color: t.ink }]}>+</Text>
           </Pressable>
           <TextInput
             testID="chat-input"
             value={text.value}
             onChangeText={text.set}
-            editable={!sending}
             placeholder={canSend ? "Message midna" : "Message midna (sends once it's back)"}
             placeholderTextColor={t.dimmer}
             multiline
-            style={[s.input, { color: t.ink, backgroundColor: t.panel, borderColor: t.line2, opacity: sending ? 0.6 : 1 }]}
+            style={[s.input, { color: t.ink, backgroundColor: t.panel, borderColor: t.line2 }]}
           />
           <Pressable
             testID="chat-send"
             accessibilityRole="button"
             accessibilityLabel="Send"
             onPress={() => void submit()}
-            disabled={!canSend || sending || uploading.length > 0 || (!text.value.trim() && !files.length)}
+            disabled={!canSend || uploading.length > 0 || (!text.value.trim() && !files.length)}
             style={({ pressed }) => [s.round, s.send, { backgroundColor: t.primary, opacity: !canSend || (!text.value.trim() && !files.length) || uploading.length ? 0.35 : pressed ? 0.7 : 1 }]}
           >
-            {sending ? <ActivityIndicator size="small" color={t.primaryInk} /> : <Text style={[s.arrow, { color: t.primaryInk }]}>↑</Text>}
+            <Text style={[s.arrow, { color: t.primaryInk }]}>↑</Text>
           </Pressable>
         </View>
       </View>
@@ -264,16 +258,22 @@ function LineView({
       <View style={s.user}>
         {l.attachments.length > 0 && <Attachments items={l.attachments} align="end" source={midna.attachmentSource} fetchAttachment={midna.fetchAttachment} />}
         {l.text ? (
-          <View style={[s.bubble, { backgroundColor: t.primary, opacity: l.pending ? 0.6 : 1 }]}>
-            <Text selectable style={[s.userText, { color: t.primaryInk }]}>
+          <Pressable disabled={l.state !== "failed"} onPress={() => void midna.retry(l)} style={[s.bubble, { backgroundColor: t.primary, opacity: l.state === "sending" || l.state === "failed" ? 0.6 : 1 }]}>
+            <Text selectable={l.state !== "failed"} style={[s.userText, { color: t.primaryInk }]}>
               {l.text}
             </Text>
-          </View>
+          </Pressable>
         ) : null}
-        <Text style={[s.meta, { color: t.dimmer }]}>
-          {l.pending ? "sending…" : time(l.at)}
-          {l.client && l.client !== "mobile" ? ` · via ${l.client}` : ""}
-        </Text>
+        {l.state === "failed" ? (
+          <Text onPress={() => void midna.retry(l)} style={[s.meta, { color: t.danger }]}>
+            Not sent · Tap to retry
+          </Text>
+        ) : (
+          <Text style={[s.meta, { color: t.dimmer }]}>
+            {l.state === "sending" ? "sending…" : `${time(l.at)}${l.state === "sent" ? " ✓" : ""}`}
+            {l.client && l.client !== "mobile" ? ` · via ${l.client}` : ""}
+          </Text>
+        )}
       </View>
     );
   }
@@ -367,6 +367,7 @@ const s = StyleSheet.create({
   userText: { fontSize: 16, lineHeight: 22 },
   midna: { alignItems: "flex-start", gap: 6, width: "92%" },
   meta: { fontSize: 11.5 },
+  connecting: { textAlign: "center", fontSize: 12.5, paddingVertical: 6 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   option: { minHeight: 34, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, justifyContent: "center" },
   optionText: { fontSize: 14.5, fontWeight: "500" },

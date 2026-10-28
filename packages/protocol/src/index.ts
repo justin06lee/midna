@@ -11,6 +11,8 @@ export * from "./hands.ts";
 import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
 
 export const DEFAULT_PORT = 7717;
+/** How long a request waits on midna before giving up, unless it says otherwise. */
+export const REQUEST_TIMEOUT_MS = 30_000;
 export const SERVICE = "midna";
 
 export const Priority = z.enum(["urgent", "normal", "fyi"]);
@@ -393,20 +395,50 @@ export class MidnaClient {
     this.token = token;
   }
 
-  private async call<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, raw?: { body: Upload; type: string }): Promise<T> {
-    const res = await this.fetch(this.baseUrl + path, {
-      method,
-      headers: {
-        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
-        ...(body !== undefined ? { "content-type": "application/json" } : raw ? { "content-type": raw.type } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : raw ? { body: raw.body } : {}),
-      ...(signal ? { signal } : {}),
-    });
-    const text = await res.text();
-    const data = text ? JSON.parse(text) : undefined;
-    if (!res.ok) throw new MidnaError(res.status, data?.error ?? res.statusText);
-    return data as T;
+  /**
+   * One request. It gives up after `timeoutMs` (30 s unless the call says
+   * otherwise): a request on a connection that died under it (a phone back
+   * from the background, a VPN that dropped) may otherwise never end — the
+   * iPhone's fetch sets no timeout of its own.
+   */
+  private async call<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    raw?: { body: Upload; type: string },
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<T> {
+    const ctl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctl.abort();
+    }, timeoutMs);
+    const stop = () => ctl.abort();
+    if (signal?.aborted) ctl.abort();
+    signal?.addEventListener("abort", stop, { once: true });
+    try {
+      const res = await this.fetch(this.baseUrl + path, {
+        method,
+        headers: {
+          ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
+          ...(body !== undefined ? { "content-type": "application/json" } : raw ? { "content-type": raw.type } : {}),
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : raw ? { body: raw.body } : {}),
+        signal: ctl.signal,
+      });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : undefined;
+      if (!res.ok) throw new MidnaError(res.status, data?.error ?? res.statusText);
+      return data as T;
+    } catch (err) {
+      if (timedOut) throw new MidnaError(0, `midna didn't answer in ${Math.round(timeoutMs / 1000)} s`);
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    }
   }
 
   /** Is midna there? Pass a signal (e.g. `AbortSignal.timeout(2_000)`) to stop waiting on a machine that never answers. */
@@ -420,8 +452,8 @@ export class MidnaClient {
   pairingCode(): Promise<{ code: string; expiresAt: number }> {
     return this.call("POST", "/v1/pairing-codes");
   }
-  status(): Promise<Status> {
-    return this.call("GET", "/v1/status");
+  status(signal?: AbortSignal): Promise<Status> {
+    return this.call("GET", "/v1/status", undefined, signal);
   }
   updateSettings(patch: SettingsPatch): Promise<Status> {
     return this.call("PATCH", "/v1/settings", patch);
@@ -460,25 +492,26 @@ export class MidnaClient {
     return this.call("POST", "/v1/inbound", e);
   }
   /** The conversation, newest `limit` lines before message `before`, oldest first. */
-  history(opts: { before?: number; limit?: number; conversationId?: string } = {}): Promise<HistoryItem[]> {
+  history(opts: { before?: number; limit?: number; conversationId?: string } = {}, signal?: AbortSignal): Promise<HistoryItem[]> {
     const q = new URLSearchParams();
     if (opts.before) q.set("before", String(opts.before));
     if (opts.limit) q.set("limit", String(opts.limit));
     if (opts.conversationId) q.set("conversation", opts.conversationId);
-    return this.call("GET", `/v1/history?${q}`);
+    return this.call("GET", `/v1/history?${q}`, undefined, signal);
   }
   brains(): Promise<BrainInfo[]> {
     return this.call("GET", "/v1/brains");
   }
   /** Try the brain now (a tiny real turn); work that was waiting on it runs if it answers. */
   checkBrain(): Promise<BrainHealth> {
-    return this.call("POST", "/v1/brains/check");
+    // A real turn of the brain: a minute or more on a slow one.
+    return this.call("POST", "/v1/brains/check", undefined, undefined, undefined, 5 * 60_000);
   }
   bridges(): Promise<BridgeInfo[]> {
     return this.call("GET", "/v1/bridges");
   }
   setupBridge(name: string, input: Record<string, string>): Promise<BridgeSetupResult> {
-    return this.call("POST", `/v1/bridges/${encodeURIComponent(name)}/setup`, input);
+    return this.call("POST", `/v1/bridges/${encodeURIComponent(name)}/setup`, input, undefined, undefined, 2 * 60_000);
   }
   /** An attachment's bytes. The desktop draws an image from them with URL.createObjectURL. */
   async attachment(id: string, signal?: AbortSignal): Promise<Blob> {
@@ -498,7 +531,8 @@ export class MidnaClient {
     const q = new URLSearchParams({ name: file.name });
     if (file.caption) q.set("caption", file.caption);
     if (file.as) q.set("as", file.as);
-    return this.call("POST", `/v1/attachments?${q}`, undefined, undefined, { body: data, type: file.mime || "application/octet-stream" });
+    // Up to 100 MB over a phone's uplink: minutes, not seconds.
+    return this.call("POST", `/v1/attachments?${q}`, undefined, undefined, { body: data, type: file.mime || "application/octet-stream" }, 15 * 60_000);
   }
   /**
    * Take back an upload that was never sent (the user removed it before
@@ -517,7 +551,7 @@ export class MidnaClient {
    * daemon holds the answer up to `waitMs` (at most 15 s). From 0.13.
    */
   delivery(outboxId: number, waitMs = 0, signal?: AbortSignal): Promise<Delivery> {
-    return this.call("GET", `/v1/outbox/${outboxId}/delivery?wait=${waitMs}`, undefined, signal);
+    return this.call("GET", `/v1/outbox/${outboxId}/delivery?wait=${waitMs}`, undefined, signal, undefined, REQUEST_TIMEOUT_MS + waitMs);
   }
   /** Register this phone for push notifications; again whenever the token may have changed. From 0.13. */
   registerPush(reg: PushRegistration): Promise<{ ok: true }> {

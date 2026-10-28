@@ -90,3 +90,21 @@ test("a fetch passed in carries every call, the event stream included", async ()
   expect(urls).toEqual(["/v1/events", "/healthz", "/v1/attachments/att_x"]);
   await settle();
 });
+
+test("a request on a connection that never answers gives up, and a caller can stop one", async () => {
+  // A fetch that never settles unless aborted: what a request looks like on a connection that died under it.
+  const hang = ((_url: string, init?: RequestInit) =>
+    new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }))) as never;
+  const client = new MidnaClient("http://midna.test", "t", { fetch: hang });
+  const started = Date.now();
+  const err = await (client as unknown as { call: (m: string, p: string, b?: unknown, s?: AbortSignal, r?: unknown, t?: number) => Promise<unknown> })
+    .call("GET", "/v1/status", undefined, undefined, undefined, 200)
+    .catch((e) => e);
+  expect((err as Error).message).toBe("midna didn't answer in 0 s");
+  expect(Date.now() - started).toBeLessThan(2_000);
+
+  const ctl = new AbortController();
+  const stopped = client.status(ctl.signal).catch((e) => e);
+  ctl.abort();
+  expect(((await stopped) as Error).message).toBe("aborted");
+});

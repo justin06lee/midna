@@ -22,7 +22,12 @@ export interface Line {
   attachments: Attachment[];
   /** The message id, for lines that came from history — where older pages continue from. */
   messageId?: number;
+  /** Sent from this phone and not yet seen back from midna: the echo or history replaces it. */
   pending?: boolean;
+  /** A line this phone sent: on its way, taken by midna (✓), or not sent (tap to retry). */
+  state?: "sending" | "sent" | "failed";
+  /** The question it answers, kept for a retry. */
+  replyTo?: number;
 }
 
 // A host older than 0.4 sends no attachments at all.
@@ -48,6 +53,9 @@ export function fromOutbox(item: OutboxItem): Line {
 
 const files = (l: Line) => l.attachments.map((a) => a.id).join();
 
+/** How far apart (clocks included) a line sent here and its echo can be. */
+export const ECHO_WINDOW_MS = 10 * 60_000;
+
 /**
  * Lines merged in by key: a line seen before is updated in place, and the
  * echo of something this phone sent replaces its placeholder.
@@ -60,8 +68,10 @@ export function mergeLines(cur: Line[], incoming: Line[], where: "append" | "pre
     const at = seen.get(l.key);
     if (at !== undefined) next[at] = { ...next[at]!, ...l };
     else {
-      const p = l.role === "user" ? next.findIndex((x) => x.pending && x.text === l.text && files(x) === files(l)) : -1;
-      if (p >= 0) next[p] = l;
+      // Its echo, or history, settles a line this phone sent; something said long before with the same words doesn't.
+      const p = l.role === "user" ? next.findIndex((x) => x.pending && x.text === l.text && files(x) === files(l) && Math.abs(l.at - x.at) < ECHO_WINDOW_MS) : -1;
+      // Heard back from midna: it has the line, whatever this phone last knew.
+      if (p >= 0) next[p] = { ...l, state: "sent" };
       else fresh.push(l);
     }
   }
