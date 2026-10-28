@@ -176,7 +176,7 @@ function modelReport(s: Status): string {
   return lines.length === 1 ? s.model : lines.join("\n");
 }
 
-/** Where alerts go, and whether push can carry them. Hosts before 0.12 say nothing. */
+/** Where alerts go, and whether push can carry them. Hosts before 0.13 say nothing. */
 function alertsLine(s: Status): string {
   if (!s.alerts) return "";
   const phones = s.push?.phones ?? 0;
@@ -468,7 +468,7 @@ async function main(): Promise<void> {
     case "alerts": {
       const c = client();
       const channel = rest[0];
-      if (!channel) return console.log(alertsLine(await reach(() => c.status())) || "this midna is older than 0.12: alerts go to Telegram");
+      if (!channel) return console.log(alertsLine(await reach(() => c.status())) || "this midna is older than 0.13: alerts go to Telegram");
       if (channel !== "telegram" && channel !== "both" && channel !== "push") die("alerts go to `telegram`, `both` or `push`");
       return console.log(alertsLine(await reach(() => c.updateSettings({ alerts: channel }))));
     }

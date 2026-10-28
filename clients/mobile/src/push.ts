@@ -26,7 +26,7 @@ export async function registerForPush(client: MidnaClient): Promise<PushSetup> {
     await client.registerPush({ token: String(token), environment: env === "development" || (env === null && __DEV__) ? "development" : "production" });
     return "on";
   } catch (err) {
-    // A host before 0.12 has no push.
+    // A host before 0.13 has no push.
     if (err instanceof MidnaError && err.status === 404) return "unsupported";
     console.warn(`push registration failed: ${(err as Error).message}`);
     return "failed";

@@ -91,12 +91,12 @@ export function isAlert(item: Pick<OutboxItem, "kind" | "priority">): boolean {
 /**
  * Where alerts go. "telegram": Telegram only. "both": a push to each phone
  * and Telegram. "push": a push, and Telegram only when no push got through
- * (none set up, no phone registered, or Apple refused it). From 0.12.
+ * (none set up, no phone registered, or Apple refused it). From 0.13.
  */
 export const AlertChannel = z.enum(["telegram", "both", "push"]);
 export type AlertChannel = z.infer<typeof AlertChannel>;
 
-/** A phone's Apple push token, sent by the app once notifications are allowed. From 0.12. */
+/** A phone's Apple push token, sent by the app once notifications are allowed. From 0.13. */
 export const PushRegistration = z.object({
   /** The APNs device token, hex. */
   token: z.string().regex(/^[0-9a-fA-F]{32,200}$/),
@@ -108,7 +108,7 @@ export type PushRegistration = z.infer<typeof PushRegistration>;
 /** What became of an alert's push: "pending" while Apple hasn't answered, "none" when nothing was tried. */
 export type PushState = "pending" | "sent" | "failed" | "none";
 
-/** How an outbox item is being delivered, for a bridge deciding whether it should send it too. From 0.12. */
+/** How an outbox item is being delivered, for a bridge deciding whether it should send it too. From 0.13. */
 export interface Delivery {
   channel: AlertChannel;
   push: PushState;
@@ -317,9 +317,9 @@ export interface Status {
   activeModel?: string;
   /** Providers out of usage, and when each resets (epoch ms). From 0.12. */
   caps?: Record<string, number>;
-  /** Where alerts go. From 0.12. */
+  /** Where alerts go. From 0.13. */
   alerts?: AlertChannel;
-  /** Push notifications: whether the host has an APNs key, and how many phones are registered. From 0.12. */
+  /** Push notifications: whether the host has an APNs key, and how many phones are registered. From 0.13. */
   push?: { configured: boolean; phones: number };
 }
 
@@ -514,12 +514,12 @@ export class MidnaClient {
   }
   /**
    * How an outbox item is being delivered. While its push waits on Apple, the
-   * daemon holds the answer up to `waitMs` (at most 15 s). From 0.12.
+   * daemon holds the answer up to `waitMs` (at most 15 s). From 0.13.
    */
   delivery(outboxId: number, waitMs = 0, signal?: AbortSignal): Promise<Delivery> {
     return this.call("GET", `/v1/outbox/${outboxId}/delivery?wait=${waitMs}`, undefined, signal);
   }
-  /** Register this phone for push notifications; again whenever the token may have changed. From 0.12. */
+  /** Register this phone for push notifications; again whenever the token may have changed. From 0.13. */
   registerPush(reg: PushRegistration): Promise<{ ok: true }> {
     return this.call("POST", "/v1/push", reg);
   }

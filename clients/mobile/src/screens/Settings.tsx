@@ -63,7 +63,7 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
 /** Whether this phone gets notifications, and if not, why. */
 function notifications(midna: Midna): string {
   if (midna.push === "denied") return "Off in iPhone Settings";
-  if (midna.push === "unsupported") return "Needs midna 0.12";
+  if (midna.push === "unsupported") return "Needs midna 0.13";
   if (midna.push === "failed") return "Not registered yet";
   if (midna.push === "unknown") return "—";
   if (midna.status?.push && !midna.status.push.configured) return "Not set up on midna";
