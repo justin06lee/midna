@@ -6,6 +6,7 @@ import { BrainCappedError, BrainError, resolveModel, yagamiBrain, type Brain } f
 import { brainProblem, checkBrainLive, howToSignIn, type BrainProblem } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
 import { INTRODUCTION, devicesSection, eventsTask, jobTask, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
+import { ruriTurn } from "./ruriTurns.ts";
 
 export interface AssistantOptions {
   store: Store;
@@ -171,6 +172,8 @@ export class Assistant {
    * as user input, so it interrupts nothing. The same id counts once, and a
    * source gets at most one wakeup per subject (data.project) in each
    * window: what comes meanwhile is merged into the wakeup still waiting.
+   * ruri tells of every project's turns; one midna didn't start (the user's
+   * own, in ruri) is ignored, with nothing kept (ruriTurns.ts).
    */
   hear(e: { source: string; title: string; id?: string; data?: unknown }): EventReceipt {
     const data = e.data as { id?: unknown; kind?: unknown; project?: { id?: unknown; path?: unknown; name?: unknown } } | null | undefined;
@@ -178,6 +181,11 @@ export class Assistant {
     const extId = e.id ?? word(data?.id);
     const subject = word(data?.project?.id) ?? word(data?.project?.path) ?? word(data?.project?.name);
     const kind = word(data?.kind);
+    const turn = e.source === "ruri" ? ruriTurn(e.data) : null;
+    if (turn?.by === "other") {
+      console.log(`[midna] event from ruri${subject ? ` about ${subject}` : ""}: ${e.title.slice(0, 80)} — ignored: ${turn.why}`);
+      return { status: "ignored", reason: turn.why };
+    }
     const r = this.store.inbound.add({
       source: e.source,
       title: e.title,

@@ -412,6 +412,7 @@ async function sendEvent(): Promise<void> {
   // The daemon takes the event's id (for dedup) and project (for the rate limit) from the JSON itself.
   const r = await reach(() => client().event({ source, title, ...(data !== undefined ? { data } : {}) }));
   if (json) return out({ ok: true, ...r });
+  if (r.status === "ignored") return console.log(`not for midna: ${r.reason}`);
   if (r.status === "duplicate") return console.log(`already heard: event ${r.eventId}`);
   if (r.status === "merged") return console.log(`merged with the events midna hears at ${new Date(r.dueAt).toLocaleTimeString()}`);
   console.log(`midna hears it ${r.dueAt <= Date.now() + 1_000 ? "now" : `at ${new Date(r.dueAt).toLocaleTimeString()}`}`);

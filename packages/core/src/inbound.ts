@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { EventReceipt } from "@midna/protocol";
+import type { EventKept } from "@midna/protocol";
 import type { Schedule } from "./schedule.ts";
 
 /**
@@ -30,8 +30,8 @@ export class Inbound {
   add(
     e: { source: string; title: string; extId?: string; subject?: string; kind?: string; data?: string; windowMs: number; tz: string },
     now = Date.now(),
-  ): EventReceipt {
-    return this.db.transaction((): EventReceipt => {
+  ): EventKept {
+    return this.db.transaction((): EventKept => {
       if (e.extId) {
         const dup = this.db.query("SELECT id, wakeup_id FROM inbound_events WHERE source = $s AND ext_id = $x").get({ s: e.source, x: e.extId }) as { id: number; wakeup_id: number } | null;
         if (dup) return { status: "duplicate", eventId: dup.id, wakeupId: dup.wakeup_id };

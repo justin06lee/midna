@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { EVENT_WINDOW_MS, MAX_ATTACHMENT_BYTES, MAX_EVENT_DATA_BYTES, MidnaClient, type OutboxItem, type StreamEvent } from "@midna/protocol";
+import { EVENT_WINDOW_MS, MAX_ATTACHMENT_BYTES, MAX_EVENT_DATA_BYTES, MidnaClient, type EventKept, type EventReceipt, type OutboxItem, type StreamEvent } from "@midna/protocol";
 import { BrainError, type Brain, type BrainRun } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
 
@@ -65,6 +65,11 @@ async function until<T>(what: string, fn: () => T | undefined, ms = 5_000): Prom
   throw new Error(`timed out waiting for ${what}`);
 }
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+/** The receipt of an event midna kept; an ignored one fails the test. */
+const kept = (r: EventReceipt): EventKept => {
+  if (r.status === "ignored") throw new Error(`ignored: ${r.reason}`);
+  return r;
+};
 const outbox = () => events.filter((e): e is { type: "outbox"; item: OutboxItem } => e.type === "outbox").map((e) => e.item);
 
 beforeAll(async () => {
@@ -717,7 +722,7 @@ describe("midnad", () => {
       await call(tools, "message_user", { text: "midna's team is idle — v0.6.0 is cut.", priority: "fyi" });
       return "told the user";
     };
-    const r = await client.event({ source: "ruri", title: "midna went idle", data: idle });
+    const r = kept(await client.event({ source: "ruri", title: "midna went idle", data: idle }));
     expect(r).toMatchObject({ status: "queued" });
     await until("heard", () => heard);
     expect(heard!.prompt).toStartWith("[Wakeup — the user did not send this");
@@ -731,6 +736,41 @@ describe("midnad", () => {
     expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
     // The same id again is the same event.
     expect(await client.event({ source: "ruri", title: "midna went idle", data: idle })).toEqual({ status: "duplicate", eventId: r.eventId, wakeupId: r.wakeupId });
+  });
+
+  test("ruri's events about the user's own turns don't wake midna; those about midna's do", async () => {
+    const heard: string[] = [];
+    script = async (run) => {
+      for (const t of ["kumo is idle", "kumo is blocked", "weekly usage at 71%"]) if (run.prompt.includes(t)) heard.push(t);
+      return "ok";
+    };
+    const project = { id: "p-kumo", name: "kumo", path: "/work/kumo" };
+    const lead = (lastPrompt: { id: string; at: string } | null) => ({ id: "c-lead", name: "Lead", role: "lead", lastSummary: "Done.", lastPrompt });
+    const ev = (id: string, kind: string, lastPrompt: { id: string; at: string } | null) => ({
+      source: "ruri",
+      title: `kumo is ${kind === "project.idle" ? "idle" : "blocked"}`,
+      data: { id, source: "ruri", kind, project, chats: [lead(lastPrompt)], costUsd: 0.5, at: new Date().toISOString() },
+    });
+    const wakeups = () => (daemon.store.db.query("SELECT COUNT(*) AS n FROM wakeups").get() as { n: number }).n;
+    const stored = () => (daemon.store.db.query("SELECT COUNT(*) AS n FROM inbound_events WHERE subject = 'p-kumo'").get() as { n: number }).n;
+    const before = wakeups();
+    // The user typed in kumo's lead: idle or blocked, nothing for midna, and nothing kept.
+    const theirs = { id: "8d0f6a52-5d1e-4d43-9a8c-0c6b3c2f1e7d", at: new Date(Date.now() - 60_000).toISOString() };
+    const idle = await client.event(ev("kumo-1", "project.idle", theirs));
+    expect(idle).toEqual({ status: "ignored", reason: "the latest prompt in kumo (Lead) wasn't midna's" });
+    expect(await client.event(ev("kumo-2", "project.blocked", theirs))).toMatchObject({ status: "ignored" });
+    expect(wakeups()).toBe(before);
+    expect(stored()).toBe(0);
+    // midna sent the latest prompt: heard, as any event.
+    const mine = { id: "midna-5e4b3a29-1c0d-4f8e-b7a6-958473625140", at: new Date().toISOString() };
+    const queued = await client.event(ev("kumo-3", "project.idle", mine));
+    expect(queued).toMatchObject({ status: "queued" });
+    await until("midna's heard", () => heard.includes("kumo is idle") || undefined);
+    expect(stored()).toBe(1);
+    // ruri-watch's usage events aren't project events: always heard.
+    expect(await client.event({ source: "ruri", title: "ruri: weekly usage at 71% (crossed 70%)", data: { weekly: 71, threshold: 70 } })).toMatchObject({ status: "queued" });
+    await until("usage heard", () => heard.includes("weekly usage at 71%") || undefined);
+    expect(heard).not.toContain("kumo is blocked");
   });
 
   test("follow-ups due within minutes of each other run as one turn, and end together", async () => {
@@ -784,10 +824,10 @@ describe("midnad", () => {
       title: `${project} idle #${n}`,
       data: { id: `${project}-${n}`, kind: "project.idle", project: { id: project, name: project, path: `/work/${project}` } },
     });
-    const first = await client.event(ev(1, "umi"));
+    const first = kept(await client.event(ev(1, "umi")));
     expect(first.status).toBe("queued");
     await until("first heard", () => prompts.length === 1 || undefined);
-    const second = await client.event(ev(2, "umi"));
+    const second = kept(await client.event(ev(2, "umi")));
     const third = await client.event(ev(3, "umi"));
     const other = await client.event(ev(1, "una"));
     // Inside the window: the next wakeup waits for the window to pass, and takes the one after too.

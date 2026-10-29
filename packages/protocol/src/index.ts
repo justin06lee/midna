@@ -214,10 +214,13 @@ export type SendEvent = z.input<typeof SendEvent>;
 
 /**
  * What became of an event: queued (a wakeup at dueAt delivers it), merged
- * (into the subject's wakeup still waiting), or a duplicate of one already
- * received.
+ * (into the subject's wakeup still waiting), a duplicate of one already
+ * received, or ignored: nothing for midna, so nothing kept (a ruri project
+ * event about a turn midna didn't start). From 0.13.1 on, ignored.
  */
-export type EventReceipt =
+export type EventReceipt = EventKept | { status: "ignored"; reason: string };
+/** The receipt of an event midna kept, which a wakeup delivers. */
+export type EventKept =
   | { status: "queued" | "merged"; eventId: number; wakeupId: number; dueAt: number }
   | { status: "duplicate"; eventId: number; wakeupId: number };
 
