@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import type { Approval } from "@midna/protocol";
+import { plainText, type Approval } from "@midna/protocol";
 import { approvalOutcome } from "../lines";
 import { useTheme } from "../theme";
 import { Card, time } from "../ui";
@@ -45,7 +45,7 @@ export function Approvals({ midna }: { midna: Midna }) {
           <Text style={[s.heading, { color: t.dim }]}>Earlier</Text>
           {over.map((a) => (
             <View key={a.id} style={[s.past, { borderBottomColor: t.line }]}>
-              <Text style={[s.pastSummary, { color: t.ink }]}>{a.summary}</Text>
+              <Text style={[s.pastSummary, { color: t.ink }]}>{plainText(a.summary)}</Text>
               <Text style={[s.pastMeta, { color: t.dim }]}>
                 {approvalOutcome(a)} · {time(a.answeredAt ?? a.requestedAt)}
               </Text>
@@ -68,7 +68,7 @@ function Waiting({ a, now, midna }: { a: Approval; now: number; midna: Midna }) 
         </Text>
         <Text style={[s.left, { color: remaining < 30_000 ? t.danger : t.dim }]}>{left(remaining)}</Text>
       </View>
-      <Text style={[s.summary, { color: t.ink }]}>midna wants to {a.summary}</Text>
+      <Text style={[s.summary, { color: t.ink }]}>midna wants to {plainText(a.summary)}</Text>
       <ApprovalButtons approval={a} midna={midna} canSend={midna.link === "live" && remaining > 0} />
     </Card>
   );

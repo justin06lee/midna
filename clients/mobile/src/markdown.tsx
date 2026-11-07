@@ -1,93 +1,16 @@
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import { columnWidths, parse, type Block } from "./blocks";
 import { mono, useTheme, type Theme } from "./theme";
 
 /**
  * Markdown for midna's messages, small and in-house: paragraphs, headings,
  * bullet and numbered lists (nested), quotes, rules, fenced code (scrolls
- * sideways, copies), and inline bold, italic, strike, code and links. Text is
- * selectable; anything it doesn't know stays as plain text.
+ * sideways, copies), simple tables (scroll sideways), and inline bold,
+ * italic, strike, code and links (blocks.ts parses). Text is selectable;
+ * anything it doesn't know stays as plain text.
  */
-
-type Block =
-  | { t: "p"; text: string }
-  | { t: "h"; level: number; text: string }
-  | { t: "code"; lang: string; text: string }
-  | { t: "quote"; text: string }
-  | { t: "hr" }
-  | { t: "list"; items: Item[] };
-interface Item {
-  ordered: boolean;
-  n: number;
-  text: string;
-  indent: number;
-}
-
-const FENCE = /^\s*(```+|~~~+)\s*([\w+#.-]*)\s*$/;
-const ITEM = /^(\s*)(?:([-*+•])|(\d{1,3})[.)])\s+(.*)$/;
-
-export function parse(src: string): Block[] {
-  const lines = src.replace(/\r\n?/g, "\n").split("\n");
-  const out: Block[] = [];
-  let para: string[] = [];
-  const flush = () => {
-    if (para.length) out.push({ t: "p", text: para.join("\n") });
-    para = [];
-  };
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const fence = FENCE.exec(line);
-    if (fence) {
-      flush();
-      const body: string[] = [];
-      for (i++; i < lines.length && !lines[i]!.trim().startsWith(fence[1]!.slice(0, 3)); i++) body.push(lines[i]!);
-      out.push({ t: "code", lang: fence[2]!, text: body.join("\n") });
-      continue;
-    }
-    if (!line.trim()) {
-      flush();
-      continue;
-    }
-    const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
-    if (h) {
-      flush();
-      out.push({ t: "h", level: h[1]!.length, text: h[2]! });
-      continue;
-    }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-      flush();
-      out.push({ t: "hr" });
-      continue;
-    }
-    if (/^\s*>/.test(line)) {
-      flush();
-      const q: string[] = [];
-      for (; i < lines.length && /^\s*>/.test(lines[i]!); i++) q.push(lines[i]!.replace(/^\s*>\s?/, ""));
-      i--;
-      out.push({ t: "quote", text: q.join("\n") });
-      continue;
-    }
-    const it = ITEM.exec(line);
-    if (it) {
-      flush();
-      const last = out[out.length - 1];
-      const list = last?.t === "list" ? last : { t: "list" as const, items: [] };
-      if (list !== last) out.push(list);
-      list.items.push({ ordered: !it[2], n: Number(it[3] ?? 0), text: it[4]!, indent: Math.floor(it[1]!.replace(/\t/g, "  ").length / 2) });
-      continue;
-    }
-    // A wrapped continuation of the last list item.
-    const last = out[out.length - 1];
-    if (!para.length && last?.t === "list" && /^\s+\S/.test(line) && lines[i - 1]?.trim()) {
-      last.items[last.items.length - 1]!.text += `\n${line.trim()}`;
-      continue;
-    }
-    para.push(line);
-  }
-  flush();
-  return out;
-}
 
 const INLINE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)|\*\*(?=\S)([\s\S]*?\S)\*\*|__(?=\S)([\s\S]*?\S)__|~~(?=\S)([\s\S]*?\S)~~|\*(?=[^\s*])([\s\S]*?[^\s*])\*|(?<![\w])_(?=[^\s_])([\s\S]*?[^\s_])_(?![\w])|\[([^\]\n]+)\]\(\s*<?([^)\s>]+)>?[^)]*\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
 
@@ -172,6 +95,33 @@ function Code({ text, lang }: { text: string; lang: string }) {
   );
 }
 
+/** A table in a box like code's, its columns lined up; wider than the message, it scrolls sideways. */
+function Table({ b, size }: { b: Extract<Block, { t: "table" }>; size: number }) {
+  const t = useTheme();
+  const fontSize = size - 1;
+  const widths = useMemo(() => columnWidths(b.head, b.rows, fontSize, CELL_PAD), [b, fontSize]);
+  const cell = { fontSize, lineHeight: Math.round(fontSize * 1.4), color: t.ink };
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tableScroll}>
+      <View style={[s.table, { backgroundColor: t.sunken, borderColor: t.line }]}>
+        {[b.head, ...b.rows].map((row, r) => (
+          <View key={r} style={[s.tableRow, r > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line2 }]}>
+            {row.map((text, c) => (
+              <View key={c} style={[s.tableCell, { width: widths[c] }]}>
+                <Text selectable style={[cell, r === 0 && s.bold, { textAlign: b.align[c] }]}>
+                  {inline(text, t, `${r}.${c}.`)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+const CELL_PAD = 12;
+
 const HEADING = [22, 20, 18, 17, 16, 16];
 
 /** A message's text as markdown, in the ink and size of the surrounding message text. */
@@ -197,6 +147,8 @@ export const Markdown = memo(function Markdown({ text, size = 16, lineHeight = 2
             );
           case "code":
             return <Code key={i} text={b.text} lang={b.lang} />;
+          case "table":
+            return <Table key={i} b={b} size={size} />;
           case "quote":
             return (
               <View key={i} style={[s.quote, { borderLeftColor: t.line2 }]}>
@@ -253,6 +205,9 @@ const s = StyleSheet.create({
   codeCopy: { fontSize: 12.5, fontWeight: "500" },
   codeScroll: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 11 },
   codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19 },
+  tableScroll: { alignSelf: "stretch", flexGrow: 0 },
+  table: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  tableRow: { flexDirection: "row" },
+  tableCell: { paddingHorizontal: CELL_PAD, paddingVertical: 7 },
 });
 
-export type { Block };

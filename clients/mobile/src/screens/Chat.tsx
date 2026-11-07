@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, t
 import { ActionSheetIOS, ActivityIndicator, Animated, AppState, Dimensions, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
+import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, plainText, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
 import { Attachments, Thumb } from "../attachments";
 import { keyboardLift } from "../keyboard";
 import type { PhoneConnection } from "../connection";
@@ -304,7 +304,7 @@ function LineView({
               onPress={() => onAnswer(o)}
               style={({ pressed }) => [s.option, { backgroundColor: t.panel, borderColor: t.line2, opacity: l.answered || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
             >
-              <Text style={[s.optionText, { color: t.ink }]}>{o}</Text>
+              <Text style={[s.optionText, { color: t.ink }]}>{plainText(o)}</Text>
             </Pressable>
           ))}
         </View>
@@ -324,7 +324,7 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
     setProblem("");
     setBusy(a);
     try {
-      const why = await faceId(`${label}: ${approval.summary}`);
+      const why = await faceId(`${label}: ${plainText(approval.summary)}`);
       if (why !== null) return setProblem(why);
       await midna.answerApproval(approval, a);
     } catch (err) {

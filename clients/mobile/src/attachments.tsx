@@ -5,11 +5,15 @@ import * as Sharing from "expo-sharing";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Attachment } from "@midna/protocol";
 import { size } from "./lines";
+import { Markdown } from "./markdown";
 import { useTheme } from "./theme";
 import type { Midna } from "./useMidna";
 
 type Source = Midna["attachmentSource"];
 type Fetch = Midna["fetchAttachment"];
+
+/** A markdown file, which Quick Look would show as raw text: it opens in the Reader instead. */
+export const isMarkdown = (a: Attachment) => /\.(md|markdown|mdown|mkd)$/i.test(a.name) || /^text\/(x-)?markdown\b/i.test(a.mime);
 
 /** Open a file from midna on this phone: Quick Look where it can, the share sheet otherwise. */
 async function open(a: Attachment, fetchAttachment: Fetch): Promise<void> {
@@ -68,30 +72,88 @@ function FileRow({ a, fetchAttachment }: { a: Attachment; fetchAttachment: Fetch
   const t = useTheme();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [reading, setReading] = useState(false);
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${a.name}`}
-      disabled={busy}
-      onPress={() => {
-        setBusy(true);
-        setFailed(false);
-        open(a, fetchAttachment)
-          .catch(() => setFailed(true))
-          .finally(() => setBusy(false));
-      }}
-      style={({ pressed }) => [s.file, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.7 : 1 }]}
-    >
-      <View style={[s.fileIcon, { backgroundColor: t.sunken }]}>
-        {busy ? <ActivityIndicator size="small" color={t.dim} /> : <Text style={[s.ext, { color: t.dim }]}>{ext(a.name)}</Text>}
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${a.name}`}
+        disabled={busy}
+        onPress={() => {
+          if (isMarkdown(a)) return setReading(true);
+          setBusy(true);
+          setFailed(false);
+          open(a, fetchAttachment)
+            .catch(() => setFailed(true))
+            .finally(() => setBusy(false));
+        }}
+        style={({ pressed }) => [s.file, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.7 : 1 }]}
+      >
+        <View style={[s.fileIcon, { backgroundColor: t.sunken }]}>
+          {busy ? <ActivityIndicator size="small" color={t.dim} /> : <Text style={[s.ext, { color: t.dim }]}>{ext(a.name)}</Text>}
+        </View>
+        <View style={s.fileText}>
+          <Text numberOfLines={1} style={[s.fileName, { color: t.ink }]}>
+            {a.name}
+          </Text>
+          <Text style={[s.fileMeta, { color: failed ? t.danger : t.dim }]}>{failed ? "Couldn't open it — tap to try again" : size(a.size)}</Text>
+        </View>
+      </Pressable>
+      {reading && <Reader a={a} fetchAttachment={fetchAttachment} onClose={() => setReading(false)} />}
+    </>
+  );
+}
+
+/** A markdown file drawn the way messages are, in a sheet: Done to close, Share to send it on. */
+function Reader({ a, fetchAttachment, onClose }: { a: Attachment; fetchAttachment: Fetch; onClose: () => void }) {
+  const t = useTheme();
+  const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetchAttachment(a)
+      .then((f) => f.text())
+      .then((body) => live && setText(body))
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [a, fetchAttachment]);
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={[s.reader, { backgroundColor: t.bg }]}>
+        <View style={[s.readerBar, { borderBottomColor: t.line }]}>
+          <Pressable accessibilityRole="button" onPress={onClose} hitSlop={12}>
+            <Text style={[s.readerButton, { color: t.ink }]}>Done</Text>
+          </Pressable>
+          <Text numberOfLines={1} style={[s.readerTitle, { color: t.dim }]}>
+            {a.name}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={sharing}
+            hitSlop={12}
+            onPress={() => {
+              setSharing(true);
+              fetchAttachment(a)
+                .then((f) => Sharing.shareAsync(f.uri, { dialogTitle: a.name }))
+                .catch(() => {})
+                .finally(() => setSharing(false));
+            }}
+          >
+            {sharing ? <ActivityIndicator color={t.dim} /> : <Text style={[s.readerButton, { color: t.ink }]}>Share</Text>}
+          </Pressable>
+        </View>
+        {text !== null ? (
+          <ScrollView contentContainerStyle={s.readerBody}>
+            <Markdown text={text} />
+          </ScrollView>
+        ) : (
+          <View style={s.readerWait}>{failed ? <Text style={[s.fileMeta, { color: t.dim }]}>Couldn't load the file</Text> : <ActivityIndicator color={t.dim} />}</View>
+        )}
       </View>
-      <View style={s.fileText}>
-        <Text numberOfLines={1} style={[s.fileName, { color: t.ink }]}>
-          {a.name}
-        </Text>
-        <Text style={[s.fileMeta, { color: failed ? t.danger : t.dim }]}>{failed ? "Couldn't open it — tap to try again" : size(a.size)}</Text>
-      </View>
-    </Pressable>
+    </Modal>
   );
 }
 
@@ -199,4 +261,10 @@ const s = StyleSheet.create({
   viewerFailed: { color: "#8e8e93", fontSize: 15 },
   viewerBar: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
   viewerButton: { color: "#fff", fontSize: 17, fontWeight: "600" },
+  reader: { flex: 1 },
+  readerBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  readerTitle: { flex: 1, textAlign: "center", fontSize: 14 },
+  readerButton: { fontSize: 17, fontWeight: "600" },
+  readerBody: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 40 },
+  readerWait: { flex: 1, alignItems: "center", justifyContent: "center" },
 });

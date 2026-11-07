@@ -193,3 +193,8 @@ body {
 .prose-midna a { text-decoration: underline; text-decoration-color: var(--dimmer); text-underline-offset: 2px; cursor: pointer; }
 .prose-midna strong { font-weight: 600; }
 .prose-midna h3 { font-weight: 600; margin: 0.6em 0 0.25em; }
+.prose-midna .md-table { overflow-x: auto; margin: 0.3em 0 0.6em; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; }
+.prose-midna table { border-collapse: collapse; font-size: 0.95em; }
+.prose-midna th, .prose-midna td { padding: 0.35em 0.75em; vertical-align: top; max-width: 22em; }
+.prose-midna th { font-weight: 600; white-space: nowrap; }
+.prose-midna tbody td { border-top: 1px solid var(--line); }
