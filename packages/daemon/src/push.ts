@@ -3,7 +3,7 @@ import { createPrivateKey, sign, type KeyObject } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "@midna/core";
-import { isAlert, type Delivery, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
+import { isAlert, plainText, type Delivery, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
 
 /**
  * Push notifications to the iPhone app, through Apple's push service (APNs)
@@ -66,10 +66,10 @@ export function loadApns(config: ApnsConfig | undefined, home: string): { keyId:
   }
 }
 
-/** The notification an alert becomes: midna's name over its text, a question's choices, a word on its files. */
+/** The notification an alert becomes: midna's name over its text as plain text (iOS draws no markdown), a question's choices, a word on its files. */
 export function payload(item: OutboxItem, name: string): Record<string, unknown> {
-  let body = item.text.trim();
-  if (item.options?.length) body += `\n${item.options.join(" · ")}`;
+  let body = plainText(item.text);
+  if (item.options?.length) body += `\n${item.options.map(plainText).join(" · ")}`;
   const files = item.attachments.length;
   if (files) body += `${body ? "\n" : ""}📎 ${files === 1 ? item.attachments[0]!.name : `${files} files`}`;
   if (body.length > BODY_MAX) body = body.slice(0, BODY_MAX - 1).trimEnd() + "…";

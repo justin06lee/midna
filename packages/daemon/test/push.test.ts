@@ -243,6 +243,13 @@ describe("payload", () => {
     expect((payload(item(), "midna") as { aps: Record<string, any> }).aps["interruption-level"]).toBe("active");
   });
 
+  test("the notification says the words, not the markdown", () => {
+    const md = "**Nova** is `live`:\n\n- see [the demo](https://nova.example)\n\n| a | b |\n|---|---|\n| 1 | 2 |";
+    expect((payload(item({ text: md, kind: "question", options: ["**Yes**", "Not *yet*"] }), "midna") as any).aps.alert.body).toBe(
+      "Nova is live:\n\n• see the demo\n\na · b\n1 · 2\nYes · Not yet",
+    );
+  });
+
   test("files are named, and a long text is cut to fit Apple's limit", () => {
     const a = { id: "att_1", name: "plan.pdf", mime: "application/pdf", size: 1, kind: "file" as const, caption: null };
     expect((payload(item({ attachments: [a] }), "midna") as any).aps.alert.body).toBe("Hi\n📎 plan.pdf");
