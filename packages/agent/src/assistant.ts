@@ -5,6 +5,7 @@ import { liftLocalImages, workspaceCopy } from "./attachments.ts";
 import { BrainCappedError, BrainError, resolveModel, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn, type BrainProblem } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
+import { isHermes, type TurnFile } from "./hermes.ts";
 import { INTRODUCTION, devicesSection, eventsTask, jobTask, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 import { ruriTurn } from "./ruriTurns.ts";
 
@@ -20,6 +21,8 @@ export interface AssistantOptions {
   coalesceMs?: number;
   /** The user's computers that offer their hands, for the prompt to name. */
   hands?: HandsHandle;
+  /** Ask the user's OK for something the brain is about to do (Hermes's approvals), as a device approval is asked. */
+  approve?: (req: { summary: string; tool?: string }, ctx: { episodeId: number; signal: AbortSignal }) => Promise<"once" | "deny">;
 }
 
 /** How long to wait before retrying work the brain couldn't do, and how often to say so. */
@@ -314,7 +317,9 @@ export class Assistant {
         const sent = store.attachments.forMessages([...history, ...unseen].filter((m) => m.role === "user").map((m) => m.id));
         const files = (m: Message) => (sent.get(m.id) ?? []).map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) }));
         const prompt = turnPrompt(unseen, history, settings.timezone, now, (id) => store.outbox.get(id)?.text, files, (m) => this.replied(m, settings.timezone), [...notes.map((n) => interruptionNote(n, !fresh)), ...(cutOff ? [cutOff] : [])]);
-        return this.episode({ kind: "chat", conversationId: conv, prompt, model, resume: fresh ? undefined : convo.brain_session!, turn });
+        // Hermes can't open midna's files: what the user just sent goes with the turn itself.
+        const sentNow: TurnFile[] = isHermes(model) ? unseen.filter((m) => m.role === "user").flatMap(files).map((f) => ({ name: f.name, mime: f.mime, kind: f.kind, path: f.path })) : [];
+        return this.episode({ kind: "chat", conversationId: conv, prompt, model, resume: fresh ? undefined : convo.brain_session!, turn, ...(sentNow.length ? { files: sentNow } : {}) });
       };
       let result: Awaited<ReturnType<typeof run>>;
       for (;;) {
@@ -407,7 +412,7 @@ export class Assistant {
   }
 
   /** One model session, start to finish, recorded as an episode. */
-  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; model: string; resume?: string; turn?: Turn }) {
+  private async episode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; prompt: string; model: string; resume?: string; turn?: Turn; files?: TurnFile[] }) {
     const { store, opts } = this;
     return this.slot(async () => {
       const abort = e.turn?.abort ?? new AbortController();
@@ -422,10 +427,15 @@ export class Assistant {
       const devices = opts.hands?.devices() ?? [];
       const state = [...contextSections(store, now), { title: "The user's computers", body: devicesSection(devices) }];
       this.aborts.add(abort);
+      // Hermes keeps its own memory, state and persona: it gets the turn itself, and a word on where it comes from.
+      const hermes = isHermes(e.model);
+      const approve = opts.approve;
       try {
         const result = await this.brain({
-          prompt: `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
-          systemPrompt: systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0 }),
+          prompt: hermes ? e.prompt : `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
+          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0 }),
+          ...(e.files?.length ? { files: e.files } : {}),
+          ...(approve ? { onApproval: (req: { summary: string; tool?: string }) => approve(req, { episodeId, signal: abort.signal }) } : {}),
           model: e.model,
           resume: e.resume,
           cwd: opts.env.workspace,
@@ -447,7 +457,7 @@ export class Assistant {
           ...(u ? { tokens: { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens } } : {}),
         });
         this.healthy();
-        if (result.sessionId) this.sawState(result.sessionId, state);
+        if (result.sessionId && !hermes) this.sawState(result.sessionId, state);
         return { ...result, episodeId };
       } catch (err) {
         // What the cut-off turn had already done, for the brain that takes over.
@@ -538,6 +548,8 @@ export class Assistant {
         }
       }
       const with_ = rest.length ? ` with ${rest.map((x) => `#${x.id}`).join(", ")}` : "";
+      // Hermes has no message_user: what it replies to a wakeup is what it has to say.
+      if (isHermes(model) && !isNoReply(result.text)) store.say({ kind: "message", conversationId: MAIN, text: result.text.trim() }, { client: "hermes", seenByBrain: true });
       if (result.text) console.log(`[midna] wakeup #${w.id}${with_} (${w.reason.slice(0, 60)}): ${result.text.slice(0, 200)}`);
       return "done";
     } catch (err) {
@@ -725,6 +737,8 @@ export class Assistant {
   ensureRituals(): void {
     const { store } = this;
     const s = store.settings();
+    // Hermes runs the rituals (its brief and the migrated midna:* jobs); midna's stay as they were.
+    if (isHermes(s.model)) return;
     const wanted: Array<[string, string | null, "ritual" | "system"]> = [
       ["morning brief", s.rituals.morning, "ritual"],
       ["evening review", s.rituals.evening, "ritual"],
@@ -870,4 +884,11 @@ function resultOf(path: string): { bytes: number; text?: string } {
   const buf = readFileSync(path);
   const text = buf.toString("utf8");
   return buf.includes(0) || text.includes("\uFFFD") ? { bytes } : { bytes, text: text.replace(/\n$/, "") };
+}
+
+/** What a Hermes turn hears on top of its own system prompt: where this turn comes from. */
+export function hermesInstructions(kind: "chat" | "wakeup"): string {
+  return kind === "chat"
+    ? "This turn comes from the midna app (or midna's own Telegram bot), not from your Telegram chat: the user reads your reply in the app. Lines marked [midna] are notes from the app's relay, not from the user."
+    : "This turn is a background task midna's app relay scheduled (an event from another program, a finished job, a follow-up). Whatever you reply is sent to the user in the midna app; reply exactly \"No reply needed\" to say nothing.";
 }

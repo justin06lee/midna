@@ -213,6 +213,20 @@ export const SendEvent = z.object({
 export type SendEvent = z.input<typeof SendEvent>;
 
 /**
+ * POST /v1/deliver: what another brain on this machine (Hermes) sent the user
+ * on its own — a reminder, the morning brief, a question — so it reaches the
+ * app and the phone too. It goes out as midna's notification, at once: the
+ * sender keeps its own quiet hours. From a bridge (or the host) only. After 0.13.2.
+ */
+export const Deliver = z.object({
+  text: z.string().trim().min(1).max(20_000),
+  /** Who sent it ("hermes", "hermes:cron"), as the conversation records it. */
+  source: z.string().trim().min(1).max(100).default("hermes"),
+  priority: Priority.default("normal"),
+});
+export type Deliver = z.input<typeof Deliver>;
+
+/**
  * What became of an event: queued (a wakeup at dueAt delivers it), merged
  * (into the subject's wakeup still waiting), a duplicate of one already
  * received, or ignored: nothing for midna, so nothing kept (a ruri project

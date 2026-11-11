@@ -106,10 +106,10 @@ export class Store {
     return this.db.query("INSERT OR IGNORE INTO settings (key, value) VALUES ($k, 'true')").run({ k: `once:${key}` }).changes === 1;
   }
 
-  /** Say something to the user, honouring quiet hours for non-urgent news. */
-  tell(item: Parameters<Outbox["add"]>[0], now = Date.now()) {
+  /** Say something to the user, honouring quiet hours for non-urgent news — unless the sender kept its own (`quiet` false). */
+  tell(item: Parameters<Outbox["add"]>[0], now = Date.now(), quiet = true) {
     const s = this.settings();
-    return this.outbox.add(item, { tz: s.timezone, quietHours: s.quietHours }, now);
+    return this.outbox.add(item, { tz: s.timezone, quietHours: quiet ? s.quietHours : null }, now);
   }
 
   /**
@@ -121,10 +121,10 @@ export class Store {
    */
   say(
     item: Parameters<Outbox["add"]>[0],
-    record: { client: string; seenByBrain: boolean; logText?: string },
+    record: { client: string; seenByBrain: boolean; logText?: string; quiet?: boolean },
     now = Date.now(),
   ) {
-    const sent = this.tell(item, now);
+    const sent = this.tell(item, now, record.quiet ?? true);
     const files = sent.attachments.length ? `[sent with it: ${sent.attachments.map((a) => a.name).join(", ")}]` : "";
     const text = [record.logText ?? item.text, files].filter(Boolean).join("\n");
     this.log.addMessage({ conversationId: item.conversationId ?? MAIN, role: "midna", text, client: record.client, seen: record.seenByBrain, outboxId: sent.id }, now);

@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
-import { MAX_ATTACHMENT_BYTES, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult } from "@midna/protocol";
+import { MAX_ATTACHMENT_BYTES, OPS, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult, type Op } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { PushSender, loadApns, type ApnsTransport } from "./push.ts";
 import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
@@ -79,12 +79,41 @@ function hostToken(store: Store, file: string): string {
   return token;
 }
 
+/** midna-body's tools that act on the Mac, as the hands op and capability the user allows. */
+const BODY_OPS: Record<string, Op> = {
+  device_shell: "shell",
+  device_write_file: "file_write",
+  device_applescript: "script",
+  device_clipboard_write: "clipboard_write",
+};
+
+/**
+ * What Hermes asks the user's OK for, during a turn midna gave it, is asked as a device approval:
+ * the app's approval card, a question in the chat and on Telegram, "Allow for 10 min" included. A
+ * midna-body tool is asked about the Mac it acts on; anything else, about midna's host.
+ */
+export async function hermesApproval(
+  hands: HandsHub,
+  host: { id: string; name: string },
+  req: { summary: string; tool?: string },
+  ctx: { episodeId: number; signal: AbortSignal },
+): Promise<"once" | "deny"> {
+  const op = Object.entries(BODY_OPS).find(([tool]) => req.tool?.includes(tool) || req.summary.includes(tool))?.[1] ?? "shell";
+  const mac = req.tool || /device_/.test(req.summary) ? hands.devices().find((d) => d.online) ?? hands.devices()[0] : undefined;
+  const device = mac && /device_|midna.body/.test(`${req.tool ?? ""} ${req.summary}`) ? { id: mac.id, name: mac.name } : host;
+  const d = await hands.approvals.request(
+    { deviceId: device.id, deviceName: device.name, op, capability: OPS[op], commandId: `hermes_${randomBytes(6).toString("hex")}`, args: {}, summary: `do this through Hermes on ${device.name}: ${req.summary}`, episodeId: ctx.episodeId },
+    ctx.signal,
+  );
+  return d.approved ? "once" : "deny";
+}
+
 export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaemon> {
   const home = opts.home ?? midnaHome();
   const p = ensureHome(home);
   const config = loadConfig(home);
   const store = Store.open(p.db);
-  hostToken(store, p.hostToken);
+  const hostDevice = store.devices.authenticate(hostToken(store, p.hostToken))!;
   const mcpToken = "mcp_" + randomBytes(24).toString("base64url");
 
   const port = opts.port ?? config.port;
@@ -117,6 +146,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     mcp: { url: (episode) => `${base}/mcp/${episode}`, token: mcpToken },
     ...(opts.brain ? { brain: opts.brain } : {}),
     ...(opts.coalesceMs !== undefined ? { coalesceMs: opts.coalesceMs } : {}),
+    approve: (req, ctx) => hermesApproval(hands, hostDevice, req, ctx),
   });
 
   // Alerts go to each registered phone as they are released, beside the event stream.

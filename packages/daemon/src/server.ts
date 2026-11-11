@@ -15,6 +15,7 @@ import {
   PairRequest,
   PushRegistration,
   SendEvent,
+  Deliver,
   SendMessage,
   SettingsPatch,
   SERVICE,
@@ -251,6 +252,18 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       return c.json({ error: `an event's data can be at most ${MAX_EVENT_DATA_BYTES / 1024} KB of JSON` }, 413);
     }
     return c.json(assistant.hear(e.data), 202);
+  });
+
+  // ── deliveries: what Hermes said on its own, into the conversation and the outbox ──
+  app.post("/v1/deliver", async (c) => {
+    const kind = c.get("device").kind;
+    if (kind !== "bridge" && kind !== "host") return c.json({ error: "only a bridge (Hermes) delivers into midna's outbox" }, 403);
+    const d = Deliver.safeParse(await c.req.json().catch(() => null));
+    if (!d.success) return c.json({ error: d.error.message }, 400);
+    // The chat brain hasn't heard it: the next turn is told, so a reply to it makes sense.
+    const item = store.say({ kind: "notification", conversationId: MAIN, text: d.data.text, priority: d.data.priority }, { client: d.data.source, seenByBrain: false, quiet: false });
+    console.log(`[midna] delivered from ${d.data.source} (${c.get("device").name}): ${d.data.text.slice(0, 80).replace(/\s+/g, " ")}`);
+    return c.json({ id: item.id }, 202);
   });
 
   // ── attachments: the bytes behind images and files in the conversation ──

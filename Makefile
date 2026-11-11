@@ -50,4 +50,4 @@ tenet-cargo-test:
 
 # Pick up changes: rebuild, reinstall, and restart the service if this machine is a host.
 update: build install
-	@if $(BIN) service status 2>/dev/null | grep -q installed; then $(BIN) service restart; fi
+	@if $(BIN) service status 2>/dev/null | grep -q installed; then $(BIN) service restart && $(BIN) hermes setup; fi

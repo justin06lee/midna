@@ -28,6 +28,7 @@ import {
 } from "@midna/daemon";
 import { TelegramBridge, setupTelegram } from "@midna/telegram";
 import { discover } from "./discover.ts";
+import { hermesSetup } from "./hermes.ts";
 import { STEPS, defaultKits, install, sameHost, type InstallEvent } from "./install.ts";
 
 const HELP = `midna ${VERSION} — a proactive personal assistant
@@ -40,7 +41,7 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
                                   tell midna something happened elsewhere; it hears it in the background
   midna status                    mode, model, what it's doing
   midna mode [autonomous|ask]     show or switch the permission mode
-  midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, …
+  midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, hermes, …
     --fallback codex[,…]|none     what to think with while the brain is out of usage
   midna alerts [telegram|both|push]
                                   where reminders, questions and notifications go:
@@ -52,9 +53,12 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna paired [revoke <id>]      devices paired with this midna
   midna telegram setup            connect a Telegram bot (your phone, for now)
   midna doctor [--live <model>]   which brains are here, and whether one answers
+  midna hermes setup              set up Hermes on this host as midna's brain (its pinned deploy, the app
+                                  delivery, and \`model hermes\` once Hermes is the writer); re-runnable
+    --keep-model                  leave the brain setting alone
   midna service install|uninstall|restart
 
-  --json on status, pair, version, doctor, devices, setup and host install prints machine-readable output.
+  --json on status, pair, version, doctor, devices, setup, hermes setup and host install prints machine-readable output.
   On event, --json names the event's JSON (a file, or - for stdin), and the receipt prints as JSON.
 `;
 
@@ -521,6 +525,24 @@ async function main(): Promise<void> {
         return bridge.run();
       }
       return die("usage: midna telegram setup | run [--state <file>]");
+    }
+    case "hermes": {
+      if (rest[0] !== "setup") return die("usage: midna hermes setup [--keep-model]");
+      const r = await reach(() =>
+        hermesSetup({
+          home: midnaHome(),
+          url: localUrl(),
+          client: client(),
+          keepModel: args.includes("--keep-model"),
+          force: args.includes("--force"),
+          ...(flag("--ref") ? { ref: flag("--ref")! } : {}),
+          ...(flag("--repo") ? { repo: flag("--repo")! } : {}),
+          log: (line) => (json ? console.error(line) : console.log(`  ${line}`)),
+        }),
+      );
+      if (json) return out(r);
+      if (!r.ok) die(r.error ?? "Hermes setup failed");
+      return console.log(r.skipped ? `Hermes: skipped — ${r.skipped}` : `Hermes: set up (${r.detail})`);
     }
     case "service": {
       if (rest[0] === "install") return void installService([...selfCommand(), "serve"], { PATH: loginPath() }).forEach((n) => console.log(n));
