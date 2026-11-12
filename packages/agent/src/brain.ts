@@ -9,6 +9,7 @@ import {
   type PermissionHandler,
   type SessionPermissionHandler,
 } from "@justin06lee/yagami";
+import { HERMES, hermesBrain, hermesProblem, isHermes, type TurnFile } from "./hermes.ts";
 
 /**
  * The brain is whichever agent harness the user picked, reached through
@@ -36,6 +37,10 @@ export interface BrainRun {
    * did stays in the session's transcript for the next turn to resume.
    */
   signal?: AbortSignal;
+  /** What the user sent with the turn, for a brain that can't open midna's files itself (Hermes). */
+  files?: TurnFile[];
+  /** The brain asks the user's OK for something it is about to do (Hermes's approvals); the answer is "once" or "deny". */
+  onApproval?: (req: { summary: string; tool?: string }) => Promise<"once" | "deny">;
 }
 
 export interface BrainResult {
@@ -130,17 +135,20 @@ export function toolDetail(input: unknown): string | undefined {
 }
 
 export function resolveModel(model: string): { provider: string; model?: string } {
+  if (isHermes(model)) return { provider: HERMES };
   const ref = parseModelRef(model, PROVIDER_PRESETS.map((p) => p.id));
   return { provider: ref.providerId ?? "claude", ...(ref.model ? { model: ref.model } : {}) };
 }
 
 /** Harnesses installed on this machine that can run midna's brain. */
 export function installedBrains(): Array<{ id: string; label: string; installed: boolean; loginCommand: string; installHint: string }> {
-  return detectProviders(loadHostEngineConfig().providerConfig ?? {}).map(({ id, label, installed, loginCommand, installHint }) => ({ id, label, installed, loginCommand, installHint }));
+  const hermes = { id: HERMES, label: "Hermes (its api_server on this machine)", installed: !hermesProblem(), loginCommand: "midna hermes setup", installHint: "run `midna hermes setup`" };
+  return [...detectProviders(loadHostEngineConfig().providerConfig ?? {}).map(({ id, label, installed, loginCommand, installHint }) => ({ id, label, installed, loginCommand, installHint })), hermes];
 }
 
 /** Why `model` can't run here, or null when it can. */
 export function checkModel(model: string): string | null {
+  if (isHermes(model)) return hermesProblem();
   const brains = installedBrains();
   const prefix = model.includes(":") ? model.slice(0, model.indexOf(":")) : null;
   // yagami reads an unknown prefix as a bare Claude model id; here it is nearly always a typo.
@@ -155,6 +163,7 @@ export function checkModel(model: string): string | null {
 }
 
 export const yagamiBrain: Brain = async (run) => {
+  if (isHermes(run.model)) return hermesBrain(run);
   const { provider, model } = resolveModel(run.model);
   return provider === "claude" ? runClaude(run, model) : runHarness(run, provider, model);
 };

@@ -44,7 +44,7 @@ test("install on this machine: binary, start, pair, talk", async () => {
   expect(ok).toBe(true);
 
   const steps = events.filter((e): e is Extract<InstallEvent, { type: "step" }> => e.type === "step" && e.status !== "running").map((e) => `${e.id}:${e.status}`);
-  expect(steps).toEqual(["reach:done", "binary:done", "brain:skipped", "start:done", "pair:done"]);
+  expect(steps).toEqual(["reach:done", "binary:done", "brain:skipped", "start:done", "hermes:skipped", "pair:done"]);
   expect(events.some((e) => e.type === "progress")).toBe(true);
 
   const done = events.find((e): e is Extract<InstallEvent, { type: "done" }> => e.type === "done")!;
@@ -65,7 +65,7 @@ test("install on this machine: binary, start, pair, talk", async () => {
       (e) => again.push(e),
     ),
   ).toBe(true);
-  expect(again.filter((e) => e.type === "step" && e.status === "skipped").map((e) => (e as { id: string }).id)).toEqual(["binary", "brain", "start"]);
+  expect(again.filter((e) => e.type === "step" && e.status === "skipped").map((e) => (e as { id: string }).id)).toEqual(["binary", "brain", "start", "hermes"]);
   expect(again.find((e) => e.type === "step" && e.id === "pair" && e.status === "done")).toMatchObject({ detail: "the pairing it replaces is retired" });
   await expect(midna.status()).rejects.toThrow();
   const second = again.find((e): e is Extract<InstallEvent, { type: "done" }> => e.type === "done")!.connection;

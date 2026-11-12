@@ -294,7 +294,16 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
       step("start", "done", res.service === "process" ? "running in the background" : `running as a ${res.service} service`);
     }
 
-    // 5 ── pair: a code minted there, spent from here over the network.
+    // 5 ── Hermes, where that machine has one: its pinned deploy, the app delivery, and the brain once
+    //      Hermes is the writer. Re-run on every install, like the binary; nothing to do without Hermes.
+    step("hermes", "running");
+    const h = await t.sh(`${env}${bin} hermes setup --json`, { timeoutMs: 20 * 60_000 });
+    const hr = safeJson<{ ok?: boolean; skipped?: string; detail?: string; error?: string }>(h.stdout.trim().split("\n").pop() ?? "{}");
+    if (hr.skipped) step("hermes", "skipped", hr.skipped);
+    else if (!hr.ok) throw new StepFailed("hermes", hr.error ?? "Setting up Hermes failed.", h.stderr.trim().split("\n").slice(-3).join("\n") || undefined);
+    else step("hermes", "done", hr.detail);
+
+    // 6 ── pair: a code minted there, spent from here over the network.
     step("pair", "running");
     // A service that was just (re)started may not be listening yet: ask until it answers.
     let code: string | undefined;

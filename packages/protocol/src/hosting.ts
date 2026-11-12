@@ -21,13 +21,14 @@ export interface DiscoveredDevice {
   midna: { running: boolean; version?: string; name?: string; url?: string };
 }
 
-export type InstallStepId = "reach" | "binary" | "brain" | "start" | "pair";
+export type InstallStepId = "reach" | "binary" | "brain" | "start" | "hermes" | "pair";
 
 export const INSTALL_STEPS: Record<InstallStepId, string> = {
   reach: "Reach the machine",
   binary: "Put midna on it",
   brain: "Check its brain",
   start: "Start midna",
+  hermes: "Connect Hermes",
   pair: "Pair this computer",
 };
 

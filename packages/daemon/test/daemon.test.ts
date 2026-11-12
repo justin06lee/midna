@@ -877,3 +877,73 @@ describe("midnad", () => {
     await expect(new MidnaClient(daemon.url, "mdn_nope").event({ source: "ruri", title: "x" })).rejects.toThrow(/unauthorized/);
   });
 });
+
+describe("Hermes as the brain (P4)", () => {
+  const deliver = (token: string, body: object) =>
+    fetch(`${daemon.url}/v1/deliver`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  test("Hermes's own messages reach the app as notifications, from a bridge only", async () => {
+    const hermes = await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "Hermes", kind: "bridge" });
+    daemon.store.updateSettings({ quietHours: { start: "00:00", end: "23:59" } }); // Hermes keeps its own quiet hours
+    try {
+      const r = await deliver(hermes.token, { text: "⏰ Fajr in 20 min", source: "hermes:cron" });
+      expect(r.status).toBe(202);
+      const item = await until("delivered", () => outbox().find((i) => i.text === "⏰ Fajr in 20 min"));
+      expect(item.kind).toBe("notification");
+      // The chat brain hasn't heard it: the next turn is told.
+      const line = daemon.store.db.query("SELECT client, seen_by_brain AS seen FROM messages WHERE outbox_id = $id").get({ id: item.id }) as { client: string; seen: number };
+      expect(line).toEqual({ client: "hermes:cron", seen: 0 });
+    } finally {
+      daemon.store.updateSettings({ quietHours: null });
+    }
+    const phone = await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "phone", kind: "mobile" });
+    expect((await deliver(phone.token, { text: "spoof" })).status).toBe(403);
+    expect((await deliver(hermes.token, { text: " " })).status).toBe(400);
+    expect((await deliver("mdn_nope", { text: "x" })).status).toBe(401);
+  });
+
+  test("a turn gets the user's words and where they come from, not midna's own state; a wakeup's reply is said", async () => {
+    daemon.store.updateSettings({ model: "hermes" });
+    try {
+      script = async (run) => (run.prompt.includes("ruri finished") ? "The umi PR is merged." : "Hermes here.");
+      const before = runs.length;
+      await client.send({ text: "hello from the app", client: "test" });
+      await until("reply", () => outbox().find((i) => i.text === "Hermes here."));
+      const run = runs.slice(before).find((r) => r.prompt.includes("hello from the app"))!;
+      expect(run.model).toBe("hermes");
+      expect(run.systemPrompt).toStartWith("This turn comes from the midna app");
+      expect(run.prompt).not.toContain("## ");
+      expect(run.onApproval).toBeFunction();
+
+      daemon.store.schedule.add({ dueAt: Date.now(), reason: "ruri finished the umi PR: tell the user", tz: "UTC" });
+      const said = await until("wakeup said", () => outbox().find((i) => i.text === "The umi PR is merged."));
+      expect(said.kind).toBe("message");
+
+      // No rituals of midna's own while Hermes runs them.
+      const rituals = () => (daemon.store.db.query("SELECT COUNT(*) AS n FROM wakeups WHERE kind IN ('ritual','system') AND status = 'pending'").get() as { n: number }).n;
+      daemon.store.db.query("UPDATE wakeups SET status = 'cancelled' WHERE kind IN ('ritual','system') AND status = 'pending'").run();
+      daemon.assistant.ensureRituals();
+      expect(rituals()).toBe(0);
+    } finally {
+      daemon.store.updateSettings({ model: "claude:opus" });
+      daemon.assistant.ensureRituals();
+    }
+  });
+
+  test("what Hermes asks the user's OK for is asked like a device approval", async () => {
+    const laptop = new MidnaClient(daemon.url, (await new MidnaClient(daemon.url).pair({ code: (await client.pairingCode()).code, deviceName: "laptop", kind: "desktop" })).token);
+    const answers: string[] = [];
+    script = async (run) => {
+      if (!run.prompt.includes("clean the build")) return "ok";
+      answers.push(await run.onApproval!({ summary: "run `rm -rf build`", tool: "mcp_midna_body_device_shell" }));
+      return "Cleaned.";
+    };
+    await client.send({ text: "clean the build", client: "test" });
+    const asked = await until("asked", () => outbox().find((i) => i.kind === "question" && i.text.includes("rm -rf build")));
+    expect(asked.text).toContain("do this through Hermes on");
+    const [approval] = await laptop.approvals();
+    await laptop.answerApproval(approval!.id, { answer: "allow", client: "desktop" });
+    await until("reply", () => outbox().find((i) => i.text === "Cleaned."));
+    expect(answers).toEqual(["once"]);
+  });
+});

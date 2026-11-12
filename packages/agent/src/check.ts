@@ -1,5 +1,6 @@
 import { AuthRequiredError, ProviderNotInstalledError, Yagami } from "@justin06lee/yagami";
 import { BrainCappedError, USAGE_LIMIT_TEXT, checkModel } from "./brain.ts";
+import { checkHermes, isHermes } from "./hermes.ts";
 
 export type BrainCheck =
   | { ok: true; model: string }
@@ -60,6 +61,10 @@ export function brainProblem(err: unknown): BrainProblem | null {
 export async function checkBrainLive(model: string): Promise<BrainCheck> {
   const problem = checkModel(model);
   if (problem) return { ok: false, model, reason: "unusable", message: problem };
+  if (isHermes(model)) {
+    const down = await checkHermes();
+    return down ? { ok: false, model, reason: "unusable", message: down } : { ok: true, model };
+  }
   try {
     await new Yagami().messages.create({ model, max_tokens: 16, messages: [{ role: "user", content: "Reply with the single word: ok" }] });
     return { ok: true, model };
