@@ -6,5 +6,6 @@ export { JobRunner, processStart, JOB_TIMEOUT_DEFAULT, JOB_TIMEOUT_MAX, type Job
 export { midnaHome, paths, ensureHome, loadConfig, saveConfig, writePrivate, type DaemonConfig, type BridgeConfig } from "./config.ts";
 export { installService, uninstallService, restartService, serviceInstalled } from "./service.ts";
 export { VERSION } from "./version.ts";
+export { Vault, VaultError, vaultSettings, findBw, findByTitle, type VaultSettings, type VaultConfig } from "./vault.ts";
 export { hostSettings, updateHostSettings } from "./host.ts";
 export { installedBrains, checkModel, checkBrainLive, type BrainCheck } from "@midna/agent";

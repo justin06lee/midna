@@ -138,6 +138,20 @@ export async function copy(text: string): Promise<void> {
   await navigator.clipboard.writeText(text);
 }
 
+/**
+ * A password onto the clipboard, and off it again after `clearMs` — only if it is still the
+ * one there, so whatever the user copied since stays (as ghostly's own copy does).
+ */
+export async function copySecret(text: string, clearMs = 30_000): Promise<void> {
+  await copy(text);
+  setTimeout(() => {
+    void (async () => {
+      const now = inApp ? await (await import("@tauri-apps/plugin-clipboard-manager")).readText() : await navigator.clipboard.readText();
+      if (now === text) await copy("");
+    })().catch(() => {});
+  }, clearMs);
+}
+
 /** A system notification, when the window isn't what the user is looking at. */
 export async function notify(title: string, body: string): Promise<void> {
   if (document.hasFocus()) return;

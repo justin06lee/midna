@@ -8,10 +8,13 @@ import { useMidna } from "../useMidna";
 import { Approvals } from "./Approvals";
 import { Chat } from "./Chat";
 import { Settings } from "./Settings";
+import { Vault } from "./Vault";
 
-type Tab = "chat" | "approvals" | "settings";
+type Tab = "chat" | "approvals" | "vault" | "settings";
 
-/** Paired: the header, and Chat, Approvals and Settings as tabs along the bottom. */
+const TABS: Record<Tab, string> = { chat: "Chat", approvals: "Approvals", vault: "Vault", settings: "Settings" };
+
+/** Paired: the header, and Chat, Approvals, Vault and Settings as tabs along the bottom. */
 export function Main({ connection, onPairAgain, onUnpaired }: { connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -41,13 +44,14 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
       <View style={[s.body, { opacity: offline ? 0.45 : 1 }]}>
         {tab === "chat" && <Chat midna={midna} connection={connection} onOpenApprovals={() => setTab("approvals")} />}
         {tab === "approvals" && <Approvals midna={midna} />}
+        {tab === "vault" && <Vault midna={midna} connection={connection} />}
         {tab === "settings" && <Settings midna={midna} connection={connection} onPairAgain={onPairAgain} onUnpaired={onUnpaired} />}
       </View>
       <View style={[s.tabs, { paddingBottom: Math.max(insets.bottom, 8), borderTopColor: t.line, backgroundColor: t.bg }]}>
-        {(["chat", "approvals", "settings"] as const).map((k) => (
+        {(Object.keys(TABS) as Tab[]).map((k) => (
           <Pressable key={k} testID={`tab-${k}`} accessibilityRole="tab" accessibilityState={{ selected: tab === k }} onPress={() => setTab(k)} style={s.tab}>
             <Text style={[s.tabText, { color: tab === k ? t.ink : t.dimmer, fontWeight: tab === k ? "600" : "500" }]}>
-              {k === "chat" ? "Chat" : k === "approvals" ? "Approvals" : "Settings"}
+              {TABS[k]}
             </Text>
             {k === "approvals" && waiting > 0 ? (
               <View style={[s.badge, { backgroundColor: t.danger }]}>

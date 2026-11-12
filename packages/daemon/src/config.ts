@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { isIP } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import type { ApnsConfig } from "./push.ts";
+import type { VaultConfig } from "./vault.ts";
 import { join } from "node:path";
 import { DEFAULT_PORT } from "@midna/protocol";
 
@@ -38,6 +39,8 @@ export interface DaemonConfig {
   bridges: Record<string, BridgeConfig>;
   /** Push notifications to the iPhone app; off without an APNs key. */
   push?: { apns?: ApnsConfig };
+  /** The vault (ghostly's Vaultwarden): only what differs from ghostly's own install on this host. */
+  vault?: VaultConfig;
 }
 
 const DEFAULTS: DaemonConfig = { host: "127.0.0.1", port: DEFAULT_PORT, listen: [], bridges: {} };

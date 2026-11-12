@@ -1,6 +1,7 @@
 export { Assistant, QUEUE_PREFIX, type AssistantOptions } from "./assistant.ts";
 export { yagamiBrain, resolveModel, checkModel, installedBrains, BrainError, type Brain, type BrainRun, type BrainResult, type TurnUsage } from "./brain.ts";
 export { handleMcp } from "./mcp.ts";
+export { handleVaultMcp, createVaultServer, type VaultLookup } from "./vaultTools.ts";
 export { createToolServer, type ToolContext } from "./tools.ts";
 export type { HandsHandle, HandsRequest, HandsOutcome } from "./hands.ts";
 export type { JobsHandle, JobStart } from "./jobs.ts";

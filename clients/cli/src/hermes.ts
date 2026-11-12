@@ -14,7 +14,9 @@ import { writePrivate } from "@midna/daemon";
  *  3. Pair Hermes with this midna as a bridge, so what it sends on its own reaches the app
  *     (secrets/hermes_app_token; kept while it still works).
  *  4. `midna_hermes.py install` — P1, persona, P2, the api_server, and the app delivery. Idempotent.
- *  5. Once Hermes is the writer (P3, phase "activated"), midna thinks with it: `midna model hermes`.
+ *  5. The vault's tools (find a login by title; its password, with the user's OK) as Hermes's MCP
+ *     server `midna-vault`, opened with Hermes's own app token; the gateway restarts only on a change.
+ *  6. Once Hermes is the writer (P3, phase "activated"), midna thinks with it: `midna model hermes`.
  */
 export const HERMES_DEPLOY = {
   repo: "https://github.com/justin06lee/hyperactive",
@@ -110,12 +112,64 @@ export async function hermesSetup(o: HermesSetupOptions): Promise<HermesSetupRes
   const inst = run(["python3", "-I", script, "install", "--repo", vendor, "--ref", sha, "--app-url", o.url], { log: o.log });
   if (inst.code !== 0) return { ok: false, error: `Hermes's installer failed: ${inst.out.trim().split("\n").slice(-3).join(" | ")}` };
 
-  // 5 ── one brain, once Hermes is the writer
+  // 5 ── the vault's tools, in Hermes's own config
+  const tools = vaultTools(o.url, o.log);
+  if (!tools.ok) return { ok: false, error: tools.error };
+
+  // 6 ── one brain, once Hermes is the writer
   const phase = hermesState().phase ?? "none";
   let model = (await o.client.status()).model;
   if (phase === "activated" && !o.keepModel && model !== "hermes") {
     model = (await o.client.updateSettings({ model: "hermes" })).model;
     o.log("brain: hermes (Hermes is the writer)");
   }
-  return { ok: true, detail: `hyperactive ${sha.slice(0, 12)}, phase ${phase}, brain ${model}` };
+  return { ok: true, detail: `hyperactive ${sha.slice(0, 12)}, phase ${phase}, vault tools ${tools.detail}, brain ${model}` };
+}
+
+/** Hermes's MCP server entry for midna's vault tools. */
+export const VAULT_MCP = "midna-vault";
+
+/**
+ * What Hermes's config.yaml says for the vault's tools. The token is Hermes's own pairing with midna,
+ * which the app delivery already keeps in Hermes's .env (MIDNA_APP_TOKEN): nothing secret is written here.
+ * "untrusted": vault_find runs on its own (read-only), vault_password asks the user first.
+ */
+export function vaultMcpConfig(url: string): Array<[string, string]> {
+  const k = `mcp_servers.${VAULT_MCP}.`;
+  return [
+    [`${k}url`, `${url.replace(/\/+$/, "")}/v1/vault/mcp`],
+    [`${k}headers.Authorization`, "Bearer ${MIDNA_APP_TOKEN}"],
+    [`${k}trust`, "untrusted"],
+    [`${k}timeout`, "180"],
+    [`${k}connect_timeout`, "30"],
+    [`${k}enabled`, "true"],
+  ];
+}
+
+const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** A `hermes` command as Hermes's user, from a directory it can read (as hyperactive's installer runs it). */
+function asHermes(args: string[]): { code: number; out: string } {
+  const uid = run(["id", "-u", "hermes"]).out.trim();
+  return run(["sudo", "-n", "-u", "hermes", "-H", "env", `XDG_RUNTIME_DIR=/run/user/${uid}`, "bash", "-lc", `cd /tmp && exec ${args.map(quote).join(" ")}`]);
+}
+
+/** Add (or keep) the vault's MCP entry in Hermes's config; restart its gateway only when it changed. */
+export function vaultTools(url: string, log: (line: string) => void): { ok: true; detail: string } | { ok: false; error: string } {
+  let changed = false;
+  for (const [key, value] of vaultMcpConfig(url)) {
+    const got = asHermes(["hermes", "config", "get", key]);
+    const now = got.code === 0 ? got.out.trim() : null;
+    // `hermes config get` masks a header: "Bearer ${X}" prints as "Bear...X}".
+    if (now === value || now === `${value.slice(0, 4)}...${value.slice(-4)}`) continue;
+    const set = asHermes(["hermes", "config", "set", key, value]);
+    if (set.code !== 0) return { ok: false, error: `setting Hermes's ${key} failed: ${set.out.trim().slice(-300)}` };
+    changed = true;
+  }
+  if (!changed) return { ok: true, detail: "unchanged" };
+  log(`Hermes: added the vault's tools (mcp_servers.${VAULT_MCP})`);
+  const r = asHermes(["hermes", "gateway", "restart"]);
+  if (r.code !== 0) return { ok: false, error: `restarting Hermes's gateway failed: ${r.out.trim().slice(-300)}` };
+  log("Hermes: gateway restarted");
+  return { ok: true, detail: "added" };
 }

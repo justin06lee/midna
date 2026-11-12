@@ -13,6 +13,8 @@ import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsH
 export const DEFAULT_PORT = 7717;
 /** How long a request waits on midna before giving up, unless it says otherwise. */
 export const REQUEST_TIMEOUT_MS = 30_000;
+/** A vault call runs the Bitwarden CLI on the host, and the first one in a while logs in and syncs too. */
+export const VAULT_TIMEOUT_MS = 2 * 60_000;
 export const SERVICE = "midna";
 
 export const Priority = z.enum(["urgent", "normal", "fyi"]);
@@ -225,6 +227,60 @@ export const Deliver = z.object({
   priority: Priority.default("normal"),
 });
 export type Deliver = z.input<typeof Deliver>;
+
+/**
+ * A login in the vault — ghostly's Vaultwarden on midna's host, opened with
+ * midna's account there. What the apps list: never its password, which
+ * comes only on its own (POST /v1/vault/:id/password). After 0.13.2.
+ */
+export interface VaultItem {
+  id: string;
+  title: string;
+  username: string | null;
+  url: string | null;
+  /** In the collection the user shares with midna, so their own Bitwarden apps see it too. */
+  shared: boolean;
+  /** Last changed, ms since the epoch. */
+  updatedAt: number | null;
+}
+
+/** "github.com" for "https://www.github.com/login": a login's website, as a list shows it. */
+export function vaultSite(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url.includes("://") ? url : `https://${url}`).hostname.replace(/^www\./, "") || url;
+  } catch {
+    return url;
+  }
+}
+
+/** The logins whose title, username or website holds `query` (any case); all of them for an empty one. */
+export function vaultMatches(items: VaultItem[], query: string): VaultItem[] {
+  const q = query.trim().toLowerCase();
+  return q ? items.filter((i) => [i.title, i.username ?? "", i.url ?? ""].some((v) => v.toLowerCase().includes(q))) : items;
+}
+
+const vaultText = (max: number) => z.string().trim().max(max);
+
+/** POST /v1/vault: a new login. The password travels in the body only, never in a URL. */
+export const VaultEntry = z.object({
+  title: vaultText(200).min(1),
+  username: vaultText(500).optional(),
+  url: vaultText(2_000).optional(),
+  password: z.string().min(1).max(10_000),
+});
+export type VaultEntry = z.input<typeof VaultEntry>;
+
+/** PATCH /v1/vault/:id: what changes; a field left out stays as it was, an empty username or url is cleared. */
+export const VaultPatch = z
+  .object({
+    title: vaultText(200).min(1).optional(),
+    username: vaultText(500).optional(),
+    url: vaultText(2_000).optional(),
+    password: z.string().min(1).max(10_000).optional(),
+  })
+  .refine((p) => Object.values(p).some((v) => v !== undefined), "nothing to change");
+export type VaultPatch = z.input<typeof VaultPatch>;
 
 /**
  * What became of an event: queued (a wakeup at dueAt delivers it), merged
@@ -590,6 +646,26 @@ export class MidnaClient {
   /** Ask the daemon to re-read its config and restart its bridges. */
   reloadBridges(): Promise<{ ok: true }> {
     return this.call("POST", "/v1/bridges/reload");
+  }
+
+  // The vault: every call is a run of the Bitwarden CLI on midna's host, a few seconds each.
+  /** The logins in the vault, by title; `query` keeps those whose title, username or website has it. */
+  vault(query?: string, signal?: AbortSignal): Promise<VaultItem[]> {
+    return this.call("GET", `/v1/vault${query ? `?q=${encodeURIComponent(query)}` : ""}`, undefined, signal, undefined, VAULT_TIMEOUT_MS);
+  }
+  addToVault(entry: VaultEntry): Promise<VaultItem> {
+    return this.call("POST", "/v1/vault", entry, undefined, undefined, VAULT_TIMEOUT_MS);
+  }
+  editVault(id: string, patch: VaultPatch): Promise<VaultItem> {
+    return this.call("PATCH", `/v1/vault/${encodeURIComponent(id)}`, patch, undefined, undefined, VAULT_TIMEOUT_MS);
+  }
+  /** To the vault's trash, where Bitwarden can still restore it. */
+  removeFromVault(id: string): Promise<{ ok: true }> {
+    return this.call("DELETE", `/v1/vault/${encodeURIComponent(id)}`, undefined, undefined, undefined, VAULT_TIMEOUT_MS);
+  }
+  /** One login's password, asked for on its own, in a response body and never a URL. */
+  vaultPassword(id: string): Promise<{ password: string }> {
+    return this.call("POST", `/v1/vault/${encodeURIComponent(id)}/password`, undefined, undefined, undefined, VAULT_TIMEOUT_MS);
   }
 
   /**
