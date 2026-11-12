@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, checkModel, handleMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
+import { QUEUE_PREFIX, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
   AnswerApproval,
   HandsHello,
@@ -19,6 +19,8 @@ import {
   SendMessage,
   SettingsPatch,
   SERVICE,
+  VaultEntry,
+  VaultPatch,
   type BridgeInfo,
   type BridgeSetupResult,
   type Delivery,
@@ -32,6 +34,7 @@ import {
 import { answerIn } from "./approvals.ts";
 import type { HandsHub } from "./hands.ts";
 import type { PushSender } from "./push.ts";
+import { Vault, VaultError } from "./vault.ts";
 import { VERSION } from "./version.ts";
 
 export interface ServerDeps {
@@ -53,6 +56,8 @@ export interface ServerDeps {
   workspace: string;
   /** Push notifications to the iPhone app. */
   push?: PushSender;
+  /** The vault (ghostly's Vaultwarden on this host), or why there is none. */
+  vault?: Vault | string;
 }
 
 type Env = { Variables: { device: Device } };
@@ -265,6 +270,69 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     console.log(`[midna] delivered from ${d.data.source} (${c.get("device").name}): ${d.data.text.slice(0, 80).replace(/\s+/g, " ")}`);
     return c.json({ id: item.id }, 202);
   });
+
+  // ── the vault: ghostly's logins, for the user's own devices; Hermes looks them up through its MCP ──
+  const vault = deps.vault instanceof Vault ? deps.vault : null;
+  const noVault = typeof deps.vault === "string" ? deps.vault : "there's no vault here";
+  /** Bridges (Telegram, Hermes) and midna's host never open the vault through the API. */
+  const vaultDevice = (c: Context<Env>) => (["desktop", "mobile", "cli"].includes(c.get("device").kind) ? null : c.json({ error: "the vault opens on your own devices only" }, 403));
+  const vaultFailed = (c: Context<Env>, err: unknown) =>
+    err instanceof VaultError ? c.json({ error: err.message }, err.status) : c.json({ error: (err as Error).message }, 500);
+  const withVault = async (c: Context<Env>, work: (v: Vault) => Promise<Response>) => {
+    const refused = vaultDevice(c);
+    if (refused) return refused;
+    if (!vault) return c.json({ error: noVault }, 503);
+    try {
+      return await work(vault);
+    } catch (err) {
+      return vaultFailed(c, err);
+    }
+  };
+
+  app.all("/v1/vault/mcp", async (c) => {
+    const d = c.get("device");
+    if (d.kind !== "bridge" || d.name !== "Hermes") return c.json({ error: "the vault's tools are for Hermes" }, 403);
+    return handleVaultMcp(c.req.raw, vault ? { find: (t) => vault.find(t), password: (id) => vault.password(id, { forAnotherProgram: true }) } : null, noVault, (line) => console.log(`[midna] vault: Hermes ${line}`));
+  });
+
+  app.get("/v1/vault", (c) => withVault(c, async (v) => c.json(await v.list(c.req.query("q") || undefined))));
+
+  app.post("/v1/vault", (c) =>
+    withVault(c, async (v) => {
+      const e = VaultEntry.safeParse(await c.req.json().catch(() => null));
+      if (!e.success) return c.json({ error: "a title and a password are needed" }, 400);
+      const item = await v.add(e.data);
+      console.log(`[midna] vault: ${c.get("device").name} added "${item.title}"`);
+      return c.json(item, 201);
+    }),
+  );
+
+  app.patch("/v1/vault/:id", (c) =>
+    withVault(c, async (v) => {
+      const p = VaultPatch.safeParse(await c.req.json().catch(() => null));
+      if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "nothing to change" }, 400);
+      const item = await v.edit(c.req.param("id"), p.data);
+      console.log(`[midna] vault: ${c.get("device").name} changed "${item.title}"${p.data.password ? " and its password" : ""}`);
+      return c.json(item);
+    }),
+  );
+
+  app.delete("/v1/vault/:id", (c) =>
+    withVault(c, async (v) => {
+      await v.remove(c.req.param("id"));
+      console.log(`[midna] vault: ${c.get("device").name} moved ${c.req.param("id")} to the trash`);
+      return c.json({ ok: true as const });
+    }),
+  );
+
+  app.post("/v1/vault/:id/password", (c) =>
+    withVault(c, async (v) => {
+      const { item, password } = await v.password(c.req.param("id"));
+      console.log(`[midna] vault: ${c.get("device").name} was shown the password of "${item.title}"`);
+      c.header("cache-control", "no-store");
+      return c.json({ password });
+    }),
+  );
 
   // ── attachments: the bytes behind images and files in the conversation ──
   // Any type, up to MAX_ATTACHMENT_BYTES; ?name= is required, ?caption= and ?as=file optional.

@@ -11,6 +11,7 @@ import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveCon
 import { HandsHub } from "./hands.ts";
 import { JobRunner } from "./jobs.ts";
 import { createApp } from "./server.ts";
+import { Vault, vaultSettings, type VaultSettings } from "./vault.ts";
 import { VERSION } from "./version.ts";
 
 /** How long inbound events are kept, and so how long a resent id still counts as a duplicate. */
@@ -48,6 +49,8 @@ export interface DaemonOptions {
    * name: the program hosting it says what a bridge is and how to launch it.
    */
   bridgeSetups?: Record<string, BridgeSetup>;
+  /** The vault's settings, for tests (null: no vault); otherwise ghostly's install on this host, as config.json's "vault" adjusts it. */
+  vault?: VaultSettings | null;
 }
 
 /** Connect one bridge: given the user's input, set it up and say how to launch it. */
@@ -154,6 +157,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const unpush = store.bus.on((e) => e.type === "outbox" && push.onOutbox(e.item));
 
   const bridges = new Bridges({ MIDNA_URL: base });
+  const found = opts.vault !== undefined ? (opts.vault ?? { missing: "there's no vault here" }) : vaultSettings(home, config.vault);
+  const vault = "missing" in found ? null : new Vault(found);
   const app = createApp({
     push,
     store,
@@ -162,6 +167,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     jobs,
     workspace: p.workspace,
     mcpToken,
+    vault: vault ?? ("missing" in found ? found.missing : "there's no vault here"),
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
     bridges: () => {
       const configured = loadConfig(home).bridges;
@@ -283,6 +289,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       unpush();
       push.close();
       hands.shutdown();
+      await vault?.lock();
       await assistant.shutdown();
       server.stop(true);
       store.close();
