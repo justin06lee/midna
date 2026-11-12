@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { MidnaClient, MidnaError, type OutboxItem, type SpendDay, type SpendKind, type Status } from "@midna/protocol";
+import { MidnaClient, MidnaError, type Account, type OutboxItem, type SpendDay, type SpendKind, type Status } from "@midna/protocol";
 import {
   VERSION,
+  accountEmails,
   checkBrainLive,
   checkModel,
   ensureHome,
@@ -43,6 +44,8 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna mode [autonomous|ask]     show or switch the permission mode
   midna model [ref]               show or set the brain: claude:opus, codex:gpt-5.6-sol, gemini, hermes, …
     --fallback codex[,…]|none     what to think with while the brain is out of usage
+  midna account [work|personal]   show or set the Claude account midna thinks and runs prompt jobs with
+    --fallback on|off             while it's out of usage, carry on with the other account (off by default)
   midna alerts [telegram|both|push]
                                   where reminders, questions and notifications go:
                                   push to the phone, Telegram, or both (push falls back to Telegram)
@@ -52,7 +55,8 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna host install <machine>    make one of them midna's home, over SSH, and pair with it
   midna paired [revoke <id>]      devices paired with this midna
   midna telegram setup            connect a Telegram bot (your phone, for now)
-  midna doctor [--live <model>]   which brains are here, and whether one answers
+  midna doctor [--live <model>] [--account work|personal]
+                                  which brains are here, and whether one answers
   midna hermes setup              set up Hermes on this host as midna's brain (its pinned deploy, the app
                                   delivery, the vault's tools, and \`model hermes\` once Hermes is the
                                   writer); re-runnable
@@ -162,9 +166,37 @@ function spendLines(days: SpendDay[] | undefined): string {
   return (
     `\n  spent     today ${usd(today.usd)} in ${today.turns} turn(s)${kinds.length ? `: ${kinds.join(" · ")}` : ""}` +
     (today.unpriced ? `\n            ${today.unpriced} of them on a plan with no price per turn (Codex)` : "") +
-    `\n            ${days.length} days ${usd(week)}: ${days.map((d) => `${d.date.slice(5)} ${usd(d.usd)}`).join(" · ")}`
+    `\n            ${days.length} days ${usd(week)}: ${days.map((d) => `${d.date.slice(5)} ${usd(d.usd)}`).join(" · ")}` +
+    accountSpend(days)
   );
 }
+
+/** Claude's spend by account, today and over the days, once there's a turn that knows its account. Hosts up to 0.13.2 don't say. */
+function accountSpend(days: SpendDay[]): string {
+  const usd = (n: number) => `$${n.toFixed(2)}`;
+  const sum = (a: Account, ds: SpendDay[]) => ds.reduce((n, d) => ({ usd: n.usd + (d.byAccount?.[a]?.usd ?? 0), turns: n.turns + (d.byAccount?.[a]?.turns ?? 0) }), { usd: 0, turns: 0 });
+  const used = ACCOUNT_NAMES.filter((a) => sum(a, days).turns > 0);
+  if (!used.length) return "";
+  const line = (ds: SpendDay[]) => used.map((a) => `${a} ${usd(sum(a, ds).usd)} (${sum(a, ds).turns})`).join(" · ");
+  return `\n  claude    today ${line(days.slice(0, 1))}; ${days.length} days ${line(days)}`;
+}
+
+const ACCOUNT_NAMES: Account[] = ["work", "personal"];
+
+/** The Claude account, whether it may hand over to the other, who each is signed in as, and which one thinks while the other is capped. Hosts up to 0.13.2 say nothing. */
+function accountLines(s: Status): string[] {
+  if (!s.account) return [];
+  const who = (a: Account) => (s.accounts ? ` (${s.accounts[a] ?? "not signed in here"})` : "");
+  const lines = [`account   ${s.account}${who(s.account)}`, `fallback  ${s.accountFallback ? `on: the ${other(s.account)} account${who(other(s.account))} while it's out of usage` : "off: it never moves to the other account"}`];
+  for (const a of ACCOUNT_NAMES) {
+    const until = s.caps?.[`claude@${a}`];
+    if (until) lines.push(`capped    ${a} until ${new Date(until).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`);
+  }
+  if (s.activeAccount && s.activeAccount !== s.account) lines.push(`thinking  on ${s.activeAccount} meanwhile`);
+  return lines;
+}
+
+const other = (a: Account): Account => (a === "work" ? "personal" : "work");
 
 /** The model, its fallbacks, and which one is thinking while another is out of usage. Hosts before 0.12 say only the model. */
 function modelLines(s: Status): string[] {
@@ -443,7 +475,7 @@ async function main(): Promise<void> {
     case "status": {
       const s = await reach(() => client().status());
       if (json) return out(s);
-      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  ${modelLines(s).join("\n  ")}\n  timezone  ${s.timezone}${alertsLine(s) ? `\n  ${alertsLine(s)}` : ""}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
+      return console.log(`${s.name} ${s.version} on ${s.host.name}\n  mode      ${s.mode}\n  ${[...modelLines(s), ...accountLines(s).slice(0, 1)].join("\n  ")}\n  timezone  ${s.timezone}${alertsLine(s) ? `\n  ${alertsLine(s)}` : ""}\n  ${s.busy ? "working" : "idle"} · ${s.pendingWakeups} scheduled wakeup(s)${spendLines(s.spend)}${wakeupLine(s.wakeups)}`);
     }
     case "version":
     case "--version":
@@ -451,10 +483,14 @@ async function main(): Promise<void> {
       return console.log(VERSION);
     case "doctor": {
       const live = flag("--live");
-      const report = { version: VERSION, brains: installedBrains(), ...(live ? { live: await checkBrainLive(live) } : {}) };
+      const account = flag("--account");
+      if (account !== undefined && account !== "work" && account !== "personal") die("the account is `work` or `personal`");
+      const report = { version: VERSION, brains: installedBrains(), accounts: accountEmails(), ...(live ? { live: await checkBrainLive(live, account) } : {}) };
       if (json) return out(report);
       for (const b of report.brains) console.log(`${b.installed ? "✓" : "·"} ${b.id.padEnd(10)} ${b.label}${b.installed ? "" : `  (${b.installHint})`}`);
-      if (report.live) console.log(report.live.ok ? `\n${live} answers.` : `\n${live}: ${report.live.message}`);
+      for (const a of ACCOUNT_NAMES) console.log(`  claude account ${a.padEnd(8)} ${report.accounts[a] ?? "not signed in"}`);
+      const which = `${live}${account ? ` (${account} account)` : ""}`;
+      if (report.live) console.log(report.live.ok ? `\n${which} answers.` : `\n${which}: ${report.live.message}`);
       return;
     }
     case "mode": {
@@ -470,6 +506,17 @@ async function main(): Promise<void> {
       if (!model && fallback === undefined) return console.log(modelReport(await reach(() => c.status())));
       const list = fallback === undefined || fallback === "none" ? [] : fallback.split(",").map((m) => m.trim()).filter(Boolean);
       return console.log(modelReport(await reach(() => c.updateSettings({ ...(model ? { model } : {}), ...(fallback !== undefined ? { fallback: list } : {}) }))));
+    }
+    case "account": {
+      const c = client();
+      const account = rest[0]?.startsWith("--") ? undefined : rest[0];
+      const fallback = flag("--fallback");
+      if (account !== undefined && account !== "work" && account !== "personal") die("the account is `work` or `personal`");
+      if (fallback !== undefined && fallback !== "on" && fallback !== "off") die("--fallback is `on` or `off`");
+      const s = await reach(() => (account || fallback ? c.updateSettings({ ...(account ? { account } : {}), ...(fallback ? { accountFallback: fallback === "on" } : {}) }) : c.status()));
+      const lines = accountLines(s);
+      if (!lines.length) die("this midna is older than accounts: it thinks with Claude Code's default account");
+      return console.log(lines.join("\n"));
     }
     case "alerts": {
       const c = client();

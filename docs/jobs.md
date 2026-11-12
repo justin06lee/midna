@@ -6,9 +6,9 @@ Each of midna's turns runs in its own Claude Code process, and that process ends
 
 ## The tools
 
-- `job_start { label, command | prompt, model?, cwd?, timeout_minutes?, result_file?, when_done? }` starts one and returns at once: `started job #12 (render the deck); log: …`.
+- `job_start { label, command | prompt, model?, account?, cwd?, timeout_minutes?, result_file?, when_done? }` starts one and returns at once: `started job #12 (render the deck); log: …`.
   - `command` is bash, run in `cwd` (by default midna's workspace).
-  - `prompt` runs `claude -p` with that task instead: a fresh run without midna's tools or the conversation. Its answer goes to `result.md` in the job's folder unless `result_file` says otherwise. `model` picks the Claude model; by default it's the one midna thinks with.
+  - `prompt` runs `claude -p` with that task instead: a fresh run without midna's tools or the conversation. Its answer goes to `result.md` in the job's folder unless `result_file` says otherwise. `model` picks the Claude model; by default it's the one midna thinks with. `account` (`work` or `personal`) picks the Claude account it runs as; by default it's the `account` setting's ([accounts.md](accounts.md)).
   - The command sees `$MIDNA_JOB_DIR`, the job's folder, and `$MIDNA_JOB_ID`.
   - A job is stopped after `timeout_minutes`: 120 by default, at most 1440.
   - `when_done` says what to do when it ends, e.g. "the user asked to hear what out.txt says". The wakeup that reports the job runs in a session of its own, without the chat the job came from, so this note is all it knows of what the user wanted.

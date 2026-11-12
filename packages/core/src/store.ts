@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { AlertChannel, Mode } from "@midna/protocol";
+import type { Account, AlertChannel, Mode } from "@midna/protocol";
 import { Attachments } from "./attachments.ts";
 import { Bus } from "./bus.ts";
 import { openDatabase } from "./db.ts";
@@ -22,6 +22,10 @@ export interface Settings {
   model: string;
   /** Models to think with, in order, while the model's provider is at its usage limit: ["codex"]. None by default. */
   fallback: string[];
+  /** The Claude account Claude Code runs as, for the brain and for prompt jobs: "work" (~/.claude) or "personal" (~/.claude-personal). */
+  account: Account;
+  /** Whether a Claude account at its usage limit hands over to the other one. Off: the user never wants one account's work to spend the other's usage unasked. */
+  accountFallback: boolean;
   timezone: string;
   /** Non-urgent notifications wait until this window ends. */
   quietHours: { start: string; end: string } | null;
@@ -38,6 +42,8 @@ export const DEFAULT_SETTINGS: Settings = {
   mode: "autonomous",
   model: "claude:opus",
   fallback: [],
+  account: "work",
+  accountFallback: false,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   quietHours: { start: "23:00", end: "08:00" },
   rituals: { morning: "0 8 * * *", evening: "0 21 * * *", weekly: "0 18 * * 0" },

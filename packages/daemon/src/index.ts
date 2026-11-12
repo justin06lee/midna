@@ -8,4 +8,4 @@ export { installService, uninstallService, restartService, serviceInstalled } fr
 export { VERSION } from "./version.ts";
 export { Vault, VaultError, vaultSettings, findBw, findByTitle, type VaultSettings, type VaultConfig } from "./vault.ts";
 export { hostSettings, updateHostSettings } from "./host.ts";
-export { installedBrains, checkModel, checkBrainLive, type BrainCheck } from "@midna/agent";
+export { installedBrains, checkModel, checkBrainLive, accountEmails, type BrainCheck } from "@midna/agent";

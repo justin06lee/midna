@@ -3,8 +3,9 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { platform } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
-import type { Job, JobStatus, Store } from "@midna/core";
-import { resolveModel, type JobStart, type JobsHandle } from "@midna/agent";
+import type { Job, JobStatus, Settings, Store } from "@midna/core";
+import type { Account } from "@midna/protocol";
+import { capKey, claudeConfigDir, resolveModel, usableAccount, type JobStart, type JobsHandle } from "@midna/agent";
 
 /**
  * Jobs: long work midna starts from a turn, run detached so it outlives
@@ -52,6 +53,12 @@ const REWRITTEN = /[$%\\]/;
 const NOT_PASSED = /^(INVOCATION_ID|JOURNAL_STREAM|NOTIFY_SOCKET|MANAGERPID|SYSTEMD_EXEC_PID|LISTEN_\w+|WATCHDOG_\w+|CLAUDECODE|_)$/;
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** What goes before `claude` on a job's command line to run it as the account: its CLAUDE_CONFIG_DIR, or for work none at all. */
+function asAccount(account: Account, home?: string): string[] {
+  const dir = claudeConfigDir(account, home);
+  return dir ? [`CLAUDE_CONFIG_DIR=${shq(dir)}`] : ["env", "-u", "CLAUDE_CONFIG_DIR"];
+}
 const minutes = (ms: number) => `${Math.round(ms / 60_000)} min`;
 
 export interface JobRunnerOptions {
@@ -71,8 +78,10 @@ export interface JobRunnerOptions {
   codexBin?: string | null;
   /** The model midna thinks with now (a capped provider's fallback meanwhile); a prompt job runs on its harness. By default the setting. */
   model?: () => string | null;
-  /** Providers out of usage, with when each resets; a prompt job naming one runs on the active model instead. */
+  /** Providers out of usage (Claude's per account: "claude@work"), with when each resets; a prompt job naming one runs on the active model instead. */
   caps?: () => Record<string, number>;
+  /** Whose ~/.claude-personal a personal-account job runs with; the user's home by default. */
+  home?: string;
   /** With no pid yet and no unit or process to show it running, how long a job may take to start before it counts as never started. */
   startGraceMs?: number;
   /** A job ended and its wakeup is due: run the scheduler now rather than at its next tick. */
@@ -100,21 +109,42 @@ export class JobRunner implements JobsHandle {
     }, opts.pollMs ?? 2_000);
   }
 
-  /** Which harness and model a prompt job runs on: a model named with its
-   *  provider ("codex:gpt-5.5") is that provider's; a bare one ("opus") is the
-   *  active model's provider's; none, or one whose provider is capped, is the
-   *  active model. */
-  private promptModel(asked: string | undefined, active: string): { provider: "claude" | "codex"; model?: string } {
+  /** Which harness, model and Claude account a prompt job runs on: a model
+   *  named with its provider ("codex:gpt-5.5") is that provider's; a bare one
+   *  ("opus") is the active model's provider's; an account named is Claude's;
+   *  none, or one whose provider is capped, is the active model. Claude runs
+   *  on the account asked for or the setting's, or while that one is capped
+   *  the other — only with account fallback on. */
+  private promptModel(asked: string | undefined, askedAccount: Account | undefined, active: string, s: Settings): { provider: "claude" | "codex"; model?: string; account?: Account } {
     const now = resolveModel(active);
-    let named = asked && /^(claude|codex)(:|$)/.test(asked) ? resolveModel(asked) : undefined;
-    if (named && named.provider !== now.provider && this.opts.caps?.()[named.provider]) {
+    const caps = this.opts.caps?.() ?? {};
+    const want = askedAccount ?? s.account;
+    const account = usableAccount(want, caps, s.accountFallback);
+    const capped = (provider: string) => (provider === "claude" ? !account : !!caps[provider]);
+    let named =
+      asked && /^(claude|codex)(:|$)/.test(asked)
+        ? resolveModel(asked)
+        : askedAccount && now.provider !== "claude"
+          ? { provider: "claude", ...(asked ? { model: asked } : {}) }
+          : undefined;
+    if (named && named.provider !== now.provider && capped(named.provider)) {
       named = undefined;
       asked = undefined;
     }
     const provider = named?.provider ?? now.provider;
     if (provider !== "claude" && provider !== "codex") throw new Error(`a prompt job runs on Claude or Codex, not ${provider}; run it through a command instead`);
     const model = named ? named.model : (asked ?? (provider === now.provider ? now.model : undefined));
-    return { provider, ...(model ? { model } : {}) };
+    if (provider === "codex") return { provider, ...(model ? { model } : {}) };
+    if (!account) {
+      const until = caps[capKey("claude", want)]!;
+      throw new Error(
+        `the ${want} Claude account is at its usage limit until ${new Date(until).toISOString()}` +
+          (s.accountFallback ? ", and so is the other" : "; account fallback is off, so it doesn't move to the other account unasked") +
+          ". Start it after the reset, or with the other account if the user says so.",
+      );
+    }
+    if (account !== want) console.log(`[midna] the ${want} account is at its usage limit; a prompt job runs on the ${account} account`);
+    return { provider, ...(model ? { model } : {}), account };
   }
 
   /**
@@ -151,7 +181,7 @@ export class JobRunner implements JobsHandle {
     let command = req.command?.trim() ?? "";
     let resultPath = req.resultFile ?? null;
     if (req.prompt?.trim()) {
-      const { provider, model } = this.promptModel(req.model, this.opts.model?.() ?? settings.model);
+      const { provider, model, account } = this.promptModel(req.model, req.account, this.opts.model?.() ?? settings.model, settings);
       const bin = provider === "codex" ? this.opts.codexBin : this.opts.claudeBin;
       const exe = bin === undefined ? Bun.which(provider) : bin;
       if (!exe) throw new Error(`${provider} isn't on midna's PATH on this machine; run it through a command instead`);
@@ -161,7 +191,7 @@ export class JobRunner implements JobsHandle {
       command = (
         provider === "codex"
           ? [shq(exe), "exec", ...m, "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--ephemeral", "--color", "never", "-o", shq(resultPath), `< "$MIDNA_JOB_DIR/prompt.md"`]
-          : [shq(exe), "-p", "--output-format", "text", ...m, "--dangerously-skip-permissions", `< "$MIDNA_JOB_DIR/prompt.md"`, `> ${shq(resultPath)}`]
+          : [...asAccount(account ?? "work", this.opts.home), shq(exe), "-p", "--output-format", "text", ...m, "--dangerously-skip-permissions", `< "$MIDNA_JOB_DIR/prompt.md"`, `> ${shq(resultPath)}`]
       ).join(" ");
     }
     writeFileSync(join(dir, "run.sh"), command + "\n");

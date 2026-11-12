@@ -9,6 +9,8 @@ import {
   type PermissionHandler,
   type SessionPermissionHandler,
 } from "@justin06lee/yagami";
+import type { Account } from "@midna/protocol";
+import { claudeEnv } from "./accounts.ts";
 import { HERMES, hermesBrain, hermesProblem, isHermes, type TurnFile } from "./hermes.ts";
 
 /**
@@ -24,6 +26,8 @@ export interface BrainRun {
   systemPrompt: string;
   /** yagami model ref: "claude:opus", "opus", "codex:gpt-5.6-sol", "gemini", … */
   model: string;
+  /** The Claude account Claude Code runs as; other harnesses have none. Work when left out. */
+  account?: Account;
   /** Provider session to continue. */
   resume?: string;
   cwd: string;
@@ -89,8 +93,11 @@ export class BrainError extends Error {
 export class BrainCappedError extends BrainError {
   /** midna's tools the turn called before it was cut off: a rerun must check before redoing them. */
   tools: string[] = [];
-  constructor(readonly provider: string, readonly until: number | undefined, sessionId?: string, readonly toolCalls = 0, options?: { cause?: unknown }) {
-    super(`${provider} usage limit reached${until ? ` until ${new Date(until).toISOString()}` : ""}`, sessionId, options);
+  /** For Claude, the account whose limit it is: "claude usage limit reached on the personal account until …". */
+  account?: Account;
+  constructor(readonly provider: string, readonly until: number | undefined, sessionId?: string, readonly toolCalls = 0, options?: { cause?: unknown; account?: Account }) {
+    super(`${provider} usage limit reached${options?.account ? ` on the ${options.account} account` : ""}${until ? ` until ${new Date(until).toISOString()}` : ""}`, sessionId, options);
+    if (options?.account) this.account = options.account;
   }
 }
 
@@ -170,6 +177,7 @@ export const yagamiBrain: Brain = async (run) => {
 
 async function runClaude(run: BrainRun, model: string | undefined): Promise<BrainResult> {
   if (run.signal?.aborted) throw new BrainError("claude turn interrupted before it started");
+  const account = run.account ?? "work";
   // midna's own tools pass in ask mode: they touch midna's state, or — the device_* tools —
   // are gated by the daemon itself, which knows each device's toggles and what counts as acting.
   const askPolicy: PermissionHandler = async (req) =>
@@ -187,7 +195,8 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
       ...(run.resume ? { resume: run.resume } : {}),
       // alwaysLoad: midna's tools are its core abilities — never defer them behind tool search.
       mcpServers: { midna: { type: "http", url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, alwaysLoad: true } as never },
-      env: { MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT) },
+      // The account: CLAUDE_CONFIG_DIR set for personal, unset (whatever midna was started with) for work.
+      env: { MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT), ...claudeEnv(account) },
       ...(run.mode === "autonomous" ? { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true } : {}),
     },
   });
@@ -243,21 +252,21 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
           return { text: msg.result, sessionId, sessionCostUsd: msg.total_cost_usd, usage: turnUsage(msg.usage) };
         }
         if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
-        if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls);
+        if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { account });
         const why = msg.subtype === "success" ? msg.result : msg.subtype;
         // Last resort, should the typed signals ever go missing: the limit's own wording.
-        if (USAGE_LIMIT_TEXT.test(why)) throw new BrainCappedError("claude", resetsAt, sessionId, toolCalls);
+        if (USAGE_LIMIT_TEXT.test(why)) throw new BrainCappedError("claude", resetsAt, sessionId, toolCalls, { account });
         throw new BrainError(`claude turn failed: ${why}`, sessionId);
       }
     }
     if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
-    if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls);
+    if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { account });
     // The prompt's turn never came: say nothing, and let the caller ask again.
     if (notice) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw new BrainError("claude session ended without a result", sessionId);
   } catch (err) {
     if (run.signal?.aborted && !(err instanceof BrainError)) throw new BrainError("claude turn interrupted", sessionId, { cause: err });
-    if (capped && !(err instanceof BrainError)) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { cause: err });
+    if (capped && !(err instanceof BrainError)) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { cause: err, account });
     if (notice && !(err instanceof BrainError)) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw err;
   } finally {

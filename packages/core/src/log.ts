@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { HistoryItem, ReplyFallback, ReplyRef, SpendDay, SpendKind } from "@midna/protocol";
+import type { Account, HistoryItem, ReplyFallback, ReplyRef, SpendDay, SpendKind } from "@midna/protocol";
 import type { Attachments } from "./attachments.ts";
 import { ftsQuery } from "./planning.ts";
 import { DAY, HOUR, fmtDate, startOfLocalDay } from "./time.ts";
@@ -190,13 +190,14 @@ export class Log {
       .all({ q, n: limit }) as Message[];
   }
 
-  startEpisode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; model: string }, now = Date.now()): number {
+  /** `account`: the Claude account a Claude turn runs on; none for other harnesses. */
+  startEpisode(e: { kind: "chat" | "wakeup"; conversationId?: string; wakeupId?: number; model: string; account?: Account }, now = Date.now()): number {
     const row = this.db
       .query(
-        `INSERT INTO episodes (kind, conversation_id, wakeup_id, model, started_at)
-         VALUES ($k, $c, $w, $m, $now) RETURNING id`,
+        `INSERT INTO episodes (kind, conversation_id, wakeup_id, model, account, started_at)
+         VALUES ($k, $c, $w, $m, $a, $now) RETURNING id`,
       )
-      .get({ k: e.kind, c: e.conversationId ?? null, w: e.wakeupId ?? null, m: e.model, now }) as { id: number };
+      .get({ k: e.kind, c: e.conversationId ?? null, w: e.wakeupId ?? null, m: e.model, a: e.account ?? null, now }) as { id: number };
     return row.id;
   }
 
@@ -257,7 +258,7 @@ export class Log {
     return { turns: r.turns, usd: Math.round(r.usd * 10_000) / 10_000 };
   }
 
-  /** What thinking cost on each of the last `days` local days, today first, by what started each turn. */
+  /** What thinking cost on each of the last `days` local days, today first, by what started each turn and, for Claude's, by account. */
   spendByDay(days: number, tz: string, now = Date.now()): SpendDay[] {
     const today = startOfLocalDay(now, tz);
     // Noon of each day names it, whatever a DST change does to its length.
@@ -265,11 +266,11 @@ export class Log {
     const byDate = new Map(out.map((d) => [d.date, d]));
     const rows = this.db
       .query(
-        `SELECT e.started_at AS at, e.kind AS kind, e.cost_usd AS usd, w.kind AS wkind, w.created_by AS by,
+        `SELECT e.started_at AS at, e.kind AS kind, e.cost_usd AS usd, e.account AS account, w.kind AS wkind, w.created_by AS by,
            e.ended_at IS NOT NULL AND e.error IS NULL AND e.cost_usd IS NULL AS unpriced
          FROM episodes e LEFT JOIN wakeups w ON w.id = e.wakeup_id WHERE e.started_at >= $s`,
       )
-      .all({ s: startOfLocalDay(today + 12 * HOUR - (days - 1) * DAY, tz) }) as Array<{ at: number; kind: string; usd: number | null; wkind: string | null; by: string | null; unpriced: number }>;
+      .all({ s: startOfLocalDay(today + 12 * HOUR - (days - 1) * DAY, tz) }) as Array<{ at: number; kind: string; usd: number | null; account: Account | null; wkind: string | null; by: string | null; unpriced: number }>;
     for (const r of rows) {
       const d = byDate.get(fmtDate(r.at, tz).slice(0, 10));
       if (!d) continue;
@@ -279,13 +280,18 @@ export class Log {
       b.turns++;
       d.usd += r.usd ?? 0;
       d.turns++;
+      if (r.account) {
+        const a = ((d.byAccount ??= {})[r.account] ??= { usd: 0, turns: 0 });
+        a.usd += r.usd ?? 0;
+        a.turns++;
+      }
       // A harness with no price per turn (Codex on a ChatGPT plan) reports none; say so rather than pass it off as free.
       if (r.unpriced) d.unpriced = (d.unpriced ?? 0) + 1;
     }
     const cents = (n: number) => Math.round(n * 10_000) / 10_000;
     for (const d of out) {
       d.usd = cents(d.usd);
-      for (const b of Object.values(d.byKind)) b.usd = cents(b.usd);
+      for (const b of [...Object.values(d.byKind), ...Object.values(d.byAccount ?? {})]) b.usd = cents(b.usd);
     }
     return out;
   }

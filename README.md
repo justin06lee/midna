@@ -70,9 +70,11 @@ midna status                # also what thinking cost, today and each of the las
 midna mode ask              # ask before acting; `midna mode autonomous` to undo
 midna model codex:gpt-5.6-sol
 midna model claude:opus --fallback codex   # Codex while Claude is at its usage limit
+midna account personal      # think as the personal Claude account; `midna account work` to go back
+midna account --fallback on # a capped account carries on with the other one (off by default)
 ```
 
-With a fallback, a usage limit doesn't stop midna: it thinks with the next model until the limit resets, tells you once, and goes back. Without one, wakeups wait for the reset and a chat says when midna will answer. See [docs/providers.md](docs/providers.md), including the Codex sign-in.
+With a fallback, a usage limit doesn't stop midna: it thinks with the next model until the limit resets, tells you once, and goes back. Without one, wakeups wait for the reset and a chat says when midna will answer. See [docs/providers.md](docs/providers.md), including the Codex sign-in. Claude runs as one of two accounts, work (Claude Code's own `~/.claude`) or personal (`~/.claude-personal`); prompt jobs can pick theirs, and `midna status` tells spend per account. See [docs/accounts.md](docs/accounts.md).
 
 A new message from any device interrupts whatever midna is doing, and the turn after picks up with what it was in the middle of. Start a message with `/queue` to have it wait for the current turn instead.
 

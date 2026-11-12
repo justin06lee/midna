@@ -570,6 +570,21 @@ describe("spend", () => {
     expect(days[2]).toEqual({ date: "2026-10-20", usd: 0, turns: 0, byKind: {} });
   });
 
+  test("Claude's spend is told by the account it ran on; other harnesses' turns aren't in it", () => {
+    const s = fresh();
+    const now = Date.parse("2026-10-22T20:00:00Z");
+    const turn = (usd: number, account?: "work" | "personal", model = "claude:opus") =>
+      s.log.endEpisode(s.log.startEpisode({ kind: "chat", model, ...(account ? { account } : {}) }, now - HOUR), { sessionCostUsd: usd });
+    turn(0.2, "work");
+    turn(0.1, "work");
+    turn(0.4, "personal");
+    turn(0.05, undefined, "codex");
+    const [today] = s.log.spendByDay(1, TZ, now);
+    expect(today).toMatchObject({ usd: 0.75, turns: 4, byAccount: { work: { usd: 0.3, turns: 2 }, personal: { usd: 0.4, turns: 1 } } });
+    // A day with no Claude turn that knows its account says nothing of accounts.
+    expect(s.log.spendByDay(2, TZ, now)[1]!.byAccount).toBeUndefined();
+  });
+
   test("a turn that finished with no price is counted as unpriced, not as free", () => {
     const s = fresh();
     const now = Date.parse("2026-10-22T20:00:00Z");

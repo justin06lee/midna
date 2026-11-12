@@ -100,6 +100,13 @@ export function isAlert(item: Pick<OutboxItem, "kind" | "priority">): boolean {
 export const AlertChannel = z.enum(["telegram", "both", "push"]);
 export type AlertChannel = z.infer<typeof AlertChannel>;
 
+/**
+ * Which Claude account Claude Code runs as: "work", Claude Code's own config
+ * (~/.claude), or "personal" (CLAUDE_CONFIG_DIR=~/.claude-personal). After 0.13.2.
+ */
+export const Account = z.enum(["work", "personal"]);
+export type Account = z.infer<typeof Account>;
+
 /** A phone's Apple push token, sent by the app once notifications are allowed. From 0.13. */
 export const PushRegistration = z.object({
   /** The APNs device token, hex. */
@@ -390,8 +397,16 @@ export interface Status {
   fallback?: string[];
   /** The model midna thinks with right now: `model`, or a fallback while it's capped. From 0.12. */
   activeModel?: string;
-  /** Providers out of usage, and when each resets (epoch ms). From 0.12. */
+  /** Providers out of usage, and when each resets (epoch ms). After 0.13.2, Claude's are per account: "claude@work", "claude@personal". From 0.12. */
   caps?: Record<string, number>;
+  /** The Claude account midna thinks and runs prompt jobs with. After 0.13.2. */
+  account?: Account;
+  /** Whether a capped Claude account hands over to the other one. Off unless set. After 0.13.2. */
+  accountFallback?: boolean;
+  /** The account thinking right now, when the brain is Claude: `account`, or the other while it's capped. After 0.13.2. */
+  activeAccount?: Account;
+  /** The email each account is signed in as on the host, null when it isn't. After 0.13.2. */
+  accounts?: Record<Account, string | null>;
   /** Where alerts go. From 0.13. */
   alerts?: AlertChannel;
   /** Push notifications: whether the host has an APNs key, and how many phones are registered. From 0.13. */
@@ -410,6 +425,8 @@ export interface SpendDay {
   byKind: Partial<Record<SpendKind, { usd: number; turns: number }>>;
   /** Turns that finished without a price, such as Codex on a ChatGPT plan; counted in turns, not usd. Absent when none, and from hosts before 0.12. */
   unpriced?: number;
+  /** Claude's turns, by the account they ran on. Absent from hosts up to 0.13.2. */
+  byAccount?: Partial<Record<Account, { usd: number; turns: number }>>;
 }
 
 export interface BrainHealth {
@@ -428,6 +445,10 @@ export const SettingsPatch = z.object({
   model: z.string().min(1).optional(),
   /** Models to fall back to, in order, while the one before is out of usage; [] for none. */
   fallback: z.array(z.string().min(1)).max(4).optional(),
+  /** The Claude account to think and run prompt jobs with. */
+  account: Account.optional(),
+  /** Whether a capped Claude account hands over to the other one. */
+  accountFallback: z.boolean().optional(),
   timezone: z.string().min(1).optional(),
   quietHours: z.object({ start: z.string(), end: z.string() }).nullable().optional(),
   /** "paused" stops every device's hands at once, whatever each app says. */

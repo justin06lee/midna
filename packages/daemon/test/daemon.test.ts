@@ -239,6 +239,12 @@ describe("midnad", () => {
     expect(none.fallback).toEqual([]);
     expect(none.activeModel).toBe(none.model);
     expect(none.caps).toEqual({});
+    expect(none).toMatchObject({ account: "work", accountFallback: false, activeAccount: "work" });
+    expect(Object.keys(none.accounts!)).toEqual(["work", "personal"]);
+    await expect(client.updateSettings({ account: "family" as never })).rejects.toThrow();
+    const personal = await client.updateSettings({ account: "personal", accountFallback: true });
+    expect(personal).toMatchObject({ account: "personal", accountFallback: true, activeAccount: "personal" });
+    await client.updateSettings({ account: "work", accountFallback: false });
     const s = await client.updateSettings({ mode: "ask", timezone: "Asia/Seoul" });
     expect(s.mode).toBe("ask");
     script = async (run) => {

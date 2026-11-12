@@ -1,4 +1,5 @@
 import type { Job } from "@midna/core";
+import type { Account } from "@midna/protocol";
 
 /**
  * What midna's job tools reach: long work run detached from the turn, so it
@@ -22,6 +23,8 @@ export interface JobStart {
   prompt?: string;
   /** For a prompt: the model, bare for the harness midna thinks with or "codex:…" for another; by default the one midna thinks with now. */
   model?: string;
+  /** For a prompt run by Claude: the account it runs as; by default the account setting's. */
+  account?: Account;
   /** Absolute; midna's workspace when left out. */
   cwd?: string;
   timeoutMs?: number;

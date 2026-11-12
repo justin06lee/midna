@@ -49,7 +49,7 @@ describe("a brain at its usage limit", () => {
     // Held: the next one doesn't run the brain at all.
     expect(await a.wakeup(w)).toEqual({ retryAt: until });
     expect(runs.length).toBe(1);
-    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit is reached until (?:\w{3} )?\d+:\d\d [ap]m; I'll pick up what's waiting then\.$/)]);
+    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the work account is reached until (?:\w{3} )?\d+:\d\d [ap]m; I'll pick up what's waiting then\.$/)]);
   });
 
   test("a cap that doesn't say when holds a while, not forever", async () => {
@@ -68,7 +68,7 @@ describe("a brain at its usage limit", () => {
     a.receive({ text: "what's on today?", client: "test" });
     await a.idle();
     const replies = said().filter((m) => m.conv === MAIN);
-    expect(replies.map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit is reached until .+\. I'll answer you then\.$/)]);
+    expect(replies.map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the work account is reached until .+\. I'll answer you then\.$/)]);
     expect(store.log.unseen(MAIN).filter((m) => m.role === "user")).toEqual([]);
     const f = followups();
     expect(f.length).toBe(1);
@@ -87,7 +87,7 @@ describe("a brain at its usage limit", () => {
     expect(runs[1]!.resume).toBeUndefined();
     expect(runs[1]!.prompt).toContain("hit its usage limit partway through this turn, after 2 tool calls");
     expect(said("chat").map((m) => m.text)).toEqual(["done"]);
-    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit is reached until .+; I'm thinking with codex:gpt-5\.5 till then\.$/)]);
+    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the work account is reached until .+; I'm thinking with codex:gpt-5\.5 till then\.$/)]);
     const episodes = store.db.query("SELECT model, error FROM episodes ORDER BY id").all() as Array<{ model: string; error: string | null }>;
     expect(episodes.map((e) => e.model)).toEqual(["claude:opus", "codex:gpt-5.5"]);
     expect(a.activeModel()).toBe("codex:gpt-5.5");
@@ -100,7 +100,7 @@ describe("a brain at its usage limit", () => {
 
     // The reset passes: the model thinks again, in a fresh session.
     until = Date.now() - 1;
-    store.setState("brainCaps", { claude: until });
+    store.setState("brainCaps", { "claude@work": until });
     expect(a.activeModel()).toBe("claude:opus");
     a.receive({ text: "thanks", client: "test" });
     await a.idle();
@@ -126,7 +126,7 @@ describe("a brain at its usage limit", () => {
     const a = assistant(brain);
     a.receive({ text: "hi", client: "test" });
     await a.idle();
-    expect(said("error").map((m) => m.text)).toEqual([expect.stringMatching(/^Codex and Claude are both at their usage limits; the first resets at .+\. I'll answer you then\.$/)]);
+    expect(said("error").map((m) => m.text)).toEqual([expect.stringMatching(/^Codex and Claude \(work\) are both at their usage limits; the first resets at .+\. I'll answer you then\.$/)]);
     expect(followups()[0]!.due_at).toBe(soon + 60_000);
   });
 
@@ -140,6 +140,74 @@ describe("a brain at its usage limit", () => {
   });
 });
 
+describe("two Claude accounts", () => {
+  test("the brain runs on the account setting's account, work unless set, and its turns record it", async () => {
+    const { brain, runs } = brainFor(() => null);
+    const a = assistant(brain);
+    a.receive({ text: "hi", client: "test" });
+    await a.idle();
+    store.updateSettings({ account: "personal" });
+    a.receive({ text: "and now?", client: "test" });
+    await a.idle();
+    expect(runs.map((r) => r.account)).toEqual(["work", "personal"]);
+    // A session lives in its account's config: the other account starts afresh.
+    expect(runs[1]!.resume).toBeUndefined();
+    const episodes = store.db.query("SELECT model, account FROM episodes ORDER BY id").all();
+    expect(episodes).toEqual([{ model: "claude:opus", account: "work" }, { model: "claude:opus", account: "personal" }]);
+    expect(a.activeBrain()).toEqual({ model: "claude:opus", account: "personal" });
+  });
+
+  test("other harnesses run with no account", async () => {
+    store.updateSettings({ model: "codex" });
+    const { brain, runs } = brainFor(() => null);
+    const a = assistant(brain);
+    a.receive({ text: "hi", client: "test" });
+    await a.idle();
+    expect(runs[0]!.account).toBeUndefined();
+    expect(store.db.query("SELECT account FROM episodes").get()).toEqual({ account: null });
+  });
+
+  test("account fallback off (the default): a capped account never moves to the other one", async () => {
+    store.updateSettings({ fallback: ["codex"] });
+    const until = Date.now() + HOUR;
+    const { brain, runs } = brainFor((run) => (run.model === "claude:opus" ? new BrainCappedError("claude", until, undefined, 0, { account: run.account }) : null));
+    const a = assistant(brain);
+    a.receive({ text: "hi", client: "test" });
+    await a.idle();
+    expect(runs.map((r) => [r.model, r.account])).toEqual([["claude:opus", "work"], ["codex", undefined]]);
+    expect(a.caps()).toEqual({ "claude@work": until });
+    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the work account is reached until .+; I'm thinking with codex till then\.$/)]);
+  });
+
+  test("account fallback on: the same turn carries on with the other account, then the other models", async () => {
+    store.updateSettings({ accountFallback: true, fallback: ["codex"] });
+    const until = Date.now() + HOUR;
+    const { brain, runs } = brainFor((run) => (run.account === "work" ? new BrainCappedError("claude", until, "s1", 1, { account: "work" }) : null));
+    const a = assistant(brain);
+    a.receive({ text: "send me the report", client: "test" });
+    await a.idle();
+    expect(runs.map((r) => [r.model, r.account])).toEqual([["claude:opus", "work"], ["claude:opus", "personal"]]);
+    expect(runs[1]!.resume).toBeUndefined();
+    expect(runs[1]!.prompt).toContain("Your previous brain (claude:opus on the work account) hit its usage limit");
+    expect(said("system").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the work account is reached until .+; I'm thinking with claude:opus on the personal account till then\.$/)]);
+    expect(a.activeBrain()).toEqual({ model: "claude:opus", account: "personal" });
+
+    // Both capped: on to the next model.
+    store.setState("brainCaps", { "claude@work": until, "claude@personal": until });
+    expect(a.activeBrain()).toEqual({ model: "codex" });
+  });
+
+  test("a cap stored without its account counts against the account the turn ran on", async () => {
+    store.updateSettings({ account: "personal" });
+    const { brain } = brainFor(() => new BrainCappedError("claude", Date.now() + HOUR));
+    const a = assistant(brain);
+    a.receive({ text: "hi", client: "test" });
+    await a.idle();
+    expect(Object.keys(a.caps())).toEqual(["claude@personal"]);
+    expect(said("error").map((m) => m.text)).toEqual([expect.stringMatching(/^Claude's usage limit on the personal account is reached until .+\. I'll answer you then\.$/)]);
+  });
+});
+
 describe("brainProblem on a cap", () => {
   test("the error, and its message as a wakeup keeps it", () => {
     const until = Date.parse("2026-10-26T23:00:00.000Z");
@@ -147,6 +215,13 @@ describe("brainProblem on a cap", () => {
     expect(brainProblem(err)).toEqual({ reason: "capped", provider: "claude", until });
     expect(brainProblem(new Error(err.message))).toEqual({ reason: "capped", provider: "claude", until });
     expect(brainProblem(new Error("codex usage limit reached"))).toEqual({ reason: "capped", provider: "codex" });
+  });
+  test("with the account it's on", () => {
+    const until = Date.parse("2026-10-26T23:00:00.000Z");
+    const err = new BrainCappedError("claude", until, undefined, 0, { account: "personal" });
+    expect(err.message).toBe("claude usage limit reached on the personal account until 2026-10-26T23:00:00.000Z");
+    expect(brainProblem(err)).toEqual({ reason: "capped", provider: "claude", until, account: "personal" });
+    expect(brainProblem(new Error(`wakeup failed: ${err.message}`))).toEqual({ reason: "capped", provider: "claude", until, account: "personal" });
   });
   test("a cap stored before midna knew one", () => {
     expect(brainProblem(new Error("claude turn failed: Claude AI usage limit reached|1761519600"))).toEqual({ reason: "capped", provider: "claude" });

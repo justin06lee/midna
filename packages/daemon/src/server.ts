@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
+import { QUEUE_PREFIX, accountEmails, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
   AnswerApproval,
   HandsHello,
@@ -157,6 +157,10 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       fallback: s.fallback,
       activeModel: assistant.activeModel() ?? s.model,
       caps: assistant.caps(),
+      account: s.account,
+      accountFallback: s.accountFallback,
+      ...(assistant.activeBrain()?.account ? { activeAccount: assistant.activeBrain()!.account } : {}),
+      accounts: accountEmails(),
       alerts: s.alerts,
       push: { configured: deps.push?.configured ?? false, phones: deps.push?.phones() ?? 0 },
     };

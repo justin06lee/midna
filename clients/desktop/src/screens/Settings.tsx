@@ -13,7 +13,8 @@ const models = (text: string): string[] => text.split(",").map((m) => m.trim()).
 /** " until 4:00 PM" for the model's provider's reset, when the host says. */
 function capUntil(status: Status): string {
   const provider = status.model.includes(":") ? status.model.slice(0, status.model.indexOf(":")) : "claude";
-  const until = status.caps?.[provider];
+  // Claude's caps are per account on hosts after 0.13.2: "claude@work".
+  const until = status.caps?.[provider === "claude" && status.account ? `claude@${status.account}` : provider] ?? status.caps?.[provider];
   return until ? ` until ${new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
 }
 

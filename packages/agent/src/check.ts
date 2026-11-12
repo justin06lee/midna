@@ -1,5 +1,7 @@
-import { AuthRequiredError, ProviderNotInstalledError, Yagami } from "@justin06lee/yagami";
-import { BrainCappedError, USAGE_LIMIT_TEXT, checkModel } from "./brain.ts";
+import { AuthRequiredError, ProviderNotInstalledError, Yagami, loadHostEngineConfig } from "@justin06lee/yagami";
+import type { Account } from "@midna/protocol";
+import { claudeConfigDir } from "./accounts.ts";
+import { BrainCappedError, USAGE_LIMIT_TEXT, checkModel, resolveModel } from "./brain.ts";
 import { checkHermes, isHermes } from "./hermes.ts";
 
 export type BrainCheck =
@@ -16,18 +18,18 @@ export function howToSignIn(loginCommand: string): string {
 /** yagami's sign-in and missing-CLI failures, as their messages read once wrapped in an ApiError or a BrainError. */
 const SIGNED_OUT = /: not logged in\b[\s\S]*\. Run: ([^\n]+?)\s*$/;
 const NOT_INSTALLED = /: CLI not found\b(?: \([\s\S]*?\))?\. ([^\n]+?)\s*$/;
-/** BrainCappedError's message, as a wakeup's stored error keeps it: "claude usage limit reached until <ISO>". */
-const CAPPED = /(?:^|: )([a-z][\w-]*) usage limit reached(?: until (\d{4}-\d\d-\d\dT[\d:.]+Z))?/;
+/** BrainCappedError's message, as a wakeup's stored error keeps it: "claude usage limit reached [on the personal account ]until <ISO>". */
+const CAPPED = /(?:^|: )([a-z][\w-]*) usage limit reached(?: on the (work|personal) account)?(?: until (\d{4}-\d\d-\d\dT[\d:.]+Z))?/;
 
 export type BrainProblem =
   | { reason: "signed_out"; loginCommand: string }
   | { reason: "not_installed"; installHint: string }
-  /** The provider's usage limit: it thinks again from `until` (epoch ms), when known. */
-  | { reason: "capped"; provider: string; until?: number };
+  /** The provider's usage limit: it thinks again from `until` (epoch ms), when known. For Claude, the account it's on, when known. */
+  | { reason: "capped"; provider: string; until?: number; account?: Account };
 
 /** What's wrong with the brain, when an error says it's signed out, missing or capped rather than just failing. */
 export function brainProblem(err: unknown): BrainProblem | null {
-  if (err instanceof BrainCappedError) return { reason: "capped", provider: err.provider, ...(err.until ? { until: err.until } : {}) };
+  if (err instanceof BrainCappedError) return { reason: "capped", provider: err.provider, ...(err.until ? { until: err.until } : {}), ...(err.account ? { account: err.account } : {}) };
   // A session or a BrainError carries yagami's typed failure itself, or as its `cause`. The codes
   // match even when two copies of yagami end up in a bundle and instanceof can't.
   type Failure = { cause?: unknown; code?: string; loginCommand?: string; installHint?: string; message?: string };
@@ -44,7 +46,7 @@ export function brainProblem(err: unknown): BrainProblem | null {
     const hint = NOT_INSTALLED.exec(text)?.[1];
     if (hint) return { reason: "not_installed", installHint: hint };
     const cap = CAPPED.exec(text);
-    if (cap) return { reason: "capped", provider: cap[1]!, ...(cap[2] ? { until: Date.parse(cap[2]) } : {}) };
+    if (cap) return { reason: "capped", provider: cap[1]!, ...(cap[3] ? { until: Date.parse(cap[3]) } : {}), ...(cap[2] ? { account: cap[2] as Account } : {}) };
     // Before 0.12 a cap was stored as a plain failure: "claude turn failed: Claude AI usage limit reached|…".
     const old = /^([a-z][\w-]*) turn failed: /.exec(text)?.[1];
     if (old && USAGE_LIMIT_TEXT.test(text)) return { reason: "capped", provider: old };
@@ -56,9 +58,10 @@ export function brainProblem(err: unknown): BrainProblem | null {
 
 /**
  * One tiny real turn through the brain the user picked: the only way to know
- * the CLI is not just installed but signed in. Costs a few tokens.
+ * the CLI is not just installed but signed in. Costs a few tokens. For
+ * Claude, on `account` (work when left out).
  */
-export async function checkBrainLive(model: string): Promise<BrainCheck> {
+export async function checkBrainLive(model: string, account?: Account): Promise<BrainCheck> {
   const problem = checkModel(model);
   if (problem) return { ok: false, model, reason: "unusable", message: problem };
   if (isHermes(model)) {
@@ -66,7 +69,10 @@ export async function checkBrainLive(model: string): Promise<BrainCheck> {
     return down ? { ok: false, model, reason: "unusable", message: down } : { ok: true, model };
   }
   try {
-    await new Yagami().messages.create({ model, max_tokens: 16, messages: [{ role: "user", content: "Reply with the single word: ok" }] });
+    const configDir = account && resolveModel(model).provider === "claude" ? claudeConfigDir(account) : undefined;
+    const host = loadHostEngineConfig();
+    const yagami = configDir ? new Yagami({ ...host, providerConfig: { ...host.providerConfig, claude: { ...host.providerConfig?.claude, configDir } } }) : new Yagami();
+    await yagami.messages.create({ model, max_tokens: 16, messages: [{ role: "user", content: "Reply with the single word: ok" }] });
     return { ok: true, model };
   } catch (err) {
     const p = brainProblem(err);

@@ -116,11 +116,63 @@ describe("the runner", () => {
     r.shutdown();
   });
 
+  test("a prompt runs claude as the account asked for, or the setting's; work never inherits a CLAUDE_CONFIG_DIR", async () => {
+    const bin = join(tmp, "fake-claude-as");
+    writeFileSync(bin, '#!/bin/sh\necho "config: ${CLAUDE_CONFIG_DIR-unset}"\n');
+    chmodSync(bin, 0o755);
+    const was = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = "/somewhere/else";
+    try {
+      const { r, store, ended } = runner({ claudeBin: bin, home: "/home/u" });
+      const work = await r.start({ label: "w", prompt: "x", episodeId: null });
+      const personal = await r.start({ label: "p", prompt: "x", account: "personal", episodeId: null });
+      store.updateSettings({ account: "personal" });
+      const byDefault = await r.start({ label: "d", prompt: "x", episodeId: null });
+      await until("their ends", () => ended.length === 3);
+      expect(readFileSync(work.result_path!, "utf8")).toBe("config: unset\n");
+      expect(work.command).toStartWith("env -u CLAUDE_CONFIG_DIR ");
+      expect(readFileSync(personal.result_path!, "utf8")).toBe("config: /home/u/.claude-personal\n");
+      expect(personal.command).toStartWith("CLAUDE_CONFIG_DIR='/home/u/.claude-personal' ");
+      expect(readFileSync(byDefault.result_path!, "utf8")).toBe("config: /home/u/.claude-personal\n");
+      r.shutdown();
+    } finally {
+      if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = was;
+    }
+  });
+
+  test("a capped account moves to the other only with account fallback on; naming an account runs it on Claude", async () => {
+    const bin = join(tmp, "fake-claude-as2");
+    writeFileSync(bin, '#!/bin/sh\necho "config: ${CLAUDE_CONFIG_DIR-unset}"\n');
+    chmodSync(bin, 0o755);
+    let caps: Record<string, number> = { "claude@work": Date.now() + 3_600_000 };
+    const { r, store, ended } = runner({ claudeBin: bin, home: "/home/u", caps: () => caps });
+    await expect(r.start({ label: "x", prompt: "x", episodeId: null })).rejects.toThrow("the work Claude account is at its usage limit until");
+    await expect(r.start({ label: "x", prompt: "x", episodeId: null })).rejects.toThrow("account fallback is off");
+    // The user can still ask for the other account by name.
+    const asked = await r.start({ label: "p", prompt: "x", account: "personal", episodeId: null });
+    store.updateSettings({ accountFallback: true });
+    const moved = await r.start({ label: "m", prompt: "x", episodeId: null });
+    await until("their ends", () => ended.length === 2);
+    expect(readFileSync(asked.result_path!, "utf8")).toBe("config: /home/u/.claude-personal\n");
+    expect(readFileSync(moved.result_path!, "utf8")).toBe("config: /home/u/.claude-personal\n");
+    caps = { ...caps, "claude@personal": Date.now() + 3_600_000 };
+    await expect(r.start({ label: "x", prompt: "x", episodeId: null })).rejects.toThrow("and so is the other");
+    r.shutdown();
+
+    // Thinking with Codex, a prompt naming an account still runs on Claude.
+    const { r: codex, ended: codexEnded } = runner({ claudeBin: bin, codexBin: null, home: "/home/u", model: () => "codex" });
+    const onClaude = await codex.start({ label: "c", prompt: "x", account: "personal", episodeId: null });
+    await until("its end", () => codexEnded[0]);
+    expect(readFileSync(onClaude.result_path!, "utf8")).toBe("config: /home/u/.claude-personal\n");
+    codex.shutdown();
+  });
+
   test("a prompt runs codex exec while midna thinks with Codex, and a capped provider's model moves to it", async () => {
     const bin = join(tmp, "fake-codex");
     writeFileSync(bin, '#!/bin/sh\nfor a; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done\n{ echo "args: $*"; cat; } > "$out"\n');
     chmodSync(bin, 0o755);
-    const { r, ended } = runner({ codexBin: bin, model: () => "codex:gpt-5.5", caps: () => ({ claude: Date.now() + 3_600_000 }) });
+    const { r, ended } = runner({ codexBin: bin, model: () => "codex:gpt-5.5", caps: () => ({ "claude@work": Date.now() + 3_600_000 }) });
     const flags = "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --ephemeral --color never";
     const job = await r.start({ label: "think", prompt: "what's 2+2?", episodeId: null });
     const capped = await r.start({ label: "think", prompt: "and 3+3?", model: "claude:opus", episodeId: null });

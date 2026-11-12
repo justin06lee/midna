@@ -441,6 +441,11 @@ export const MIGRATIONS: string[] = [
     at INTEGER NOT NULL
   );
   `,
+  // Two Claude accounts: the one a Claude turn ran on, so spend is told per
+  // account. NULL for other harnesses, and for turns before it was kept.
+  `
+  ALTER TABLE episodes ADD COLUMN account TEXT;
+  `,
 ];
 
 export function openDatabase(path: string): Database {
