@@ -76,7 +76,7 @@ midna account --fallback on # a capped account carries on with the other one (of
 
 With a fallback, a usage limit doesn't stop midna: it thinks with the next model until the limit resets, tells you once, and goes back. Without one, wakeups wait for the reset and a chat says when midna will answer. See [docs/providers.md](docs/providers.md), including the Codex sign-in. Claude runs as one of two accounts, work (Claude Code's own `~/.claude`) or personal (`~/.claude-personal`); prompt jobs can pick theirs, and `midna status` tells spend per account. See [docs/accounts.md](docs/accounts.md).
 
-A new message from any device interrupts whatever midna is doing, and the turn after picks up with what it was in the middle of. Start a message with `/queue` to have it wait for the current turn instead.
+A message you send while midna is working doesn't stop it: it reaches the turn in progress, and midna answers at once if it's quick or urgent, or says it's seen it, finishes, then gets to it. A message that says to stop ("stop", "cancel that", "hold on") or starts with `/stop` interrupts instead, and the turn after picks up with what it was in the middle of. Start a message with `/queue` to have it wait for the current turn. Brains other than Claude can't take a message mid-turn, so for them every message interrupts, as before. See [docs/messages-mid-turn.md](docs/messages-mid-turn.md).
 
 **From other programs:** `midna event --source ci --title "nightly build passed"` tells midna something happened elsewhere (`--json -` adds the details). midna hears it in the background, never as you, and it interrupts nothing; see [docs/inbound-events.md](docs/inbound-events.md).
 

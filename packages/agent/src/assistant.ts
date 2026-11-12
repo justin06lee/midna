@@ -3,11 +3,11 @@ import { MAIN, HOUR, contextSections, fmt, logTail, pinnedFacts, renderNow, type
 import { EVENT_WINDOW_MS, type Account, type Attachment, type BrainHealth, type EventReceipt, type InReplyTo, type ReplyFallback, type ReplyRef } from "@midna/protocol";
 import { capKey, otherAccount } from "./accounts.ts";
 import { liftLocalImages, workspaceCopy } from "./attachments.ts";
-import { BrainCappedError, BrainError, resolveModel, yagamiBrain, type Brain } from "./brain.ts";
+import { BrainCappedError, BrainError, Inbox, resolveModel, yagamiBrain, type Brain } from "./brain.ts";
 import { brainProblem, checkBrainLive, howToSignIn, type BrainProblem } from "./check.ts";
 import type { HandsHandle } from "./hands.ts";
 import { isHermes, type TurnFile } from "./hermes.ts";
-import { INTRODUCTION, devicesSection, eventsTask, jobTask, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
+import { INTRODUCTION, devicesSection, eventsTask, jobTask, midTurnNote, ownTask, replyNote, stateNote, systemPrompt, took, wakeupPrompt, wakeupsPrompt, type Environment } from "./prompt.ts";
 import { ruriTurn } from "./ruriTurns.ts";
 
 export interface AssistantOptions {
@@ -18,7 +18,7 @@ export interface AssistantOptions {
   brain?: Brain;
   /** How many model sessions may run at once (subscriptions have rate limits). */
   concurrency?: number;
-  /** Messages this close together make one interrupt; tests make it short. */
+  /** Messages this close together make one interrupt (when one does interrupt); tests make it short. */
   coalesceMs?: number;
   /** The user's computers that offer their hands, for the prompt to name. */
   hands?: HandsHandle;
@@ -44,8 +44,26 @@ const LEFTOVER_WINDOW = 6 * HOUR;
 /** How many brain sessions' last-seen state is kept, so their next turn gets only what changed. */
 const STATE_SESSIONS_KEPT = 200;
 
-/** "/queue …" waits for the turn in progress instead of interrupting it. */
+/** "/queue …" waits for the turn in progress to finish, without reaching it mid-turn. */
 export const QUEUE_PREFIX = /^\/queue(?:@\w+)?(?:\s+|$)/i;
+/** "/stop …" interrupts the turn in progress at once, whatever it is and whatever brain runs it. */
+export const STOP_PREFIX = /^\/stop(?:@\w+)?(?:\s+|$)/i;
+
+const STOP_LEAD = String.raw`(?:(?:no|ok|okay|please|pls|hey|actually|wait|midna|oh)[\s,.!]+)*`;
+const STOP_VERB = String.raw`(?:stop|cancel|abort|halt|kill)(?:\s+(?:it|that|this|everything|all|now|please|pls|right now|what you'?re doing))*`;
+const STOP_PAUSE = String.raw`(?:wait|hold on|hold up|hang on|never ?mind|nvm|scratch that|forget (?:it|that|about it))(?:\s+(?:a sec(?:ond)?|a moment|a minute|please))?`;
+const STOP_WORDS = new RegExp(String.raw`^${STOP_LEAD}(?:${STOP_VERB}|${STOP_PAUSE})(?:\s*[.!,;:?—–-]|\s*$)`);
+
+/**
+ * A message that tells midna to stop what it is doing — "stop", "cancel
+ * that", "hold on", "wait, …", /stop — rather than one to take in while it
+ * works. Only the opening counts, and only as a phrase of its own: "cancel
+ * my 3pm" and "stop by the store" are requests, and reach the turn mid-way.
+ */
+export function saysStop(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/\u2019/g, "'");
+  return STOP_PREFIX.test(t) || STOP_WORDS.test(t);
+}
 
 /** A model to think with, and for Claude the account it runs on. */
 export interface BrainChoice {
@@ -53,7 +71,7 @@ export interface BrainChoice {
   account?: Account;
 }
 
-/** A model session in flight, and what it is doing, so the user's next message can interrupt it. */
+/** A model session in flight, and what it is doing, so the user's next message can reach it or interrupt it. */
 interface Turn {
   abort: AbortController;
   startedAt: number;
@@ -64,6 +82,8 @@ interface Turn {
   tools: number;
   /** For a wakeup: why it runs. */
   reason?: string;
+  /** For a chat turn: the user's messages that reach it mid-turn, when its brain can take them. */
+  inbox?: Inbox;
 }
 
 /** What a conversation's next turn hears about work that was cut short for it. */
@@ -94,7 +114,7 @@ export class Assistant {
   private slots: number;
   private readonly waiting: Array<() => void> = [];
   private readonly aborts = new Set<AbortController>();
-  /** The chat turn running in each conversation, and the wakeups running, for the user's next message to interrupt. */
+  /** The chat turn running in each conversation, and the wakeups running, for the user's next message to reach or interrupt. */
   private readonly turns = new Map<string, Turn>();
   private readonly wakeups = new Map<number, Turn>();
   /** What each conversation's next turn should hear about work cut short for it. */
@@ -124,9 +144,12 @@ export class Assistant {
 
   /**
    * A message from the user, from any client, with the ids of anything they
-   * uploaded to go with it. It interrupts whatever midna is doing — the turn
-   * in progress in its conversation, and any wakeup — to be answered at
-   * once; one that starts with /queue waits for the turn in progress.
+   * uploaded to go with it. It goes into the chat turn in progress, which
+   * answers it now or acknowledges it and gets to it when its work is done;
+   * wakeups carry on. A turn whose brain can't take it mid-turn is
+   * interrupted to answer it, as is everything — the turn and any wakeup —
+   * when the message says to stop (saysStop). One that starts with /queue
+   * waits for the turn in progress, never reaching it.
    */
   receive(m: { text: string; client: string; conversationId?: string; replyTo?: number; attachments?: string[]; inReplyTo?: InReplyTo }): { conversationId: string; messageId: number } {
     const conv = m.conversationId ?? MAIN;
@@ -139,7 +162,10 @@ export class Assistant {
     const attachments = m.attachments?.length ? this.store.attachments.link(m.attachments, { messageId: msg.id }) : [];
     this.store.bus.emit({ type: "user_message", id: msg.id, conversationId: conv, text, client: m.client, createdAt: msg.created_at, replyTo: question?.id ?? null, attachments, inReplyTo });
     this.lastUserAt.set(conv, Date.now());
-    if (!queued) this.interrupt(conv);
+    if (queued) {
+      // waits for the turn in progress: kick() runs it after
+    } else if (saysStop(text)) this.interrupt(conv);
+    else if (!this.midTurn(conv, msg)) this.makeWay(conv);
     this.kick(conv);
     return { conversationId: conv, messageId: msg.id };
   }
@@ -211,9 +237,44 @@ export class Assistant {
   }
 
   /**
-   * The user wrote: stop what midna is doing so their message is answered
-   * now. Only the user interrupts — a wakeup or notification never cuts a
-   * chat turn short.
+   * Hand the user's message to the chat turn running in its conversation;
+   * false when there is none, or its brain can't take it now (only Claude
+   * Code can, once its session is up). Its words reach the model framed as
+   * the user's, with what to do about them (midTurnNote).
+   */
+  private midTurn(conv: string, msg: Message): boolean {
+    const turn = this.turns.get(conv);
+    if (!turn?.inbox || turn.abort.signal.aborted) return false;
+    const { store } = this;
+    const tz = store.settings().timezone;
+    const sent = store.attachments.forMessages([msg.id]).get(msg.id) ?? [];
+    const line = messageLine(msg, tz, (id) => store.outbox.get(id)?.text, () => sent.map((a) => ({ ...a, path: workspaceCopy(store, this.opts.env.workspace, a) })), (m) => this.replied(m, tz));
+    if (!turn.inbox.give({ id: msg.id, text: midTurnNote(line) })) return false;
+    console.log(`[midna] message #${msg.id} goes into the chat turn in ${conv}${turn.doing ? `, in the middle of ${turn.doing}` : ""}`);
+    return true;
+  }
+
+  /**
+   * The user wrote and the conversation's turn can't take it mid-turn: stop
+   * that turn so they're answered now (its brain can't hear them otherwise).
+   * Wakeups carry on beside the answer; one is set aside only when every
+   * slot is taken, so the answer doesn't wait for one.
+   */
+  private makeWay(conv: string): void {
+    const turn = this.turns.get(conv);
+    turn?.abort.abort();
+    // The turn's own slot, or a free one, is the answer's.
+    if (turn?.ran || this.slots > 0) return;
+    const w = [...this.wakeups.values()].filter((t) => t.ran && !t.abort.signal.aborted).sort((a, b) => b.startedAt - a.startedAt)[0];
+    if (!w) return;
+    w.abort.abort();
+    this.note(conv, { by: "wakeup", reason: w.reason!, doing: w.doing });
+  }
+
+  /**
+   * The user said to stop: stop what midna is doing — the conversation's turn
+   * and any wakeup — so their message is answered now. Only the user
+   * interrupts — a wakeup or notification never cuts a chat turn short.
    */
   private interrupt(conv: string): void {
     this.turns.get(conv)?.abort.abort();
@@ -307,7 +368,7 @@ export class Assistant {
       convo.brain_model !== sessionKey({ model, account }) ||
       (!carryOn && (convo.brain_turns >= SESSION_TURNS || !previous || now - previous.created_at > SESSION_IDLE));
 
-    const turn: Turn = { abort: new AbortController(), startedAt: now, ran: false, doing: null, tools: 0 };
+    const turn: Turn = { abort: new AbortController(), startedAt: now, ran: false, doing: null, tools: 0, inbox: new Inbox() };
     this.turns.set(conv, turn);
     let interrupted = false;
     let fresh = stale;
@@ -373,7 +434,8 @@ export class Assistant {
         const quoted = asked.map((m) => `[${fmt(m.created_at, settings.timezone)}${m.client ? ` via ${m.client}` : ""}] "${m.text.slice(0, 1500)}"`).join("\n");
         store.schedule.add({ dueAt: Date.now() + NO_REPLY_FOLLOWUP, reason: `Answer the user: their chat message got no reply from you (only "Got your message — I'm on it"). They wrote:\n${quoted}`, kind: "followup", createdBy: "system", tz: settings.timezone });
       }
-      store.log.markSeen(unseen.map((m) => m.id));
+      // What reached it mid-turn and the model read is answered too; anything it never read waits for the next turn.
+      store.log.markSeen([...unseen.map((m) => m.id), ...turn.inbox!.seen]);
       this.heard(conv, notes);
     } catch (err) {
       if (turn.abort.signal.aborted) {
@@ -440,7 +502,7 @@ export class Assistant {
       try {
         const result = await this.brain({
           prompt: hermes ? e.prompt : `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
-          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0 }),
+          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0, midTurn: midTurnBrain(e.model) }),
           ...(e.files?.length ? { files: e.files } : {}),
           ...(approve ? { onApproval: (req: { summary: string; tool?: string }) => approve(req, { episodeId, signal: abort.signal }) } : {}),
           model: e.model,
@@ -450,6 +512,7 @@ export class Assistant {
           mcp: { url: opts.mcp.url(episodeId), token: opts.mcp.token },
           mode: settings.mode,
           signal: abort.signal,
+          ...(e.turn?.inbox ? { inbox: e.turn.inbox } : {}),
           onActivity: (tool, detail) => {
             if (e.turn) {
               e.turn.doing = detail ? `${tool} (${detail})` : tool;
@@ -850,6 +913,9 @@ const brainName = (b: BrainChoice) => `${b.model}${b.account ? ` on the ${b.acco
 
 const sameBrain = (a: BrainChoice, b: BrainChoice) => a.model === b.model && a.account === b.account;
 
+/** Whether a model's harness takes the user's messages mid-turn (Claude Code does); the others are interrupted for them. */
+const midTurnBrain = (model: string) => !isHermes(model) && resolveModel(model).provider === "claude";
+
 /**
  * What a conversation's brain session is kept under: the model, and for the
  * personal account the account too, since a session lives in its account's
@@ -890,14 +956,34 @@ function interruptionNote(n: Interruption, resumed: boolean): string {
   return `[midna] You were interrupted: the user wrote again while your previous turn was still working, ${Math.max(1, Math.round(n.ms / 1000))} s in, ${n.doing ? `in the middle of ${n.doing}` : "before it called a tool"}. ${done} Nothing it was going to say reached the user, and files you attached in it were not sent. Background shells and subagents it started were stopped — a "stopped" task notification is that, not news; jobs from job_start keep running. Go by what the user wrote last: carry on, change course or drop what you were doing, and reply to them.`;
 }
 
+const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+/** One line of the conversation as the brain reads it: when, from where, who, what it replies to, and the files with it. */
+function messageLine(
+  m: Message,
+  tz: string,
+  questionText: (id: number) => string | undefined,
+  files: (m: Message) => Array<Attachment & { path: string | null }>,
+  replied: (m: Message) => string | undefined,
+): string {
+  const q = m.reply_to ? questionText(m.reply_to) : undefined;
+  const r = replied(m);
+  // What the user sent with it, as files in the workspace the brain can open.
+  const sent =
+    m.role === "user"
+      ? files(m)
+          .map((f, i, all) => `\n  Attached ${all.length > 1 ? `${i + 1}/${all.length} ` : ""}${f.kind} "${f.name}" (${f.mime}, ${size(f.size)})${f.caption ? `, captioned "${f.caption}"` : ""}${f.path ? `, saved at \`${f.path}\`` : ""}`)
+          .join("")
+      : "";
+  return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${r ? `${r} ` : ""}${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
+}
+
 /**
  * What the brain reads for a turn: a timestamp, the user's new message(s),
  * what happened to work cut short for them, anything midna said on its own
  * since the last turn (so a reply to a notification makes sense). A fresh
  * session also gets recent history.
  */
-const size = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
-
 function turnPrompt(
   unseen: Message[],
   history: Message[],
@@ -908,18 +994,7 @@ function turnPrompt(
   replied: (m: Message) => string | undefined,
   notes: string[] = [],
 ): string {
-  const line = (m: Message) => {
-    const q = m.reply_to ? questionText(m.reply_to) : undefined;
-    const r = replied(m);
-    // What the user sent with it, as files in the workspace the brain can open.
-    const sent =
-      m.role === "user"
-        ? files(m)
-            .map((f, i, all) => `\n  Attached ${all.length > 1 ? `${i + 1}/${all.length} ` : ""}${f.kind} "${f.name}" (${f.mime}, ${size(f.size)})${f.caption ? `, captioned "${f.caption}"` : ""}${f.path ? `, saved at \`${f.path}\`` : ""}`)
-            .join("")
-        : "";
-    return `[${fmt(m.created_at, tz)}${m.client ? ` via ${m.client}` : ""}] ${m.role === "user" ? "User" : "You"}: ${r ? `${r} ` : ""}${q ? `(answering your question: "${q}") ` : ""}${m.text}${sent}`;
-  };
+  const line = (m: Message) => messageLine(m, tz, questionText, files, replied);
   // The user's words come first, marked as theirs: Claude Code may put a background-task
   // notification ("NOT USER INPUT") in front of this prompt, and it must not swallow them.
   const user = unseen.filter((m) => m.role === "user");

@@ -9,6 +9,7 @@ import {
   type PermissionHandler,
   type SessionPermissionHandler,
 } from "@justin06lee/yagami";
+import { randomUUID } from "node:crypto";
 import type { Account } from "@midna/protocol";
 import { claudeEnv } from "./accounts.ts";
 import { HERMES, hermesBrain, hermesProblem, isHermes, type TurnFile } from "./hermes.ts";
@@ -41,6 +42,8 @@ export interface BrainRun {
    * did stays in the session's transcript for the next turn to resume.
    */
   signal?: AbortSignal;
+  /** The user's messages that arrive while the turn runs, for a brain that can hand them to the model mid-turn (Claude). */
+  inbox?: Inbox;
   /** What the user sent with the turn, for a brain that can't open midna's files itself (Hermes). */
   files?: TurnFile[];
   /** The brain asks the user's OK for something it is about to do (Hermes's approvals); the answer is "once" or "deny". */
@@ -75,7 +78,106 @@ function turnUsage(u: TurnUsage | undefined): TurnUsage | undefined {
   return { input_tokens: u.input_tokens, output_tokens: u.output_tokens, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0 };
 }
 
+/** Two turns' tokens together. */
+function addUsage(a: TurnUsage | undefined, b: TurnUsage | undefined): TurnUsage | undefined {
+  if (!a || !b) return a ?? b;
+  return {
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    cache_creation_input_tokens: (a.cache_creation_input_tokens ?? 0) + (b.cache_creation_input_tokens ?? 0),
+    cache_read_input_tokens: (a.cache_read_input_tokens ?? 0) + (b.cache_read_input_tokens ?? 0),
+  };
+}
+
 export type Brain = (run: BrainRun) => Promise<BrainResult>;
+
+/** A message from the user for a turn already running: its id in the log, and the words the model reads. */
+export interface InboxMessage {
+  id: number;
+  text: string;
+}
+
+/**
+ * The user's messages that come while a chat turn runs. A brain that can put
+ * them in front of the model mid-turn opens it once its session can take
+ * them; while it isn't open, the assistant interrupts the turn instead. A
+ * message counts as answered only once the brain says the model saw it:
+ * one it never saw waits for the next turn.
+ */
+export class Inbox {
+  private take: ((m: InboxMessage) => void) | null = null;
+  private readonly seenIds = new Set<number>();
+
+  /** The brain is ready: each message goes to `take`. */
+  open(take: (m: InboxMessage) => void): void {
+    this.take = take;
+  }
+
+  close(): void {
+    this.take = null;
+  }
+
+  /** Hand the running turn a message; false when it can't take one now. */
+  give(m: InboxMessage): boolean {
+    if (!this.take) return false;
+    this.take(m);
+    return true;
+  }
+
+  /** The model has read this message. */
+  saw(id: number): void {
+    this.seenIds.add(id);
+  }
+
+  /** The messages the model has read. */
+  get seen(): number[] {
+    return [...this.seenIds];
+  }
+}
+
+/**
+ * Which of the messages handed to a Claude Code session mid-turn its turns
+ * have taken. Each send carries a uuid, and every result lists the uuids its
+ * turn consumed (user_message_uuids): the ones it started with, and any it
+ * folded in between tool calls. One sent too late to fold in runs as a turn
+ * of its own after it, with a result of its own.
+ */
+export class Steering {
+  private readonly pending = new Map<string, number>();
+  /** False once a result came without user_message_uuids: this Claude Code can't say what it took. */
+  tracked = true;
+
+  constructor(private readonly inbox: Inbox) {}
+
+  given(uuid: string, id: number): void {
+    this.pending.set(uuid, id);
+  }
+
+  /** A result came: mark what it took as seen. True while some message is still to be taken, by a turn yet to come. */
+  result(uuids: string[] | undefined): boolean {
+    if (!uuids) this.tracked = false;
+    for (const u of uuids ?? []) {
+      const id = this.pending.get(u);
+      if (id === undefined) continue;
+      this.inbox.saw(id);
+      this.pending.delete(u);
+    }
+    return this.pending.size > 0;
+  }
+}
+
+/**
+ * yagami's AgentSession.send(), with the client uuid Claude Code echoes back
+ * in a result's user_message_uuids — what ties a mid-turn message to the
+ * turn that read it. send() takes no uuid, so this writes to the session's
+ * input queue itself; false (nothing sent) should yagami's insides change.
+ */
+export function sendTagged(session: AgentSession, text: string, uuid: string): boolean {
+  const input = (session as unknown as { input?: { push?: unknown } }).input;
+  if (typeof input?.push !== "function") return false;
+  (input.push as (m: unknown) => void).call(input, { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, session_id: session.sessionId ?? "", uuid });
+  return true;
+}
 
 export class BrainError extends Error {
   /** `cause` keeps yagami's typed failure, so a signed-out or missing CLI can still be told apart. */
@@ -130,6 +232,8 @@ const TOOL_TIMEOUT_SEC = 15 * 60;
 const INTERRUPT_GRACE = 10_000;
 /** After a background-task notice's empty turn, how long to wait for the prompt's own turn to start. */
 const NOTICE_GRACE = 30_000;
+/** After a turn that left a mid-turn message untaken, how long to wait for the turn that takes it to start. */
+const STEER_GRACE = 120_000;
 
 /** A few words from a tool call's input on what it is doing: a command's description, a path, a URL. */
 export function toolDetail(input: unknown): string | undefined {
@@ -219,8 +323,25 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
   let capped: { until?: number } | null = null;
   let resetsAt: number | undefined;
   let toolCalls = 0;
+  // A message the user sends meanwhile goes to the model mid-turn, as typing while Claude Code works does:
+  // it is folded in between tool calls, or — sent too late for that — runs as a turn of its own after.
+  // Each turn's reply counts, so the reply is all of them.
+  const steering = run.inbox ? new Steering(run.inbox) : null;
+  const replies: string[] = [];
+  let finished = 0;
+  let sessionCostUsd: number | undefined;
+  let usage: TurnUsage | undefined;
+  const reply = (): BrainResult => ({ text: replies.join("\n\n"), sessionId, ...(sessionCostUsd !== undefined ? { sessionCostUsd } : {}), ...(usage ? { usage } : {}) });
   try {
-    session.send(run.prompt);
+    const tagged = sendTagged(session, run.prompt, randomUUID());
+    if (!tagged) session.send(run.prompt);
+    // Untagged, nothing could say which turn read what: the assistant interrupts instead, as before.
+    if (tagged && steering) {
+      run.inbox!.open((m) => {
+        const uuid = randomUUID();
+        if (sendTagged(session, m.text, uuid)) steering.given(uuid, m.id);
+      });
+    }
     for await (const msg of session) {
       if ("session_id" in msg && msg.session_id) sessionId = msg.session_id;
       if (msg.type === "rate_limit_event") {
@@ -229,7 +350,7 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
         if (info.status === "rejected") capped = { until: resetsAt };
       }
       if (msg.type === "assistant" && msg.error === "rate_limit") capped = { until: resetsAt };
-      if (waiting && (msg.type === "assistant" || (msg.type === "system" && msg.subtype === "init"))) {
+      if (waiting && (msg.type === "assistant" || msg.type === "stream_event" || (msg.type === "system" && msg.subtype === "init"))) {
         clearTimeout(waiting);
         waiting = undefined;
       }
@@ -249,9 +370,23 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
         }
         // A turn that finished just as the interrupt landed still counts: its reply is whole.
         if (msg.subtype === "success" && !msg.is_error) {
-          return { text: msg.result, sessionId, sessionCostUsd: msg.total_cost_usd, usage: turnUsage(msg.usage) };
+          finished++;
+          if (msg.result.trim()) replies.push(msg.result.trim());
+          sessionCostUsd = msg.total_cost_usd;
+          usage = addUsage(usage, turnUsage(msg.usage));
+          // A message it hasn't taken yet: Claude Code runs it next. Wait for that turn too.
+          if (steering?.result(msg.user_message_uuids) && !run.signal?.aborted) {
+            // This Claude Code doesn't say what a turn took: take no more mid-turn.
+            if (!steering.tracked) run.inbox!.close();
+            clearTimeout(waiting);
+            waiting = setTimeout(() => session.close(), STEER_GRACE);
+            continue;
+          }
+          return reply();
         }
         if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
+        // A turn after the first, for a message sent mid-turn, failed: what came before still goes; the message waits.
+        if (finished) return reply();
         if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { account });
         const why = msg.subtype === "success" ? msg.result : msg.subtype;
         // Last resort, should the typed signals ever go missing: the limit's own wording.
@@ -260,16 +395,20 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
       }
     }
     if (run.signal?.aborted) throw new BrainError("claude turn interrupted", sessionId);
+    // The turn for a message sent mid-turn never came: the reply so far goes, and the message waits for the next turn.
+    if (finished) return reply();
     if (capped) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { account });
     // The prompt's turn never came: say nothing, and let the caller ask again.
     if (notice) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw new BrainError("claude session ended without a result", sessionId);
   } catch (err) {
     if (run.signal?.aborted && !(err instanceof BrainError)) throw new BrainError("claude turn interrupted", sessionId, { cause: err });
+    if (finished && !(err instanceof BrainError)) return reply();
     if (capped && !(err instanceof BrainError)) throw new BrainCappedError("claude", capped.until ?? resetsAt, sessionId, toolCalls, { cause: err, account });
     if (notice && !(err instanceof BrainError)) return { text: "", sessionId, sessionCostUsd: notice.sessionCostUsd };
     throw err;
   } finally {
+    run.inbox?.close();
     clearTimeout(forced);
     clearTimeout(waiting);
     run.signal?.removeEventListener("abort", onAbort);

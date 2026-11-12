@@ -38,6 +38,7 @@ const fakeBrain: Brain = async (run) => {
     const text = await Promise.race([script(run, tools), interrupted]);
     return { text, sessionId, sessionCostUsd: 0.01 };
   } finally {
+    run.inbox?.close(); // as the real brains do: a turn that's over takes no more messages
     run.signal?.removeEventListener("abort", stop);
     await tools.close();
   }
@@ -576,7 +577,7 @@ describe("midnad", () => {
     await expect(client.send({ text: "/queue  ", client: "test" })).rejects.toThrow(/text or an attachment/);
   });
 
-  test("a new message interrupts the turn mid-tool-call; the next carries on in its session and answers both", async () => {
+  test("a message saying stop interrupts the turn mid-tool-call; the next carries on in its session and answers both", async () => {
     const said = outbox().length;
     const seen = events.length;
     const turns: BrainRun[] = [];
@@ -612,7 +613,7 @@ describe("midnad", () => {
     expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
   });
 
-  test("a burst of messages is one interrupt, answered together in one turn", async () => {
+  test("a brain that can't take messages mid-turn is interrupted for them: a burst is one interrupt, answered together in one turn", async () => {
     const turns: BrainRun[] = [];
     script = async (run) => {
       if (!run.prompt.includes("plan the trip")) return "ok";
@@ -635,7 +636,7 @@ describe("midnad", () => {
     expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
   });
 
-  test("the user's message interrupts a wakeup, which carries on afterwards in its own session", async () => {
+  test("a message saying to hold on interrupts a wakeup, which carries on afterwards in its own session", async () => {
     const wakeups: BrainRun[] = [];
     script = async (run, tools) => {
       if (run.prompt.includes("quick question")) return "Sure — what is it?";
@@ -651,7 +652,7 @@ describe("midnad", () => {
     const w = daemon.store.schedule.add({ dueAt: Date.now(), reason: "tidy the inbox", tz: "UTC" });
     await until("wakeup running", () => wakeups.length === 1 || undefined);
     await Bun.sleep(50);
-    await client.send({ text: "quick question", client: "test" });
+    await client.send({ text: "hold on — quick question", client: "test" });
     await until("chat reply", () => outbox().find((i) => i.text === "Sure — what is it?"));
     const chat = runs.findLast((r) => r.prompt.includes("quick question"))!;
     expect(chat.prompt).toContain('your own wakeup "tidy the inbox" was set aside while you were in the middle of Bash (archive old mail)');
@@ -664,6 +665,158 @@ describe("midnad", () => {
     expect(wakeups[1]!.resume).toBe(`session-${runs.indexOf(wakeups[0]!) + 1}`);
     expect(wakeups[1]!.prompt).toContain("You set this aside part-way through, in the middle of Bash (archive old mail), to answer a message from the user.");
     await until("done", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
+  });
+
+  test("an ordinary message leaves a running wakeup alone: the answer runs beside it", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const wakeups: BrainRun[] = [];
+    script = async (run, tools) => {
+      if (run.prompt.includes("what time is the dentist")) return "Tuesday, 3 pm.";
+      if (!run.prompt.includes("sort the receipts")) return "ok";
+      wakeups.push(run);
+      run.onActivity?.("Bash", "ocr the receipts");
+      await gate;
+      await call(tools, "message_user", { text: "Receipts sorted." });
+      return "sorted";
+    };
+    const w = daemon.store.schedule.add({ dueAt: Date.now(), reason: "sort the receipts", tz: "UTC" });
+    await until("wakeup running", () => wakeups.length === 1 || undefined);
+    await client.send({ text: "what time is the dentist?", client: "test" });
+    await until("chat reply", () => outbox().find((i) => i.text === "Tuesday, 3 pm."));
+    const chat = runs.findLast((r) => r.prompt.includes("what time is the dentist"))!;
+    expect(chat.prompt).not.toContain("was set aside");
+    expect(wakeups[0]!.signal!.aborted).toBe(false);
+    release();
+    await until("wakeup done", () => outbox().find((i) => i.text === "Receipts sorted."));
+    await until("done", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
+    expect(wakeups.length).toBe(1);
+  });
+
+  test("with every slot taken, a wakeup is set aside so the answer doesn't wait", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const wakeups: BrainRun[] = [];
+    let side = false;
+    script = async (run) => {
+      if (run.prompt.includes("long side task")) {
+        side = true;
+        await gate;
+        return "Side task done.";
+      }
+      if (run.prompt.includes("is the car booked")) return "Yes, Saturday 9 am.";
+      if (!run.prompt.includes("defrag the archive")) return "ok";
+      wakeups.push(run);
+      return wakeups.length === 1 ? forever() : "defragged";
+    };
+    // Two slots: a chat turn in another conversation and a wakeup take both.
+    await client.send({ text: "long side task", client: "test", conversationId: "side" });
+    await until("side turn running", () => side || undefined);
+    const w = daemon.store.schedule.add({ dueAt: Date.now(), reason: "defrag the archive", tz: "UTC" });
+    await until("wakeup running", () => wakeups.length === 1 || undefined);
+    await Bun.sleep(50);
+    await client.send({ text: "is the car booked?", client: "test" });
+    await until("chat reply", () => outbox().find((i) => i.text === "Yes, Saturday 9 am."));
+    expect(wakeups[0]!.signal!.aborted).toBe(true);
+    const chat = runs.findLast((r) => r.prompt.includes("is the car booked"))!;
+    expect(chat.prompt).toContain('your own wakeup "defrag the archive" was set aside');
+    release();
+    await until("side reply", () => outbox().find((i) => i.text === "Side task done."));
+    daemon.store.schedule.reschedule(w.id, Date.now());
+    await until("done", () => daemon.store.schedule.get(w.id)!.status === "done" || undefined);
+  });
+
+  test("a message mid-turn goes into the turn: nothing is interrupted, and it's answered there", async () => {
+    const said = outbox().length;
+    const turns: BrainRun[] = [];
+    const heard: string[] = [];
+    let more!: () => void;
+    const arrived = new Promise<void>((r) => (more = r));
+    script = async (run, tools) => {
+      if (!run.prompt.includes("write the report")) return "ok";
+      turns.push(run);
+      // As Claude Code does: messages sent mid-turn come in on the session's input, and the turn reads them.
+      run.inbox!.open((m) => {
+        heard.push(m.text);
+        run.inbox!.saw(m.id);
+        more();
+      });
+      run.onActivity?.("Bash", "render the report");
+      await arrived;
+      await call(tools, "message_user", { text: "Seen — I'll add the Q3 numbers once the draft's done." });
+      return "Report's done, with the Q3 numbers in.";
+    };
+    await client.send({ text: "write the report", client: "desktop" });
+    await until("turn running", () => turns.length === 1 || undefined);
+    await client.send({ text: "add the Q3 numbers too", client: "telegram" });
+    await until("reply", () => outbox().find((i) => i.text === "Report's done, with the Q3 numbers in."));
+    await daemon.assistant.idle();
+
+    expect(turns.length).toBe(1); // one turn: not cut short, not run again
+    expect(turns[0]!.signal!.aborted).toBe(false);
+    expect(heard.length).toBe(1);
+    expect(heard[0]).toStartWith("[midna] A message from the user, sent while you were working on this — real user input");
+    expect(heard[0]).toContain("via telegram] User: add the Q3 numbers too");
+    expect(heard[0]).toContain("one-line acknowledgment with message_user");
+    expect(outbox().slice(said).map((i) => i.text)).toEqual(["Seen — I'll add the Q3 numbers once the draft's done.", "Report's done, with the Q3 numbers in."]);
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+    const cut = daemon.store.db.query("SELECT COUNT(*) AS n FROM episodes WHERE brain_session = $s AND error IS NOT NULL").get({ s: `session-${runs.indexOf(turns[0]!) + 1}` }) as { n: number };
+    expect(cut.n).toBe(0);
+  });
+
+  test("a message the turn took in but never read is answered by the next turn", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const turns: BrainRun[] = [];
+    script = async (run) => {
+      if (run.prompt.includes("and the action items")) {
+        turns.push(run);
+        return "Action items: none.";
+      }
+      if (run.prompt.includes("summarise the thread")) {
+        turns.push(run);
+        run.inbox!.open(() => release()); // taken, but the model never gets to it: no saw()
+        await gate;
+        return "Here's the summary.";
+      }
+      return "ok";
+    };
+    await client.send({ text: "summarise the thread", client: "test" });
+    await until("turn running", () => turns.length === 1 || undefined);
+    await Bun.sleep(50);
+    await client.send({ text: "and the action items", client: "test" });
+    await until("second reply", () => outbox().find((i) => i.text === "Action items: none."));
+    expect(outbox().some((i) => i.text === "Here's the summary.")).toBe(true);
+    expect(turns.length).toBe(2);
+    expect(turns[0]!.signal!.aborted).toBe(false);
+    const userPart = turns[1]!.prompt.split("\n\n")[0]!;
+    expect(userPart).toContain("User: and the action items");
+    expect(userPart).not.toContain("summarise the thread");
+    expect(turns[1]!.prompt).not.toContain("You were interrupted");
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
+  });
+
+  test("/stop interrupts even a turn that takes messages mid-turn", async () => {
+    const turns: BrainRun[] = [];
+    const heard: string[] = [];
+    script = async (run) => {
+      if (!run.prompt.includes("migrate the photos")) return "ok";
+      turns.push(run);
+      if (turns.length > 1) return "Stopped the migration.";
+      run.inbox!.open((m) => heard.push(m.text));
+      run.onActivity?.("Bash", "rsync the photos");
+      return forever();
+    };
+    await client.send({ text: "migrate the photos", client: "test" });
+    await until("turn running", () => turns.length === 1 || undefined);
+    await Bun.sleep(50);
+    await client.send({ text: "/stop", client: "telegram" });
+    await until("reply", () => outbox().find((i) => i.text === "Stopped the migration."));
+    expect(heard).toEqual([]);
+    expect(turns[0]!.signal!.aborted).toBe(true);
+    expect(turns[1]!.prompt).toContain("User: /stop");
+    expect(turns[1]!.prompt).toContain("You were interrupted");
+    expect(daemon.store.log.unseen("main").filter((m) => m.role === "user")).toEqual([]);
   });
 
   test("a wakeup that comes due mid-turn never interrupts it", async () => {

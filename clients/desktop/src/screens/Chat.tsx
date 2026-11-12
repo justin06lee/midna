@@ -368,7 +368,7 @@ export function Chat({
                 </button>
               </div>
             </div>
-            <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line · paste or drop files to attach · /queue … doesn't interrupt</p>
+            <p className="mt-1.5 px-1 text-[11px] text-dimmer">Enter to send · Shift+Enter for a new line · paste or drop files to attach · /stop interrupts · /queue … waits</p>
           </div>
         </div>
         {dragging && (

@@ -84,7 +84,8 @@ export function saveState(file: string, state: TelegramState): void {
 }
 
 const COMMANDS = [
-  { command: "queue", description: "Send without interrupting what midna is doing" },
+  { command: "stop", description: "Stop what midna is doing right now" },
+  { command: "queue", description: "Send for after what midna is doing, not during it" },
   { command: "status", description: "What midna is doing, its mode and model" },
   { command: "pause", description: "Ask before acting (ask mode)" },
   { command: "resume", description: "Act autonomously again" },
@@ -191,7 +192,7 @@ export class TelegramBridge {
     if (text.startsWith("/start")) return;
     const file = await this.receiveFile(m);
     if (!file && BARE_QUEUE.test(text)) {
-      if (file === null) await this.bot.send(m.chat.id, "Write the message after it: /queue, then what to say. It waits until midna is done instead of interrupting.");
+      if (file === null) await this.bot.send(m.chat.id, "Write the message after it: /queue, then what to say. It waits until midna is done instead of reaching it mid-task.");
       return;
     }
     if (!text && !file) {
