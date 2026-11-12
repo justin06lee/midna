@@ -54,7 +54,8 @@ const HELP = `midna ${VERSION} — a proactive personal assistant
   midna telegram setup            connect a Telegram bot (your phone, for now)
   midna doctor [--live <model>]   which brains are here, and whether one answers
   midna hermes setup              set up Hermes on this host as midna's brain (its pinned deploy, the app
-                                  delivery, and \`model hermes\` once Hermes is the writer); re-runnable
+                                  delivery, the vault's tools, and \`model hermes\` once Hermes is the
+                                  writer); re-runnable
     --keep-model                  leave the brain setting alone
   midna service install|uninstall|restart
 
