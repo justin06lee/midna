@@ -51,11 +51,12 @@ make build install && midna setup
 
 ## Using it
 
-The app has four views:
+The app has five views (the iPhone app has Chat, Approvals, Vault and Settings):
 
 - **Chat** — everything said on any device, with midna's questions as buttons.
 - **Today** — the calendar, what's due, open promises, and what midna will do on its own.
 - **Objectives** — the goal tree everything hangs from. It is read-only: goals change by talking them through, and each change keeps its reason.
+- **Vault** — your logins in [ghostly](https://github.com/justin06lee/ghostly), by title: add one, change it, show or copy its password (behind Face ID on the phone). With `midna model hermes`, Hermes finds a login by its title and asks you before it uses a password. See [docs/vault.md](docs/vault.md).
 - **Settings** — the brain, the mode, quiet hours, your phone, paired devices, and this computer's appearance (light, dark, or the system's).
 
 Closing the window keeps midna in the tray, and notifications arrive while you're elsewhere. If midna can't think (its brain is signed out or missing), a banner says so and offers the fix; if the app can't reach midna for more than a few seconds, a banner says that too, and it keeps trying.

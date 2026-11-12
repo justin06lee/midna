@@ -10,19 +10,21 @@ import { Computer } from "./Computer";
 import { Objectives } from "./Objectives";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
+import { Vault } from "./Vault";
 
-type View = "chat" | "today" | "goals" | "computer" | "settings";
+type View = "chat" | "today" | "goals" | "vault" | "computer" | "settings";
 
-const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "computer" | "settings"; key: string }> = [
+const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "key" | "computer" | "settings"; key: string }> = [
   { id: "chat", label: "Chat", icon: "chat", key: "1" },
   { id: "today", label: "Today", icon: "today", key: "2" },
   { id: "goals", label: "Objectives", icon: "goals", key: "3" },
   // What midna may do on this computer: only the app can offer that.
   ...(inApp ? [{ id: "computer" as const, label: "This computer", icon: "computer" as const, key: "4" }] : []),
+  { id: "vault", label: "Vault", icon: "key", key: "5" },
   { id: "settings", label: "Settings", icon: "settings", key: "," },
 ];
 
-/** Connected: the conversation, the day, the objectives, the settings. */
+/** Connected: the conversation, the day, the objectives, the vault, the settings. */
 export function Main({ connection, onDisconnect, onUnpaired }: { connection: Connection; onDisconnect: () => void; onUnpaired: () => void }) {
   const m = useMidna(connection);
   const [view, setView] = useState<View>("chat");
@@ -184,6 +186,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           {view === "today" && overview && <Today overview={overview} />}
           {view === "goals" && overview && <Objectives overview={overview} onDiscuss={discuss} />}
           {view === "computer" && <Computer />}
+          {view === "vault" && <Vault client={m.client} draftKey={draftKey(connection)} />}
           {view === "settings" && (
             <Settings client={m.client} status={m.status} connection={connection} onStatus={(s) => m.setStatus(s)} onCheckBrain={checkBrain} onSignIn={signIn} onDisconnect={onDisconnect} />
           )}

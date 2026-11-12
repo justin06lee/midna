@@ -18,6 +18,7 @@
   - makima is not involved.
 - **Notifications are Telegram's** for now. The app has no push; revisit with the paid ($99) account. *Done 2026-10-27: push notifications, with Telegram kept as the fallback (docs/push.md).*
 - **Face ID before any approval** is answered from the phone: Face ID only, with no passcode fallback, so a phone picked up unlocked can't say yes. This guards the phone, not midna's side: any paired token can still answer through `/v1/approvals` (the forgery item already with Justin).
+- **Face ID before a vault password** is shown or copied on the phone, the same way (Face ID only); the clipboard is cleared after 30 s if it still holds it. See docs/vault.md.
 - **Reinstalling every 7 days** (free provisioning) is accepted. *Over 2026-10-27: TestFlight builds last 90 days and update themselves.*
 
 ## 2. What v1 does
