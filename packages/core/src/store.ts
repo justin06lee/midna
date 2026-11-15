@@ -7,6 +7,7 @@ import { Devices } from "./devices.ts";
 import { Hands } from "./hands.ts";
 import { Inbound } from "./inbound.ts";
 import { Jobs } from "./jobs.ts";
+import { Location } from "./location.ts";
 import { Log, MAIN } from "./log.ts";
 import { Memory } from "./memory.ts";
 import { Planning } from "./planning.ts";
@@ -65,6 +66,7 @@ export class Store {
   readonly hands: Hands;
   readonly jobs: Jobs;
   readonly push: Push;
+  readonly location: Location;
 
   constructor(readonly db: Database) {
     this.planning = new Planning(db);
@@ -78,6 +80,7 @@ export class Store {
     this.hands = new Hands(db);
     this.jobs = new Jobs(db, this.schedule);
     this.push = new Push(db);
+    this.location = new Location(db);
   }
 
   static open(path: string): Store {

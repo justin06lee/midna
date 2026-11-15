@@ -5,6 +5,7 @@ import * as Network from "expo-network";
 import { MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Status, type StreamEvent, type UploadInfo } from "@midna/protocol";
 import { clientFor, type PhoneConnection } from "./connection";
 import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
+import { start as startLocation } from "./location";
 import { ECHO_WINDOW_MS, fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
 import { clearDelivered, onTokenChange, phonePush, type PushSetup } from "./push";
 
@@ -98,6 +99,14 @@ export function useMidna(connection: PhoneConnection) {
     if (out.length) saveDraft(outgoingKey, out);
     else dropDraft(outgoingKey);
   }, [lines, outgoingKey]);
+
+  // Location, once turned on: running for this pairing, with what waits sent and the watched places current — now and on each return.
+  useEffect(() => {
+    const go = () => void startLocation(client, connection).catch((err: Error) => console.warn(`location: ${err.message}`));
+    go();
+    const fg = AppState.addEventListener("change", (s) => s === "active" && go());
+    return () => fg.remove();
+  }, [client, connection]);
 
   // Push notifications: registered now, on returns to the foreground and when iOS changes the token —
   // never on a token event for the token just sent: asking for it raises that event, which looped.

@@ -4,6 +4,7 @@ export { openDatabase } from "./db.ts";
 export { Devices, type Device } from "./devices.ts";
 export { Hands, SUMMARY_MAX, type HandsRecord, type HandsSnapshot } from "./hands.ts";
 export { Inbound, type InboundEvent } from "./inbound.ts";
+export { Location } from "./location.ts";
 export { Jobs, LOG_TAIL_BYTES, logTail, type Job, type JobStatus } from "./jobs.ts";
 export { Log, MAIN, replyRef, spendKind, type Conversation, type Message, type TurnTokens } from "./log.ts";
 export { Memory, FACT_KINDS, ARCHIVE_BELOW, strength, type Fact, type FactKind, type LinkEntity, type ScoredFact } from "./memory.ts";

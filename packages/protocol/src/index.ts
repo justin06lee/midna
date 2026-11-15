@@ -8,6 +8,8 @@
 import { z } from "zod";
 
 export * from "./hands.ts";
+export * from "./location.ts";
+import type { LocationReceipt, LocationReport, LocationState, LocationToken, Place, PlacePatch, PlaceSave } from "./location.ts";
 import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
 
 export const DEFAULT_PORT = 7717;
@@ -687,6 +689,34 @@ export class MidnaClient {
   /** One login's password, asked for on its own, in a response body and never a URL. */
   vaultPassword(id: string): Promise<{ password: string }> {
     return this.call("POST", `/v1/vault/${encodeURIComponent(id)}/password`, undefined, undefined, undefined, VAULT_TIMEOUT_MS);
+  }
+
+  // Where the user is: the phone reports, the apps show it and manage the saved places.
+  /** The phone's fixes since it last got through; the answer carries the places to watch. */
+  reportLocation(report: LocationReport): Promise<LocationReceipt> {
+    return this.call("POST", "/v1/location", report);
+  }
+  /** The latest fix, the saved place it's in, and every saved place. */
+  location(signal?: AbortSignal): Promise<LocationState> {
+    return this.call("GET", "/v1/location", undefined, signal);
+  }
+  /** A token that can only report this phone's location, for the phone to use while it is locked. A new one retires the last. */
+  locationToken(): Promise<LocationToken> {
+    return this.call("POST", "/v1/location/token");
+  }
+  places(): Promise<Place[]> {
+    return this.call("GET", "/v1/places");
+  }
+  /** A new place; one already so named (any case) moves instead. */
+  savePlace(place: PlaceSave): Promise<Place> {
+    return this.call("POST", "/v1/places", place);
+  }
+  editPlace(id: number, patch: PlacePatch): Promise<Place> {
+    return this.call("PATCH", `/v1/places/${id}`, patch);
+  }
+  /** The phone stops watching it. The fixes taken there keep its name. */
+  deletePlace(id: number): Promise<{ ok: true }> {
+    return this.call("DELETE", `/v1/places/${id}`);
   }
 
   /**

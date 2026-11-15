@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Job, type Store } from "@midna/core";
-import { MAX_ATTACHMENTS_PER_MESSAGE, type Attachment, type Op } from "@midna/protocol";
+import { MAX_ATTACHMENTS_PER_MESSAGE, PLACE_RADIUS_DEFAULT, PLACE_RADIUS_MAX, PLACE_RADIUS_MIN, metresBetween, type Attachment, type LocationPoint, type Op, type Place } from "@midna/protocol";
 import { attach, liftLocalImages, workspaceCopy, type FileRef } from "./attachments.ts";
 import type { HandsHandle, HandsOutcome, HandsRequest } from "./hands.ts";
 import { took } from "./prompt.ts";
@@ -220,6 +220,89 @@ export function createToolServer(ctx: ToolContext): McpServer {
       return { ...r, starts_at: t(r.starts_at), ends_at: t(r.ends_at) };
     },
   );
+
+  // ── where the user is ────────────────────────────────────────────────
+  // Their phone reports only significant moves (about 500 m) and arriving at or leaving a saved place, so a fix can be hours old while they sit still.
+  const ago = (ms: number) => (ms < 48 * 3_600_000 ? `${took(ms)} ago` : `${Math.round(ms / 86_400_000)} days ago`);
+  const metres = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10_000 ? 1 : 0)} km`);
+  const coords = (x: { lat: number; lon: number }) => `${x.lat.toFixed(5)},${x.lon.toFixed(5)}`;
+  const placeOut = (x: Place) => ({ id: x.id, name: x.name, at: coords(x), radius_m: Math.round(x.radius) });
+  const pointOut = (x: LocationPoint) => ({
+    at: t(x.at), where: coords(x), accuracy_m: x.accuracy == null ? null : Math.round(x.accuracy), place: x.place_name,
+    why: x.source === "arrive" ? `arrived at ${x.place_name ?? "a saved place"}` : x.source === "leave" ? `left ${x.place_name ?? "a saved place"}` : x.source === "app" ? "app opened" : "moved",
+    ...(x.speed != null && x.speed > 0 ? { speed_kmh: Math.round(x.speed * 3.6) } : {}),
+  });
+
+  tool(
+    "location_now",
+    "Where the user is, from their phone's latest fix: the saved place they're in (and since when), or the nearest saved place and how far, plus how old the fix is. The phone reports only moves of about 500 m and arriving at or leaving a saved place, so an old fix usually means they haven't moved, not that it's unknown.",
+    {},
+    () => {
+      const s = store.location.state();
+      if (!s.latest) return "No location yet: the user's phone hasn't reported one (location is off in the app, or it was never turned on).";
+      const now = Date.now();
+      const l = s.latest;
+      const nearest = s.place ? null : s.places.map((x) => ({ x, d: metresBetween(x, l) })).sort((a, b) => a.d - b.d)[0];
+      return {
+        place: s.place?.name ?? null,
+        ...(s.place && s.since ? { there_since: t(s.since), there_for: took(now - s.since) } : {}),
+        ...(l.source === "leave" ? { just_left: l.place_name } : {}),
+        ...(nearest ? { nearest_place: nearest.x.name, nearest_is: `${metres(nearest.d)} away` } : {}),
+        where: coords(l),
+        map: `https://maps.apple.com/?ll=${coords(l)}`,
+        accuracy_m: l.accuracy == null ? null : Math.round(l.accuracy),
+        fix_at: t(l.at),
+        fix_age: ago(now - l.at),
+        reported: l.source === "arrive" ? "on arriving" : l.source === "leave" ? "on leaving" : l.source === "app" ? "when the app was opened" : "on a significant move",
+      };
+    },
+  );
+
+  tool(
+    "location_history",
+    "Where the user has been: their phone's fixes between two times (default: the last 24 hours), oldest first, each with the saved place it was in and why it was reported. Every fix is kept forever. At most `limit` (default 200, max 1000): the latest ones when there are more, and `total` says how many there were.",
+    { from: when.optional(), to: when.optional(), limit: z.number().int().min(1).max(1000).optional() },
+    (a) => {
+      const to = a.to ? parseWhen(a.to, tz()) : Date.now();
+      const from = a.from ? parseWhen(a.from, tz()) : to - 86_400_000;
+      if (from > to) throw new Error("`from` is after `to`");
+      const points = store.location.history(from, to, a.limit ?? 200);
+      return { from: t(from), to: t(to), total: store.location.count(from, to), points: points.map(pointOut) };
+    },
+  );
+
+  tool("places_list", "The user's saved places (home, the office, …): the phone says when they arrive at or leave each one.", {}, () => store.location.places().map(placeOut));
+
+  tool(
+    "place_save",
+    `Save a place the phone watches, or change one. A new place without lat/lon is saved where the user's phone last was — for "this is my gym"; here=true moves a saved one there. A name already saved (any case) changes that place; pass id to rename one. radius_m from ${PLACE_RADIUS_MIN} to ${PLACE_RADIUS_MAX} (default ${PLACE_RADIUS_DEFAULT}). The phone starts watching it the next time it reports or the app is opened.`,
+    {
+      id: id.optional(),
+      name: z.string().min(1).max(80).optional(),
+      lat: z.number().min(-90).max(90).optional(),
+      lon: z.number().min(-180).max(180).optional(),
+      radius_m: z.number().min(PLACE_RADIUS_MIN).max(PLACE_RADIUS_MAX).optional(),
+      here: z.boolean().optional().describe("Put it where the phone last was"),
+    },
+    (a) => {
+      if ((a.lat === undefined) !== (a.lon === undefined)) throw new Error("give both lat and lon, or neither");
+      if (a.id === undefined && !a.name) throw new Error("a place needs a name");
+      const known = a.id !== undefined ? store.location.place(a.id) : store.location.named(a.name!);
+      let where = a.lat !== undefined ? { lat: a.lat, lon: a.lon! } : undefined;
+      if (!where && (a.here || !known)) {
+        const l = store.location.latest();
+        if (!l) throw new Error("no location from the phone yet: give lat and lon");
+        where = { lat: l.lat, lon: l.lon };
+      }
+      return placeOut(store.location.savePlace({ name: a.name, ...where, radius: a.radius_m }, a.id));
+    },
+  );
+
+  tool("place_delete", "Delete a saved place: the phone stops watching it. The fixes taken there keep its name.", { id }, ({ id }) => {
+    const x = store.location.place(id);
+    if (!x || !store.location.deletePlace(id)) throw new Error(`no place ${id}`);
+    return `deleted ${x.name}`;
+  });
 
   // ── people ───────────────────────────────────────────────────────────
   tool("people_find", "Find people by name, relation or notes.", { query: z.string() }, ({ query }) =>
