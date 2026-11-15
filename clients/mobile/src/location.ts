@@ -114,7 +114,11 @@ export function send(): Promise<void> {
       await watch(receipt.places);
     }
   })()
-    .catch((err: Error) => console.warn(`location: not sent yet: ${err.message}`))
+    .catch(async (err: Error) => {
+      // Retired on the host (unpaired from another device, say): the next start, with the pairing's token, makes another.
+      if (err instanceof MidnaError && err.status === 401) await SecureStore.deleteItemAsync(REPORTER, reporterOpts).catch(() => {});
+      console.warn(`location: not sent yet: ${err.message}`);
+    })
     .finally(() => (sending = null)));
 }
 
