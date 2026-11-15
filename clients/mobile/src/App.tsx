@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { forget, loadConnection, loadPrevious, setAside, type PhoneConnection } from "./connection";
+import { forgetLocation } from "./location";
 import { Main } from "./screens/Main";
 import { Pair } from "./screens/Pair";
 import { useTheme } from "./theme";
@@ -45,6 +46,7 @@ export default function App() {
           }}
           onUnpaired={() => {
             void forget();
+            void forgetLocation();
             setPrevious(null);
             setConnection(null);
           }}

@@ -659,3 +659,45 @@ describe("wakeup guardrails", () => {
     expect(s.settings()).not.toHaveProperty("wakeupBudget");
   });
 });
+
+describe("location", () => {
+  const HOME = { lat: 37.33182, lon: -122.03118 };
+  const fix = (where: { lat: number; lon: number }, at: number, source: "significant" | "arrive" | "leave" | "app" = "significant", place?: number) => ({ ...where, at, source, ...(place ? { place } : {}) });
+
+  test("since when the user has been at a place: the first of the latest run of fixes there", () => {
+    const s = fresh();
+    const { device } = s.devices.create("iPhone", "mobile");
+    const home = s.location.savePlace({ name: "Home", ...HOME });
+    const away = { lat: 37.4, lon: -122.1 };
+    s.location.report(device.id, [fix(HOME, 1_000), fix(away, 2_000), fix(HOME, 3_000, "arrive", home.id), fix(HOME, 4_000, "app"), fix(HOME, 5_000)]);
+    expect(s.location.state()).toMatchObject({ place: { name: "Home" }, since: 3_000, points: 5 });
+    // Leaving ends it, even with a fix that still falls inside the circle.
+    s.location.report(device.id, [fix(HOME, 6_000, "leave", home.id)]);
+    expect(s.location.state()).toMatchObject({ place: null, since: null });
+    expect(s.location.history(0, 10_000).map((p) => p.place_name)).toEqual(["Home", null, "Home", "Home", "Home", "Home"]);
+    s.close();
+  });
+
+  test("overlapping places: the smallest wins; a place saved later doesn't rewrite old fixes", () => {
+    const s = fresh();
+    const { device } = s.devices.create("iPhone", "mobile");
+    s.location.report(device.id, [fix(HOME, 1_000)]);
+    s.location.savePlace({ name: "Neighbourhood", ...HOME, radius: 2_000 });
+    const home = s.location.savePlace({ name: "Home", lat: HOME.lat + 0.0005, lon: HOME.lon, radius: 150 });
+    s.location.report(device.id, [fix(HOME, 2_000)]);
+    expect(s.location.history(0, 3_000).map((p) => p.place_name)).toEqual([null, "Home"]);
+    expect(s.location.state().place?.id).toBe(home.id);
+    s.close();
+  });
+
+  test("a phone's location token is retired with the phone, and its fixes are the phone's", () => {
+    const s = fresh();
+    const phone = s.devices.create("iPhone", "mobile");
+    const loc = s.devices.child(phone.device.id, "iPhone · location", "location");
+    expect(s.devices.owner(loc.device.id)).toBe(phone.device.id);
+    expect(s.devices.owner(phone.device.id)).toBe(phone.device.id);
+    s.devices.revoke(phone.device.id);
+    expect(s.devices.authenticate(loc.token)).toBeNull();
+    s.close();
+  });
+});

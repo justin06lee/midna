@@ -10,9 +10,12 @@ import {
   HandsHello,
   HandsResult,
   HandsStateUpdate,
+  LocationReport,
   MAX_ATTACHMENT_BYTES,
   MAX_EVENT_DATA_BYTES,
   PairRequest,
+  PlacePatch,
+  PlaceSave,
   PushRegistration,
   SendEvent,
   Deliver,
@@ -26,6 +29,8 @@ import {
   type Delivery,
   type HandsStreamEvent,
   type Health,
+  type LocationReceipt,
+  type LocationToken,
   type MessageReceipt,
   type PairResponse,
   type StreamEvent,
@@ -61,6 +66,9 @@ export interface ServerDeps {
 }
 
 type Env = { Variables: { device: Device } };
+
+/** The kind of a phone's location-only token (POST /v1/location/token). */
+export const LOCATION_KIND = "location";
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const bearer = (c: Context) => c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
@@ -132,6 +140,8 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.use("/v1/*", async (c, next) => {
     const device = store.devices.authenticate(bearer(c));
     if (!device) return c.json({ error: "unauthorized — pair this device first" }, 401);
+    // A phone's location-only token reports where the phone is, and opens nothing else.
+    if (device.kind === LOCATION_KIND && !(c.req.method === "POST" && c.req.path === "/v1/location")) return c.json({ error: "this token only reports the phone's location" }, 403);
     c.set("device", device);
     await next();
   });
@@ -495,6 +505,73 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.delete("/v1/push/:token", (c) => {
     if (!store.push.unregister(c.req.param("token"), c.get("device").id)) return c.json({ error: "this device has no such push token" }, 404);
     return c.json({ ok: true });
+  });
+
+  // ── where the user is: the phone's fixes, kept forever, and the places it watches ──
+  /** The user's own devices see it; bridges (Telegram, Hermes) don't. */
+  const locationViewer = (c: Context<Env>) =>
+    ["desktop", "mobile", "cli", "host"].includes(c.get("device").kind) ? null : c.json({ error: "where you are is shown on your own devices only" }, 403);
+
+  app.post("/v1/location", async (c) => {
+    const d = c.get("device");
+    if (d.kind !== "mobile" && d.kind !== LOCATION_KIND) return c.json({ error: "only the phone reports where you are" }, 403);
+    const report = LocationReport.safeParse(await c.req.json().catch(() => null));
+    if (!report.success) return c.json({ error: report.error.issues[0]?.message ?? "fixes are needed" }, 400);
+    // Kept under the phone's own pairing, whichever of its tokens sent them, so a retry with the other is still the same fix.
+    const kept = store.location.report(store.devices.owner(d.id), report.data.fixes);
+    return c.json({ kept, places: store.location.places() } satisfies LocationReceipt);
+  });
+
+  app.get("/v1/location", (c) => locationViewer(c) ?? c.json(store.location.state()));
+
+  app.post("/v1/location/token", (c) => {
+    const d = c.get("device");
+    if (d.kind !== "mobile") return c.json({ error: "a location token is for the phone" }, 403);
+    const made = store.devices.child(d.id, `${d.name} · location`, LOCATION_KIND);
+    console.log(`[midna] location: ${d.name} has a location-only token (${made.device.id})`);
+    return c.json({ deviceId: made.device.id, token: made.token } satisfies LocationToken);
+  });
+
+  app.get("/v1/places", (c) => locationViewer(c) ?? c.json(store.location.places()));
+
+  app.post("/v1/places", async (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const p = PlaceSave.safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "a name and where it is are needed" }, 400);
+    try {
+      const had = store.location.named(p.data.name);
+      const place = store.location.savePlace(p.data);
+      console.log(`[midna] location: ${c.get("device").name} ${had ? "moved" : "saved"} the place "${place.name}"`);
+      return c.json(place, had ? 200 : 201);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.patch("/v1/places/:id", async (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const id = Number(c.req.param("id"));
+    if (!store.location.place(id)) return c.json({ error: "no such place" }, 404);
+    const p = PlacePatch.safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "nothing to change" }, 400);
+    try {
+      const place = store.location.savePlace(p.data, id);
+      console.log(`[midna] location: ${c.get("device").name} changed the place "${place.name}"`);
+      return c.json(place);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.delete("/v1/places/:id", (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const place = store.location.place(Number(c.req.param("id")));
+    if (!place || !store.location.deletePlace(place.id)) return c.json({ error: "no such place" }, 404);
+    console.log(`[midna] location: ${c.get("device").name} deleted the place "${place.name}"`);
+    return c.json({ ok: true as const });
   });
 
   /** A read-only snapshot for dashboards: objectives, today, what's open. */

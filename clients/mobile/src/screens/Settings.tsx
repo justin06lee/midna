@@ -1,15 +1,25 @@
-import { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { PhoneConnection } from "../connection";
+import { locationSetup, type LocationSetup } from "../location";
 import { useTheme } from "../theme";
 import { Button, Card, Problem } from "../ui";
 import type { Midna } from "../useMidna";
+import { LocationSettings } from "./Location";
 
-/** Which midna this phone talks to, and the way out: pair again, or unpair. */
+/** Which midna this phone talks to, location, and the way out: pair again, or unpair. */
 export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna: Midna; connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
   const t = useTheme();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const [location, setLocation] = useState<LocationSetup | null>(null);
+  const [showLocation, setShowLocation] = useState(false);
+  useEffect(() => {
+    if (showLocation) return;
+    void locationSetup().then(setLocation);
+    const sub = AppState.addEventListener("change", (a) => a === "active" && void locationSetup().then(setLocation));
+    return () => sub.remove();
+  }, [showLocation]);
   const rows: Array<[string, string]> = [
     ["midna", midna.status?.name ?? connection.name],
     ["Address", connection.url],
@@ -40,6 +50,8 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
       },
     ]);
 
+  if (showLocation) return <LocationSettings midna={midna} connection={connection} onBack={() => setShowLocation(false)} />;
+
   return (
     <ScrollView testID="settings" contentContainerStyle={s.body}>
       <Card style={s.card}>
@@ -53,6 +65,14 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
         ))}
       </Card>
       <Text style={[s.note, { color: t.dim }]}>{whereAlertsGo(midna)}</Text>
+      <Card style={s.card}>
+        <Pressable testID="settings-location" accessibilityRole="button" onPress={() => setShowLocation(true)} style={({ pressed }) => [s.row, s.last, pressed && { opacity: 0.6 }]}>
+          <Text style={[s.key, { color: t.dim }]}>Location</Text>
+          <Text style={[s.value, { color: location === "while-using" ? t.warn : t.ink }]}>
+            {locationLabel(location)} <Text style={{ color: t.dimmer }}>›</Text>
+          </Text>
+        </Pressable>
+      </Card>
       <Problem text={problem} />
       <Button label="Pair again" onPress={onPairAgain} disabled={busy} />
       <Button label="Unpair this phone" kind="danger" busy={busy} onPress={unpair} />
@@ -70,6 +90,15 @@ function notifications(midna: Midna): string {
   return "On";
 }
 
+/** Whether this phone tells midna where it is. */
+function locationLabel(l: LocationSetup | null): string {
+  if (l === "always") return "On";
+  if (l === "while-using") return "While open";
+  if (l === "denied") return "Off in iPhone Settings";
+  if (l === "off") return "Off";
+  return "—";
+}
+
 /** Where reminders and questions reach the user while the app is closed. */
 function whereAlertsGo(midna: Midna): string {
   const pushes = midna.push === "on" && midna.status?.push?.configured;
@@ -84,5 +113,6 @@ const s = StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, gap: 16 },
   key: { fontSize: 15 },
   value: { fontSize: 15, flexShrink: 1, textAlign: "right" },
+  last: { borderBottomWidth: 0 },
   note: { fontSize: 13.5, lineHeight: 19, paddingHorizontal: 4 },
 });

@@ -25,13 +25,13 @@ const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
 export class Devices {
   constructor(private db: Database) {}
 
-  /** Register a device and return its token — the only time it is visible. */
-  create(name: string, kind: string, now = Date.now()): { device: Device; token: string } {
+  /** Register a device and return its token — the only time it is visible. A device with a parent is retired with it. */
+  create(name: string, kind: string, now = Date.now(), parent: string | null = null): { device: Device; token: string } {
     const id = "dev_" + randomBytes(6).toString("hex");
     const token = "mdn_" + randomBytes(24).toString("base64url");
     this.db
-      .query("INSERT INTO devices (id, name, kind, token_hash, created_at) VALUES ($id, $name, $kind, $h, $now)")
-      .run({ id, name, kind, h: hash(token), now });
+      .query("INSERT INTO devices (id, name, kind, token_hash, created_at, parent_id) VALUES ($id, $name, $kind, $h, $now, $parent)")
+      .run({ id, name, kind, h: hash(token), now, parent });
     return { device: this.get(id)!, token };
   }
 
@@ -51,8 +51,25 @@ export class Devices {
     return d;
   }
 
+  /** Retire a device, and the devices it made (a phone's location-only token). */
   revoke(id: string, now = Date.now()): void {
-    this.db.query("UPDATE devices SET revoked_at = $now WHERE id = $id").run({ now, id });
+    this.db.query("UPDATE devices SET revoked_at = $now WHERE (id = $id OR parent_id = $id) AND revoked_at IS NULL").run({ now, id });
+  }
+
+  /**
+   * A token for one narrow job, made by a paired device and retired with it:
+   * a phone's location-only token. The device's last one of this kind is
+   * retired, so there is only ever one.
+   */
+  child(parentId: string, name: string, kind: string, now = Date.now()): { device: Device; token: string } {
+    this.db.query("UPDATE devices SET revoked_at = $now WHERE parent_id = $p AND kind = $kind AND revoked_at IS NULL").run({ now, p: parentId, kind });
+    return this.create(name, kind, now, parentId);
+  }
+
+  /** The device a narrow token belongs to; the device itself when it has none. */
+  owner(id: string): string {
+    const row = this.db.query("SELECT parent_id FROM devices WHERE id = $id").get({ id }) as { parent_id: string | null } | null;
+    return row?.parent_id ?? id;
   }
 
   pairingCode(now = Date.now(), ttl = 10 * MINUTE): { code: string; expiresAt: number } {

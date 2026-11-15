@@ -446,6 +446,39 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE episodes ADD COLUMN account TEXT;
   `,
+  // Where the user is: every fix the phone sends, kept forever, and the saved
+  // places it watches. A deleted place is kept (deleted_at) so the fixes taken
+  // there keep its name. A phone's location-only token is a device of its
+  // own, retired with the phone's pairing (parent_id).
+  `
+  CREATE TABLE places (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    radius_m REAL NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE UNIQUE INDEX places_name ON places(lower(name)) WHERE deleted_at IS NULL;
+  CREATE TABLE location_points (
+    id INTEGER PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    at INTEGER NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    accuracy_m REAL,
+    altitude_m REAL,
+    speed_mps REAL,
+    source TEXT NOT NULL CHECK (source IN ('significant','arrive','leave','app')),
+    place_id INTEGER REFERENCES places(id),
+    received_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX location_points_once ON location_points(device_id, at, source);
+  CREATE INDEX location_points_at ON location_points(at);
+  ALTER TABLE devices ADD COLUMN parent_id TEXT REFERENCES devices(id);
+  `,
 ];
 
 export function openDatabase(path: string): Database {
