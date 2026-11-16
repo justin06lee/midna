@@ -53,6 +53,8 @@ function run(argv: string[], opts: { cwd?: string; log?: (line: string) => void 
 
 /** Why there's nothing to set up here, or null when there is a Hermes to set up. */
 export function noHermes(force = false): string | null {
+  // Hermes is retired (Nov 2026): installs and restarts must never bring it back. `--force` still can.
+  if (!force) return "Hermes is retired; midna no longer sets it up";
   if (platform() !== "linux") return "Hermes runs on midna's Linux host only";
   if (process.env.MIDNA_HOME && !force) return "an isolated install (MIDNA_HOME) leaves Hermes alone";
   if (run(["id", "-u", "hermes"]).code !== 0) return "no Hermes on this machine (no `hermes` user)";
