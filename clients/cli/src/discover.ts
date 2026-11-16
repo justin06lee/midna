@@ -73,7 +73,9 @@ async function readTailscale(): Promise<TailscaleStatus | null> {
     const path = Bun.which(bin) ?? (existsSync(bin) ? bin : null);
     if (!path) continue;
     try {
-      const r = Bun.spawnSync([path, "status", "--json"], { stdout: "pipe", stderr: "ignore", timeout: 4_000 });
+      // TAILSCALE_BE_CLI: the Mac app's binary, started from a GUI app (no TERM),
+      // otherwise tries to open its GUI and fails instead of answering as the CLI.
+      const r = Bun.spawnSync([path, "status", "--json"], { stdout: "pipe", stderr: "ignore", timeout: 4_000, env: { ...process.env, TAILSCALE_BE_CLI: "1" } });
       if (r.exitCode === 0) return JSON.parse(r.stdout.toString()) as TailscaleStatus;
     } catch {
       /* not running */
