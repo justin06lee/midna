@@ -4,16 +4,19 @@
  * where there is dpkg, an .rpm where there is rpm, an AppImage anywhere else
  * (Arch, say). `--no-install` stops after building.
  *
- * On macOS the app is signed with this Mac's "midna dev" identity
- * (scripts/signing.ts), so the permissions it's granted survive the update;
- * without it the build is ad hoc, and loses them. An ad-hoc build is only
- * installed where nothing is lost by it (guard.ts).
+ * On macOS the app is signed with this Mac's Developer ID identity, then
+ * notarized and stapled, so Gatekeeper accepts it and its designated
+ * requirement is Apple-anchored and the same on every Mac; without one, with
+ * "midna dev" (scripts/signing.ts has why). Either way the permissions it's
+ * granted survive the update; without either the build is ad hoc, and loses
+ * them. A build is only installed where nothing is lost by it (guard.ts).
+ * MIDNA_NOTARIZE=0 signs with Developer ID but skips notarizing.
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUNDLE_ID, refuseInstall, signer, type Signer } from "./guard.ts";
-import { SIGNING_IDENTITY, hasSigningIdentity, signingReady } from "./signing.ts";
+import { NOTARY_PROFILE, SIGNING_IDENTITY, developerId, hasSigningIdentity, signingIdentity } from "./signing.ts";
 
 const here = join(import.meta.dir, "..");
 const bundleDir = join(here, "src-tauri", "target", "release", "bundle");
@@ -29,16 +32,25 @@ const dest = join(homedir(), "Applications", "midna.app");
 
 /** Stop before an ad-hoc build replaces a midna.app whose permissions it would lose. */
 function guard(bundleId: string, build: Signer): void {
-  const refusal = refuseInstall({ bundleId, build, identity: hasSigningIdentity(), installed: signer(dest), allowAdHoc: process.env.MIDNA_ALLOW_ADHOC === "1" });
+  const refusal = refuseInstall({
+    bundleId,
+    build,
+    identity: hasSigningIdentity(),
+    installed: signer(dest),
+    allowAdHoc: process.env.MIDNA_ALLOW_ADHOC === "1",
+    allowSwitch: process.env.MIDNA_SWITCH_SIGNER === "1",
+  });
   if (!refusal) return;
   console.error(`\n${refusal}\n`);
   process.exit(1);
 }
 
-// Before building: it would be signed only if codesign can use the identity now.
+const identity = kind === "app" ? signingIdentity() : null;
+
+// Before building: it would be signed only if codesign can use an identity now.
 if (kind === "app" && install) {
   const conf = JSON.parse(readFileSync(join(here, "src-tauri", "tauri.conf.json"), "utf8")) as { identifier: string };
-  guard(conf.identifier, signingReady() ? "midna dev" : "adhoc");
+  guard(conf.identifier, !identity ? "adhoc" : identity.developerId ? "developer id" : "midna dev");
 }
 
 run(["bun", "scripts/sidecar.ts"]);
@@ -53,23 +65,54 @@ const built = (sub: string, ext: string) => {
 
 /** Sign the bundle inside out — the bundled CLI, then the app — under the hardened runtime. */
 function sign(app: string): void {
-  if (!signingReady()) {
-    console.warn(`\n⚠ ad-hoc build: "${SIGNING_IDENTITY}" isn't ready on this Mac (bun run signing), so the permissions midna.app has been granted won't survive this update.\n`);
+  if (!identity) {
+    console.warn(`\n⚠ ad-hoc build: neither a Developer ID nor "${SIGNING_IDENTITY}" is ready on this Mac (bun run signing), so the permissions midna.app has been granted won't survive this update.\n`);
     return;
   }
+  const dev = developerId();
+  if (dev && !identity.developerId) console.warn(`\n⚠ "${dev}" is here but codesign can't use its key without asking; signing with "${SIGNING_IDENTITY}".\n`);
   // The grants are filed under the bundle id and the certificate: the id never changes.
   const id = Bun.spawnSync(["/usr/bin/defaults", "read", join(app, "Contents", "Info.plist"), "CFBundleIdentifier"]).stdout.toString().trim();
-  if (id !== BUNDLE_ID) throw new Error(`${app} is ${id || "unidentified"}, not ${BUNDLE_ID}: only midna.app itself is signed with "${SIGNING_IDENTITY}"`);
+  if (id !== BUNDLE_ID) throw new Error(`${app} is ${id || "unidentified"}, not ${BUNDLE_ID}: only midna.app itself is signed with "${identity.name}"`);
   const entitlements = (name: string) => join(here, "src-tauri", "entitlements", `${name}.plist`);
+  // Notarization wants a secure timestamp on every signature.
+  const timestamp = identity.developerId ? ["--timestamp"] : [];
   const codesign = (target: string, ent: string) =>
-    run(["codesign", "--force", "--options", "runtime", "--entitlements", entitlements(ent), "--sign", SIGNING_IDENTITY, target]);
+    run(["codesign", "--force", "--options", "runtime", ...timestamp, "--entitlements", entitlements(ent), "--sign", identity.name, target]);
   codesign(join(app, "Contents", "MacOS", "midna"), "sidecar");
   codesign(app, "app");
-  run(["codesign", "--verify", "--strict", app]);
-  console.log(`signed with "${SIGNING_IDENTITY}"`);
+  run(["codesign", "--verify", "--strict", "--deep", app]);
+  console.log(`signed with "${identity.name}"`);
 }
 
-if (kind === "app") sign(built("macos", ".app"));
+/** Send a Developer ID build to Apple's notary service, staple the ticket, and check Gatekeeper accepts it. */
+function notarize(app: string): void {
+  const zip = join(tmpdir(), `midna-notarize-${process.pid}.zip`);
+  run(["ditto", "-c", "-k", "--keepParent", app, zip]);
+  console.log(`notarizing with the "${NOTARY_PROFILE}" profile (a few minutes)…`);
+  const r = Bun.spawnSync(["xcrun", "notarytool", "submit", zip, "--keychain-profile", NOTARY_PROFILE, "--wait", "--output-format", "json"], { stdout: "pipe", stderr: "pipe" });
+  rmSync(zip, { force: true });
+  const out = r.stdout.toString();
+  let result: { id?: string; status?: string; message?: string } = {};
+  try {
+    result = JSON.parse(out);
+  } catch {}
+  console.log(`notarization ${result.id ?? "(no id)"}: ${result.status ?? "no answer"}`);
+  if (result.status !== "Accepted") {
+    console.error(out + r.stderr.toString());
+    if (result.id) Bun.spawnSync(["xcrun", "notarytool", "log", result.id, "--keychain-profile", NOTARY_PROFILE], { stdout: "inherit", stderr: "inherit" });
+    console.error(`\n✗ not notarized. The log above names what Apple refused (an unsigned nested binary, a missing timestamp, an entitlement). MIDNA_NOTARIZE=0 builds without notarizing.\n`);
+    process.exit(1);
+  }
+  run(["xcrun", "stapler", "staple", app]);
+  run(["xcrun", "stapler", "validate", app]);
+  run(["spctl", "-a", "-vv", app]);
+}
+
+if (kind === "app") {
+  sign(built("macos", ".app"));
+  if (identity?.developerId && process.env.MIDNA_NOTARIZE !== "0") notarize(built("macos", ".app"));
+}
 
 if (!install) process.exit(0);
 

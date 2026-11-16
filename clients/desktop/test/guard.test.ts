@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BUNDLE_ID, refuseInstall, signer, type InstallFacts } from "../scripts/guard.ts";
 
-const adHoc = (over: Partial<InstallFacts> = {}): InstallFacts => ({ bundleId: BUNDLE_ID, build: "adhoc", identity: false, installed: "none", allowAdHoc: false, ...over });
+const adHoc = (over: Partial<InstallFacts> = {}): InstallFacts => ({ bundleId: BUNDLE_ID, build: "adhoc", identity: false, installed: "none", allowAdHoc: false, allowSwitch: false, ...over });
 
 describe("installing midna.app", () => {
   test("an ad-hoc build is refused where the identity is, usable yet or not (make app at 14:43 and 21:36)", () => {
@@ -18,6 +18,19 @@ describe("installing midna.app", () => {
   test("an ad-hoc build never replaces a signed midna.app, identity or not", () => {
     expect(refuseInstall(adHoc({ installed: "midna dev" }))).toContain(`the installed midna.app is signed with "midna dev" and this build isn't`);
     expect(refuseInstall(adHoc({ installed: "other" }))).toContain("the installed midna.app is signed and this build isn't");
+    expect(refuseInstall(adHoc({ installed: "developer id" }))).toContain("the installed midna.app is signed with Developer ID and this build isn't");
+  });
+
+  test("switching between Developer ID and \"midna dev\" resets the grants, so it waits to be asked for", () => {
+    const refusal = refuseInstall(adHoc({ build: "developer id", installed: "midna dev" }));
+    expect(refusal).toContain(`signed with Developer ID, the installed one with "midna dev"`);
+    expect(refusal).toContain("MIDNA_SWITCH_SIGNER=1 make app");
+    expect(refuseInstall(adHoc({ build: "midna dev", identity: true, installed: "developer id" }))).toContain(`signed with "midna dev", the installed one with Developer ID`);
+    expect(refuseInstall(adHoc({ build: "developer id", installed: "midna dev", allowSwitch: true }))).toBeNull();
+    // Developer ID over Developer ID, or over an ad-hoc app with nothing to keep, installs.
+    expect(refuseInstall(adHoc({ build: "developer id", installed: "developer id" }))).toBeNull();
+    expect(refuseInstall(adHoc({ build: "developer id", installed: "adhoc" }))).toBeNull();
+    expect(refuseInstall(adHoc({ build: "developer id", installed: "none" }))).toBeNull();
   });
 
   test("a signed build installs; so does an ad-hoc one where nothing is lost, or when asked for", () => {

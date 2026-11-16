@@ -18,13 +18,20 @@ install:
 
 # The desktop app, built for this machine and installed: the .app into ~/Applications on macOS;
 # on Linux a .deb where there is dpkg, an .rpm where there is rpm, an AppImage anywhere else.
+# On macOS it's signed with the login keychain's Developer ID Application identity when there is a valid
+# one, then notarized with the "midna-notary" notarytool profile and stapled: Gatekeeper accepts it, and its
+# designated requirement (Apple's anchor, team 65UN46K6FA) is the same on every Mac, so grants survive updates.
+# Otherwise it's signed with "midna dev" (grants survive, this Mac only), otherwise ad hoc.
+# The first Developer ID build over a "midna dev" midna.app resets its permissions once (the requirement
+# changes), so it isn't installed until asked for: MIDNA_SWITCH_SIGNER=1 make app, at the Mac, then grant them again.
 # On a Mac with the "midna dev" identity (or a signed midna.app) an unsigned build isn't installed:
-# `make signing` first, or MIDNA_ALLOW_ADHOC=1 make app to mean it.
+# `make signing` first, or MIDNA_ALLOW_ADHOC=1 make app to mean it. MIDNA_NOTARIZE=0 skips notarizing.
 app:
 	bun install
 	cd clients/desktop && bun run app
 
-# The "midna dev" signing identity, once per Mac, so midna.app keeps its permissions across updates.
+# The "midna dev" signing identity, once per Mac, so midna.app keeps its permissions across updates
+# on a Mac without a Developer ID identity (with one, app builds use that and this isn't needed).
 signing:
 	cd clients/desktop && bun run signing
 

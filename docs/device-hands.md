@@ -19,7 +19,7 @@ midna lives on the Jetson. To act on Justin's MacBook Air (and later his Arch de
   - Pause is in the window, the tray, behind a global shortcut, and in a daemon setting reachable from Telegram;
   - real input from Justin stops midna's input at once.
 - **Audit:** every command, its decision (allowed, approved by whom, denied) and its outcome, in the daemon's database next to the existing `actions` log. The app also shows its own recent list.
-- **macOS signing:** a stable self-signed identity, "midna dev", in the login keychain, made the way ruri makes "ruri dev". `app.ts` signs with it, with the bundle id fixed at `sh.midna.desktop`, so TCC grants survive every update.
+- **macOS signing:** Developer ID ("Developer ID Application: Huiyun Lee (65UN46K6FA)") where the login keychain has it, notarized and stapled; otherwise a stable self-signed identity, "midna dev", made the way ruri makes "ruri dev". `app.ts` signs with it, with the bundle id fixed at `sh.midna.desktop`, so TCC grants survive every update.
 
 ## What exists today (and matters here)
 
@@ -269,7 +269,12 @@ Other files:
 **Once, when switching from ad hoc:** `tccutil reset All sh.midna.desktop` clears the stale grants (that id only), then Justin grants each permission once, from "This computer".
 **Exit test for phase 0:** grant the permissions, rebuild and reinstall twice, and confirm every grant still works.
 
-**Not covered:** a self-signed app isn't trusted on other Macs, and can't be notarized. Both are fine for Justin's own machines; Developer ID is the fork if that changes.
+**Developer ID (2026-11-16).** A self-signed app isn't trusted on other Macs and can't be notarized, so `app.ts` now prefers a valid "Developer ID Application" identity (`security find-identity -v`, key usable by `apple:`), and falls back to "midna dev", then ad hoc:
+- the same inside-out signing and entitlements, plus `--timestamp`, which notarization requires;
+- then `ditto -c -k --keepParent` → `xcrun notarytool submit --wait --keychain-profile midna-notary` → `xcrun stapler staple` → `spctl -a -vv`. A rejection prints `notarytool log` and stops the build. `MIDNA_NOTARIZE=0` skips it;
+- `midna-notary` is made once per Mac in the GUI session, from the App Store Connect API key in `~/.appstoreconnect/private_keys` (the one `reze-notary` and `ghostly-notary` use): `xcrun notarytool store-credentials midna-notary --key <p8> --key-id <id> --issuer <issuer>`.
+
+Why: Gatekeeper accepts a notarized app anywhere, copied or downloaded, and the DR becomes `anchor apple generic … certificate leaf[subject.OU] = "65UN46K6FA"`, the same on every Mac and across certificate renewals. **The switch resets the grants once:** the DR changes, so Screen Recording, Accessibility, Automation (Messages, System Events) and Full Disk Access must be granted again (`tccutil reset All sh.midna.desktop` first clears the stale rows). `guard.ts` won't install a Developer ID build over a "midna dev" one (or back) unless `MIDNA_SWITCH_SIGNER=1`.
 
 **macOS 15+ caveat:** Screen Recording is periodically re-confirmed (a monthly "continue to allow?" prompt) for apps that capture without the system picker. midna can't answer it; the app notices the permission dropping and tells Justin.
 

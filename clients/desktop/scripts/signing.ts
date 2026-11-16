@@ -1,29 +1,51 @@
 /**
- * The stable code-signing identity midna.app is signed with on this Mac,
- * "midna dev": a self-signed certificate in the login keychain, made the
- * way ruri makes "ruri dev".
+ * The code-signing identities midna.app is signed with, best first:
+ *
+ * 1. "Developer ID Application: …", Apple's certificate for apps shipped
+ *    outside the App Store, when the login keychain has a valid one that
+ *    codesign may use. app.ts then notarizes the build (the "midna-notary"
+ *    notarytool profile) and staples the ticket.
+ * 2. "midna dev": a self-signed certificate in the login keychain, made the
+ *    way ruri makes "ruri dev" (`bun run signing`).
+ * 3. Neither: ad hoc.
  *
  * Why: macOS keeps a permission grant (Screen Recording, Accessibility, Full
  * Disk Access, …) against the app's designated requirement. An ad-hoc
  * signature's requirement is its cdhash, new on every build, so each update
  * looked like a new app and lost its grants. Signed with the same certificate,
  * the requirement — identifier "sh.midna.desktop" and this certificate — stays
- * the same, and the grants survive every rebuild.
+ * the same, and the grants survive every rebuild. "midna dev" does that on
+ * this Mac only. Developer ID does it with a requirement Apple anchors
+ * ("anchor apple generic", the team 65UN46K6FA), the same on every Mac and for
+ * any Developer ID certificate of that team, and notarized, Gatekeeper accepts
+ * the app anywhere, downloaded or copied, without "unidentified developer".
  *
- * `bun run signing` makes it once (an identity already there is kept), then
- * does the two steps that need Justin, once each, in a terminal: trusting the
- * certificate for code signing (macOS asks for his password), so it is a
- * valid identity like "ruri dev"; and letting codesign (an "apple:" tool) use
- * its key without asking on every build (his login password). app.ts signs
- * with the identity once codesign can use it. Back it up with
- * `security export -t identities -f pkcs12` (asks for the login password);
- * losing it means granting the permissions once more.
+ * Switching certificates changes the requirement, so the switch from "midna
+ * dev" to Developer ID resets the grants once: guard.ts won't install over a
+ * "midna dev" midna.app unless asked (MIDNA_SWITCH_SIGNER=1), and Justin
+ * grants each permission again. After that they survive every update.
+ *
+ * `bun run signing` makes "midna dev" once (an identity already there is
+ * kept), then does the two steps that need Justin, once each, in a terminal:
+ * trusting the certificate for code signing (macOS asks for his password), so
+ * it is a valid identity like "ruri dev"; and letting codesign (an "apple:"
+ * tool) use its key without asking on every build (his login password). Back
+ * it up with `security export -t identities -f pkcs12` (asks for the login
+ * password); losing it means granting the permissions once more. A Developer
+ * ID certificate comes from developer.apple.com and needs none of this.
+ *
+ * The notary profile, once per Mac, from the App Store Connect API key in
+ * ~/.appstoreconnect/private_keys (no app-specific password), in the GUI
+ * session, since it goes into the login keychain:
+ *   xcrun notarytool store-credentials midna-notary --key <AuthKey_ID.p8> --key-id <ID> --issuer <issuer>
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const SIGNING_IDENTITY = "midna dev";
+/** The notarytool keychain profile app.ts notarizes Developer ID builds with. */
+export const NOTARY_PROFILE = "midna-notary";
 const KEYCHAIN = join(homedir(), "Library", "Keychains", "login.keychain-db");
 
 const sh = (argv: string[]) => {
@@ -36,21 +58,37 @@ export function hasSigningIdentity(): boolean {
   return process.platform === "darwin" && sh(["security", "find-identity", "-p", "codesigning"]).out.includes(`"${SIGNING_IDENTITY}"`);
 }
 
-/** The partitions allowed to use the identity's private key without asking, from the keychain's access lists. */
-function keyPartitions(): string[] {
+/** The partitions allowed to use an identity's private key without asking, from the keychain's access lists. */
+function keyPartitions(identity: string): string[] {
+  // The key's application label is the certificate's public-key hash.
+  const hpky = /"hpky"<blob>=(0x[0-9A-F]+)/.exec(sh(["security", "find-certificate", "-c", identity, KEYCHAIN]).out)?.[1];
+  if (!hpky) return [];
   const dump = sh(["security", "dump-keychain", "-a", KEYCHAIN]).out;
-  const record = dump.split(/^keychain: /m).find((r) => r.includes("class: 0x00000010") && r.includes(`0x00000001 <blob>="${SIGNING_IDENTITY}"`));
+  const record = dump.split(/^keychain: /m).find((r) => r.includes("class: 0x00000010") && r.includes(`<blob>=${hpky}`));
   // "authorizations (1): partition_id", then (on current macOS) "don't-require-password", then "description: apple-tool:".
   const m = record && /authorizations \(\d+\): partition_id\n(?:[^\n]*\n)*?\s*description: ([^\n]*)/.exec(record);
   return m ? m[1]!.split(",").map((p) => p.trim()).filter(Boolean) : [];
 }
 
+/** The valid (unexpired, chained to Apple) Developer ID Application identity in the keychain, if there is one. */
+export function developerId(): string | null {
+  if (process.platform !== "darwin") return null;
+  return /"(Developer ID Application: [^"]+)"/.exec(sh(["security", "find-identity", "-v", "-p", "codesigning"]).out)?.[1] ?? null;
+}
+
+/** What app.ts signs with: Developer ID when it's valid and codesign may use it, else "midna dev" when ready, else nothing (ad hoc). */
+export function signingIdentity(): { name: string; developerId: boolean } | null {
+  const dev = developerId();
+  if (dev && keyPartitions(dev).includes("apple:")) return { name: dev, developerId: true };
+  return signingReady() ? { name: SIGNING_IDENTITY, developerId: false } : null;
+}
+
 /** The command that lets codesign use the key without a prompt — the one step that needs the login password. */
 export const ALLOW_CODESIGN = ["security", "set-key-partition-list", "-S", "apple-tool:,apple:", "-s", "-t", "private", "-l", SIGNING_IDENTITY, KEYCHAIN];
 
-/** The identity is here and codesign can use it without stopping the build for a password. */
+/** "midna dev" is here and codesign can use it without stopping the build for a password. */
 export function signingReady(): boolean {
-  return hasSigningIdentity() && keyPartitions().includes("apple:");
+  return hasSigningIdentity() && keyPartitions(SIGNING_IDENTITY).includes("apple:");
 }
 
 /** Trusted for code signing, so `security find-identity -v` lists it as valid, as it does "ruri dev". */
