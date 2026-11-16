@@ -6,10 +6,10 @@
  *     machine unlike this one. Linux by default, since that's where always-on hosts live;
  *     MIDNA_KITS_FOR="linux-x64,darwin-arm64,…" chooses.
  * `--universal` (macOS): the sidecar is one binary for Apple silicon and Intel, the bun builds
- * for each joined with lipo, under the name `tauri build --target universal-apple-darwin` looks for.
+ * for each joined with lipo, under the name `tauri build --target universal-apple-darwin` bundles.
+ * That build compiles each arch on its own first, and each wants its own slice there too.
  */
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -31,13 +31,12 @@ function build(target: string | null, out: string): void {
 mkdirSync(join(tauri, "binaries"), { recursive: true });
 const sidecar = join(tauri, "binaries", `midna-${triple}${triple.includes("windows") ? ".exe" : ""}`);
 if (universal) {
-  const slices = ["darwin-arm64", "darwin-x64"].map((plat) => {
-    const out = join(tmpdir(), `midna-sidecar-${plat}-${process.pid}`);
+  const slices = [["darwin-arm64", "aarch64-apple-darwin"], ["darwin-x64", "x86_64-apple-darwin"]].map(([plat, t]) => {
+    const out = join(tauri, "binaries", `midna-${t}`);
     build(plat, out);
     return out;
   });
   const r = Bun.spawnSync(["lipo", "-create", ...slices, "-output", sidecar], { stdout: "inherit", stderr: "inherit" });
-  for (const f of slices) rmSync(f, { force: true });
   if (r.exitCode !== 0) process.exit(r.exitCode ?? 1);
 } else build(null, sidecar);
 console.log(`sidecar  ${sidecar}`);
