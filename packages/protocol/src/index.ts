@@ -328,7 +328,14 @@ export interface PairResponse {
 
 export interface DeviceInfo { id: string; name: string; kind: string; created_at: number; last_seen_at: number | null }
 
-export interface Health { ok: true; service: typeof SERVICE; version: string; name: string }
+export interface Health {
+  ok: true;
+  service: typeof SERVICE;
+  version: string;
+  name: string;
+  /** Where it answers over HTTPS on the tailnet (`tailscale serve`), when it does: the desktop app's window can't use plain http there. Hosts after 0.13.2. */
+  https?: string;
+}
 
 /** One line of the conversation as a client draws it. */
 export interface HistoryItem {

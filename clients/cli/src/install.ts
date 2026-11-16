@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { arch, hostname, platform, userInfo } from "node:os";
 import { dirname, join } from "node:path";
-import { DEFAULT_PORT, INSTALL_STEPS, MidnaClient, type InstallEvent, type InstallStepId } from "@midna/protocol";
+import { DEFAULT_PORT, INSTALL_STEPS, MidnaClient, serveCommand, webViewBlocks, type InstallEvent, type InstallStepId } from "@midna/protocol";
 import { VERSION } from "@midna/daemon";
-import type { Device } from "./discover.ts";
+import { findHttps, type Device } from "./discover.ts";
 
 /**
  * Make a machine midna's home from wherever you're sitting: reach it (SSH
@@ -315,9 +315,9 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
       last = out.error ?? r.stderr.trim();
     }
     if (!code) throw new StepFailed("pair", "midna there wouldn't give out a pairing code.", last || undefined);
-    const url = `http://${device.address.includes(":") ? `[${device.address}]` : device.address}:${port}`;
+    const plain = `http://${device.address.includes(":") ? `[${device.address}]` : device.address}:${port}`;
     // makima puts a loopback service on the mesh once it has been up a few seconds.
-    const client = new MidnaClient(url);
+    let client = new MidnaClient(plain);
     let reachable = false;
     for (const end = Date.now() + 45_000; Date.now() < end; await Bun.sleep(750)) {
       if (await client.health(AbortSignal.timeout(3_000)).then(() => true, () => false)) {
@@ -328,11 +328,24 @@ export async function install(device: Device, opts: InstallOptions, emit: (e: In
     if (!reachable)
       throw new StepFailed(
         "pair",
-        `midna is running on ${device.name} but this computer can't reach ${url}.`,
+        `midna is running on ${device.name} but this computer can't reach ${plain}.`,
         device.via === "makima" ? "makima publishes it within a few seconds; check `makima status` there." : "Check the firewall on that machine.",
       );
     const kind = opts.kind ?? "desktop";
-    const replaces = opts.replaces && sameHost(opts.replaces.url, url) ? opts.replaces.token : undefined;
+    // Its HTTPS address on the tailnet whenever it has one: the app's window can't load plain http there.
+    const https = device.self ? null : await findHttps({ url: plain, ssh: device.sshTarget });
+    if (!https && kind === "desktop" && webViewBlocks(plain)) {
+      const serve = serveCommand(port);
+      throw new StepFailed(
+        "pair",
+        `midna on ${device.name} answers only over plain http, which this app's window can't use on the tailnet.`,
+        `Give it an HTTPS address: run \`${serve}\` on ${device.name} (HTTPS certificates must be on for the tailnet; on Linux, \`sudo tailscale set --operator=$USER\` first if it says access denied), then try again.`,
+        { label: `Run it on ${device.name}`, terminal: t.terminal(serve) },
+      );
+    }
+    const url = https ?? plain;
+    if (https) client = new MidnaClient(https);
+    const replaces = opts.replaces && (sameHost(opts.replaces.url, url) || sameHost(opts.replaces.url, plain)) ? opts.replaces.token : undefined;
     const paired = await client.pair({ code, deviceName: opts.deviceName ?? `${hostname().replace(/\.local$/, "")} (${kind})`, kind, ...(replaces ? { replaces } : {}) });
     step("pair", "done", paired.replaced ? "the pairing it replaces is retired" : undefined);
     emit({ type: "done", connection: { url, token: paired.token, name: paired.name, host: device.name, ssh: device.self ? null : (device.sshTarget ?? device.address), device: paired.deviceId, ...(paired.daemonKey ? { daemonKey: paired.daemonKey } : {}) } });

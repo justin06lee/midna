@@ -1,4 +1,4 @@
-import type { Approval, ApprovalAnswer, Connection, DiscoveredDevice, InstallEvent } from "@midna/protocol";
+import { DEFAULT_PORT, serveCommand, webViewBlocks, type Approval, type ApprovalAnswer, type Connection, type DiscoveredDevice, type HttpsFound, type InstallEvent } from "@midna/protocol";
 
 /**
  * Everything the window asks of the computer it runs on. In the app that is
@@ -82,6 +82,40 @@ export async function saveConnection(c: Connection): Promise<void> {
 export async function clearConnection(): Promise<void> {
   if (inApp) return (await import("@tauri-apps/api/core")).invoke("connection_clear");
   localStorage.removeItem(KEY);
+}
+
+// ── HTTPS on the tailnet: this window can't load plain http there ────────
+
+/** midna's HTTPS address for a connection, as the bundled `midna` finds it (it can still ask the plain-http address, which this window can't). */
+export async function findHttps(c: Connection): Promise<HttpsFound> {
+  let out = "";
+  const r = await runMidna(["host", "https", c.url, ...(c.ssh ? ["--ssh", c.ssh] : []), "--json"], (l) => (out += l)).catch((err: Error): RunResult => ({ code: -1, stderr: err.message }));
+  if (r.code === 0) {
+    try {
+      return JSON.parse(out) as HttpsFound;
+    } catch {
+      /* fall through */
+    }
+  }
+  const port = Number(new URL(c.url).port) || DEFAULT_PORT;
+  return { url: null, message: r.stderr.trim() || `couldn't look for midna's HTTPS address on ${c.host}`, command: serveCommand(port) };
+}
+
+export type Secured = { connection: Connection } | { blocked: Extract<HttpsFound, { url: null }>; connection: Connection };
+
+/**
+ * A connection this window can load. One saved with plain http to a tailnet
+ * address (set up by an app of 0.13.2 or older, or by hand) moves to midna's HTTPS
+ * address there and is saved so; with none to be found it is reported
+ * blocked, never used as it is (chat would say "Can't reach midna" forever).
+ */
+export async function secured(c: Connection, find = findHttps, save = saveConnection): Promise<Secured> {
+  if (!webViewBlocks(c.url)) return { connection: c };
+  const found = await find(c);
+  if (found.url === null) return { blocked: found, connection: c };
+  const next = { ...c, url: found.url };
+  await save(next);
+  return { connection: next };
 }
 
 // ── small things a web view can't do alone ───────────────────────────────

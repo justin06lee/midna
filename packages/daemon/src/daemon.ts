@@ -11,6 +11,7 @@ import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveCon
 import { HandsHub } from "./hands.ts";
 import { JobRunner } from "./jobs.ts";
 import { createApp } from "./server.ts";
+import { tailnetHttps } from "./tailnet.ts";
 import { Vault, vaultSettings, type VaultSettings } from "./vault.ts";
 import { VERSION } from "./version.ts";
 
@@ -51,6 +52,8 @@ export interface DaemonOptions {
   bridgeSetups?: Record<string, BridgeSetup>;
   /** The vault's settings, for tests (null: no vault); otherwise ghostly's install on this host, as config.json's "vault" adjusts it. */
   vault?: VaultSettings | null;
+  /** The HTTPS address /healthz advertises, for tests (null: none); otherwise whatever `tailscale serve` proxies to this port. */
+  https?: string | null;
 }
 
 /** Connect one bridge: given the user's input, set it up and say how to launch it. */
@@ -167,6 +170,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     jobs,
     workspace: p.workspace,
     mcpToken,
+    https: opts.https !== undefined ? async () => opts.https ?? null : tailnetHttps(port),
     vault: vault ?? ("missing" in found ? found.missing : "there's no vault here"),
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
     bridges: () => {

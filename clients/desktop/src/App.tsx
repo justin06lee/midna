@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Connection, DiscoveredDevice } from "@midna/protocol";
-import { clearConnection, loadConnection, saveConnection, type InstallChoices } from "./host";
+import type { Connection, DiscoveredDevice, HttpsFound } from "@midna/protocol";
+import { clearConnection, inApp, loadConnection, saveConnection, secured, type InstallChoices } from "./host";
 import { Boundary } from "./Boundary";
 import { dropDraft, loadDraft, saveDraft } from "./drafts";
+import { Insecure } from "./screens/Insecure";
 import { Install } from "./screens/Install";
 import { Main } from "./screens/Main";
 import { Welcome } from "./screens/Welcome";
 import { Spinner } from "./ui";
 
-type Screen = { at: "loading" } | { at: "welcome"; notice?: string } | { at: "install"; device: DiscoveredDevice } | { at: "main"; connection: Connection };
+type Screen =
+  | { at: "loading" }
+  | { at: "welcome"; notice?: string }
+  | { at: "install"; device: DiscoveredDevice }
+  | { at: "main"; connection: Connection }
+  | { at: "insecure"; connection: Connection; blocked: Extract<HttpsFound, { url: null }> };
 
 /** The setup choices once changed, until a machine is set up with them. */
 const SETUP_DRAFT = "midna.draft:setup";
@@ -31,18 +37,24 @@ export function App() {
     setChoices(c);
   }, []);
 
+  /** Talk to `c`, by HTTPS when it was saved with plain http on the tailnet (the preview, a plain browser tab, can use http). */
+  const open = useCallback(async (c: Connection) => {
+    const s = inApp ? await secured(c) : { connection: c };
+    setScreen("blocked" in s ? { at: "insecure", connection: s.connection, blocked: s.blocked } : { at: "main", connection: s.connection });
+  }, []);
+
   useEffect(() => {
     void loadConnection().then(
-      (c) => setScreen(c ? { at: "main", connection: c } : { at: "welcome" }),
+      (c) => (c ? open(c) : setScreen({ at: "welcome" })),
       () => setScreen({ at: "welcome" }),
     );
-  }, []);
+  }, [open]);
 
   const connected = useCallback(async (c: Connection) => {
     await saveConnection(c);
     dropDraft(SETUP_DRAFT);
-    setScreen({ at: "main", connection: c });
-  }, []);
+    await open(c);
+  }, [open]);
 
   const disconnect = useCallback(async (notice?: string) => {
     await clearConnection();
@@ -60,6 +72,8 @@ export function App() {
       return <Welcome choices={choices} onChoices={choose} notice={screen.notice} onPick={(device) => setScreen({ at: "install", device })} />;
     case "install":
       return <Install device={screen.device} choices={choices} onDone={(c) => void connected(c)} onBack={() => setScreen({ at: "welcome" })} />;
+    case "insecure":
+      return <Insecure connection={screen.connection} blocked={screen.blocked} onRetry={() => open(screen.connection)} onDisconnect={() => void disconnect()} />;
     case "main":
       return (
         <Boundary onReset={() => void disconnect()}>

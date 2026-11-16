@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { openSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { MidnaClient, MidnaError, type Account, type OutboxItem, type SpendDay, type SpendKind, type Status } from "@midna/protocol";
+import { DEFAULT_PORT, MidnaClient, MidnaError, serveCommand, type Account, type HttpsFound, type OutboxItem, type SpendDay, type SpendKind, type Status } from "@midna/protocol";
 import {
   VERSION,
   accountEmails,
@@ -28,7 +28,7 @@ import {
   type BridgeSetup,
 } from "@midna/daemon";
 import { TelegramBridge, setupTelegram } from "@midna/telegram";
-import { discover } from "./discover.ts";
+import { discover, findHttps } from "./discover.ts";
 import { hermesSetup } from "./hermes.ts";
 import { STEPS, defaultKits, install, sameHost, type InstallEvent } from "./install.ts";
 
@@ -431,6 +431,22 @@ async function hostInstall(): Promise<void> {
   if (!ok) process.exit(1);
 }
 
+/**
+ * `midna host https <url> [--ssh <host>]`: midna's HTTPS address on the tailnet
+ * for a connection saved with plain http there — the desktop app asks before it
+ * opens one, since its window can't load plain http to a Tailscale address.
+ */
+async function hostHttps(url: string | undefined): Promise<void> {
+  if (!url) die("usage: midna host https <url> [--ssh <host>]");
+  const found = await findHttps({ url, ssh: flag("--ssh") ?? null });
+  const port = Number(new URL(url).port) || DEFAULT_PORT;
+  const answer: HttpsFound = found
+    ? { url: found }
+    : { url: null, message: `midna at ${url} has no HTTPS address on the tailnet.`, command: serveCommand(port) };
+  if (json) return out(answer);
+  console.log(answer.url ?? `${answer.message}\nOn its host, run: ${answer.command}`);
+}
+
 /** `midna event`: something that happened elsewhere, for midna to hear in the background. */
 async function sendEvent(): Promise<void> {
   const source = flag("--source");
@@ -552,7 +568,8 @@ async function main(): Promise<void> {
     }
     case "host":
       if (rest[0] === "install") return hostInstall();
-      return die(`usage: midna host install <machine>   (steps: ${Object.values(STEPS).join(" → ")})`);
+      if (rest[0] === "https") return hostHttps(rest[1]);
+      return die(`usage: midna host install <machine>   (steps: ${Object.values(STEPS).join(" → ")})\n       midna host https <url> [--ssh <host>]`);
     case "paired": {
       const c = client();
       if (rest[0] === "revoke" && rest[1]) {

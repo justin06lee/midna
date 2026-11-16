@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { hostname } from "node:os";
-import { DEFAULT_PORT, MidnaClient, type DiscoveredDevice } from "@midna/protocol";
+import { DEFAULT_PORT, MidnaClient, SERVICE, httpsCandidates, type DiscoveredDevice, type Health } from "@midna/protocol";
 
 /**
  * Which machines midna could live on: this one, every peer on the makima
@@ -92,7 +92,7 @@ async function readTailscale(): Promise<TailscaleStatus | null> {
 export async function probe(url: string, ms = 1_500): Promise<Device["midna"]> {
   try {
     const h = await new MidnaClient(url).health(AbortSignal.timeout(ms));
-    return { running: true, version: h.version, name: h.name, url };
+    return { running: true, version: h.version, name: h.name, url, ...(h.https ? { https: h.https } : {}) };
   } catch {
     return { running: false };
   }
@@ -129,4 +129,23 @@ export async function discover(port = DEFAULT_PORT): Promise<Device[]> {
     }),
   );
   return devices;
+}
+
+/**
+ * midna's HTTPS address on the tailnet, for a connection at `from.url`: the
+ * one it advertises, else its MagicDNS name (`from.ssh`) on the conventional
+ * port. A candidate counts only once it answers as midna — the same midna,
+ * when the plain-http one answers too. Null when there is none.
+ */
+export async function findHttps(
+  from: { url: string; ssh?: string | null },
+  health: (url: string, signal: AbortSignal) => Promise<Health> = (url, signal) => new MidnaClient(url).health(signal),
+  ms = 4_000,
+): Promise<string | null> {
+  const known = await health(from.url, AbortSignal.timeout(ms)).catch(() => null);
+  for (const url of httpsCandidates({ ssh: from.ssh, https: known?.https })) {
+    const h = await health(url, AbortSignal.timeout(ms)).catch(() => null);
+    if (h?.service === SERVICE && (!known || h.name === known.name)) return url;
+  }
+  return null;
 }

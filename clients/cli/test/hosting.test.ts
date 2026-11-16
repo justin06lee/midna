@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fromMakima, fromTailscale } from "../src/discover.ts";
+import type { Health } from "@midna/protocol";
+import { findHttps, fromMakima, fromTailscale } from "../src/discover.ts";
 import { dq, explainSsh, findBuild, platformOf, signInHint, sshControlPath } from "../src/install.ts";
 
 describe("discovery", () => {
@@ -25,6 +26,37 @@ describe("discovery", () => {
       Peer: { nodekey1: { HostName: "tenet", DNSName: "tenet.tail1234.ts.net.", TailscaleIPs: ["fd7a:115c::1", "100.101.102.103"], Online: true, OS: "linux" } },
     });
     expect(d).toMatchObject({ id: "tailscale:tenet", address: "100.101.102.103", sshTarget: "tenet.tail1234.ts.net", listen: "100.101.102.103", os: "linux", online: true });
+  });
+});
+
+describe("finding midna's HTTPS address", () => {
+  const midna = (name: string, https?: string): Health => ({ ok: true, service: "midna", version: "0.13.3", name, ...(https ? { https } : {}) });
+  /** Health by URL; a URL not listed doesn't answer. */
+  const answers = (by: Record<string, Health>) => async (url: string) => by[url] ?? Promise.reject(new Error("unreachable"));
+
+  test("the address midna advertises", async () => {
+    const health = answers({ "http://100.74.137.16:7717": midna("midna", "https://midna.tailddc9d9.ts.net:9443"), "https://midna.tailddc9d9.ts.net:9443": midna("midna") });
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "midna.tailddc9d9.ts.net" }, health)).toBe("https://midna.tailddc9d9.ts.net:9443");
+  });
+
+  test("a midna too old to advertise one: its MagicDNS name on 8443", async () => {
+    const health = answers({ "http://100.74.137.16:7717": midna("midna"), "https://midna.tailddc9d9.ts.net:8443": midna("midna") });
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "midna.tailddc9d9.ts.net" }, health)).toBe("https://midna.tailddc9d9.ts.net:8443");
+  });
+
+  test("an advertised address that doesn't answer from here falls to the MagicDNS name", async () => {
+    const health = answers({ "http://100.74.137.16:7717": midna("midna", "https://elsewhere.ts.net"), "https://midna.tailddc9d9.ts.net:8443": midna("midna") });
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "midna.tailddc9d9.ts.net" }, health)).toBe("https://midna.tailddc9d9.ts.net:8443");
+  });
+
+  test("another midna answering there isn't this one", async () => {
+    const health = answers({ "http://100.74.137.16:7717": midna("midna"), "https://midna.tailddc9d9.ts.net:8443": midna("trial") });
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "midna.tailddc9d9.ts.net" }, health)).toBeNull();
+  });
+
+  test("none: nothing answers over HTTPS, or there's no name to try", async () => {
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "midna.tailddc9d9.ts.net" }, answers({ "http://100.74.137.16:7717": midna("midna") }))).toBeNull();
+    expect(await findHttps({ url: "http://100.74.137.16:7717", ssh: "100.74.137.16" }, answers({ "https://100.74.137.16:8443": midna("midna") }))).toBeNull();
   });
 });
 

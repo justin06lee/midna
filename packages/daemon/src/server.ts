@@ -63,6 +63,8 @@ export interface ServerDeps {
   push?: PushSender;
   /** The vault (ghostly's Vaultwarden on this host), or why there is none. */
   vault?: Vault | string;
+  /** midna's HTTPS address on the tailnet (`tailscale serve`), which /healthz advertises. */
+  https?: () => Promise<string | null>;
 }
 
 type Env = { Variables: { device: Device } };
@@ -115,7 +117,10 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.use("/v1/*", crossOrigin);
 
   // ── open: liveness and pairing ───────────────────────────────────────
-  app.get("/healthz", (c) => c.json<Health>({ ok: true, service: SERVICE, version: VERSION, name: store.settings().name }));
+  app.get("/healthz", async (c) => {
+    const https = await deps.https?.();
+    return c.json<Health>({ ok: true, service: SERVICE, version: VERSION, name: store.settings().name, ...(https ? { https } : {}) });
+  });
 
   app.post("/v1/pair", async (c) => {
     const req = PairRequest.safeParse(await c.req.json().catch(() => null));
