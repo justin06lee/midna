@@ -29,12 +29,16 @@ export interface Wakeup {
   fired_at: number | null;
   /** The wakeup whose turn this one ran in, when it joined another's. */
   joined_to: number | null;
+  /** How many restarts cut its turn short. */
+  recoveries?: number;
 }
 
 /** Follow-ups due within this long of one that's due run in its turn. */
 export const JOIN_MS = 5 * 60_000;
 /** At most this many wakeups in one turn. */
 export const JOIN_MAX = 8;
+/** A one-off wakeup whose turn restarts cut short this many times fails instead of running again. */
+export const MAX_RECOVERIES = 2;
 
 /** Words, for telling two reasons apart: lowercase, no punctuation. */
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/).filter(Boolean));
@@ -141,6 +145,7 @@ export class Schedule {
     } else {
       this.db.query("UPDATE wakeups SET status = $s WHERE id = $id AND status = 'running'").run({ s: ok ? "done" : "failed", id });
     }
+    this.db.query("UPDATE wakeups SET recoveries = 0 WHERE id = $id").run({ id });
   }
 
   /** Give a pending or failed one-off wakeup another go at `at`. */
@@ -153,7 +158,7 @@ export class Schedule {
     return this.db
       .query(
         `SELECT w.id, (SELECT e.error FROM episodes e WHERE e.wakeup_id = w.id ORDER BY e.id DESC LIMIT 1) AS error
-         FROM wakeups w WHERE w.status = 'failed' AND w.cron IS NULL AND w.fired_at >= $s`,
+         FROM wakeups w WHERE w.status = 'failed' AND w.cron IS NULL AND w.fired_at >= $s AND w.recoveries < ${MAX_RECOVERIES}`,
       )
       .all({ s: since }) as Array<{ id: number; error: string | null }>;
   }
@@ -168,9 +173,24 @@ export class Schedule {
     if (r.changes === 0) throw new Error(`no pending wakeup with id ${id}`);
   }
 
-  /** After a crash, whatever was mid-flight runs again. */
-  recover(): number {
-    return this.db.query("UPDATE wakeups SET status = 'pending' WHERE status = 'running'").run().changes;
+  /**
+   * After a crash, whatever was mid-flight runs again — except a one-off that
+   * restarts have already cut short MAX_RECOVERIES times: its turn may be what
+   * restarts midna, so it fails rather than loop. Recurring ones are retimed to
+   * their next run by retime(), so they can't loop.
+   */
+  recover(): { resumed: number; gaveUp: number[] } {
+    const gaveUp = (
+      this.db
+        .query(
+          "UPDATE wakeups SET status = 'failed' WHERE status = 'running' AND cron IS NULL AND recoveries >= $max RETURNING id",
+        )
+        .all({ max: MAX_RECOVERIES }) as Array<{ id: number }>
+    ).map((r) => r.id);
+    const resumed = this.db
+      .query("UPDATE wakeups SET status = 'pending', recoveries = recoveries + 1 WHERE status = 'running'")
+      .run().changes;
+    return { resumed, gaveUp };
   }
 
   /** Reschedule recurring wakeups after the timezone changes. */

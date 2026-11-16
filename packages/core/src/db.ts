@@ -479,6 +479,11 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX location_points_at ON location_points(at);
   ALTER TABLE devices ADD COLUMN parent_id TEXT REFERENCES devices(id);
   `,
+  // How many restarts cut a wakeup's turn short, so one whose turn restarts
+  // midna can't run again forever.
+  `
+  ALTER TABLE wakeups ADD COLUMN recoveries INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDatabase(path: string): Database {

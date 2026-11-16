@@ -153,6 +153,27 @@ describe("schedule and outbox", () => {
     expect(fmt(next.due_at, TZ)).toBe("2026-10-02 Fri 08:00");
   });
 
+  test("a one-off whose turn keeps getting cut short by restarts fails instead of looping", () => {
+    const s = fresh();
+    const now = parseWhen("2026-10-01 08:00", TZ);
+    const loop = s.schedule.add({ dueAt: now - 1000, reason: "restarts midna", tz: TZ }, now - 5000);
+    for (let i = 0; i < 2; i++) {
+      expect(s.schedule.claimDue(now).map((w) => w.id)).toEqual([loop.id]);
+      expect(s.schedule.recover()).toEqual({ resumed: 1, gaveUp: [] });
+    }
+    s.schedule.claimDue(now);
+    expect(s.schedule.recover()).toEqual({ resumed: 0, gaveUp: [loop.id] });
+    expect(s.schedule.get(loop.id)!.status).toBe("failed");
+    expect(s.schedule.recentFailures(now - DAY)).toEqual([]);
+    // One that finishes starts counting afresh.
+    const ok = s.schedule.add({ dueAt: now - 1000, reason: "check on Bob", tz: TZ }, now - 5000);
+    s.schedule.claimDue(now);
+    s.schedule.recover();
+    s.schedule.claimDue(now);
+    s.schedule.finish(ok.id, true, TZ, now);
+    expect(s.schedule.get(ok.id)!.recoveries).toBe(0);
+  });
+
   test("held items are released in delivery order", () => {
     const s = fresh();
     s.updateSettings({ quietHours: { start: "23:00", end: "08:00" } });

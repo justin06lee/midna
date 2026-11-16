@@ -268,7 +268,9 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   console.log(`  home      ${home}`);
   console.log(`  brain     ${s.model} (${s.mode})`);
   console.log(`  timezone  ${s.timezone}`);
-  if (recovered) console.log(`  recovered ${recovered} interrupted wakeup(s)`);
+  if (recovered.resumed) console.log(`  recovered ${recovered.resumed} interrupted wakeup(s)`);
+  if (recovered.gaveUp.length)
+    console.error(`[midna] gave up on wakeup(s) ${recovered.gaveUp.map((id) => `#${id}`).join(", ")}: restarts cut their turn short too often`);
   if (stillRunning) console.log(`  jobs      ${stillRunning} still running`);
   if (push.configured) console.log(`  push      ${s.alerts === "telegram" ? "off (alerts go to Telegram)" : `${push.phones()} phone(s), alerts: ${s.alerts}`}`);
   if (Object.keys(config.bridges).length) console.log(`  bridges   ${Object.entries(config.bridges).filter(([, b]) => b.enabled).map(([n]) => n).join(", ") || "none enabled"}`);
