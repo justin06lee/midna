@@ -7,7 +7,9 @@ import { MAIN } from "@midna/core";
 import { MidnaClient, MidnaError, type OutboxItem } from "@midna/protocol";
 import type { Brain } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
-import { payload, type ApnsResponse } from "../src/push.ts";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { locatePayload, payload, type ApnsResponse } from "../src/push.ts";
 
 /**
  * Push notifications: a phone registers its Apple push token, each alert
@@ -35,7 +37,11 @@ let daemon: RunningDaemon;
 let host: MidnaClient;
 let phone: MidnaClient;
 let phoneId: string;
-const brain: Brain = async () => ({ text: "ok", sessionId: "s", sessionCostUsd: 0 });
+let mcp: { url: string; token: string } | null = null;
+const brain: Brain = async (run) => {
+  mcp ??= run.mcp;
+  return { text: "ok", sessionId: "s", sessionCostUsd: 0 };
+};
 
 async function until<T>(what: string, fn: () => T | undefined | null | false, ms = 5_000): Promise<T> {
   for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(10)) {
@@ -258,5 +264,62 @@ describe("payload", () => {
     expect(long.length).toBe(1_200);
     expect(long.endsWith("…")).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(payload(item({ text: "가".repeat(5_000) }), "midna")))).toBeLessThan(4_096);
+  });
+});
+
+describe("asking the phone where it is", () => {
+  let tools: Client;
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = (await tools.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+    const text = r.content[0]!.text;
+    return { text, error: !!r.isError, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
+  };
+  const HERE = { lat: 37.33182, lon: -122.03118 };
+
+  beforeAll(async () => {
+    // A phone of its own: the one above was unpaired.
+    phone = new MidnaClient(daemon.url, (await new MidnaClient(daemon.url).pair({ code: (await host.pairingCode()).code, deviceName: "Justin's iPhone", kind: "mobile" })).token);
+    await phone.registerPush({ token: TOKEN, environment: "production" });
+    await phone.send({ text: "hi" });
+    const m = await until("a brain run", () => mcp);
+    tools = new Client({ name: "fake-brain", version: "0" });
+    await tools.connect(new StreamableHTTPClientTransport(new URL(m.url), { requestInit: { headers: { authorization: `Bearer ${m.token}` } } }));
+  });
+  afterAll(() => tools.close().catch(() => {}));
+
+  test("location_now fresh=true sends a silent background push (nothing shown, gone in a minute) and waits for the phone's answer", async () => {
+    await phone.reportLocation({ fixes: [{ ...HERE, at: Date.now() - 3 * 3_600_000, accuracy: 65, source: "precise" }] });
+    // The phone answers the push with a fix a moment later.
+    answer = (s) => {
+      if (s.body.midna === "locate") setTimeout(() => void phone.reportLocation({ fixes: [{ lat: 37.4, lon: -122.1, at: Date.now(), accuracy: 5, source: "requested" }] }), 300);
+      return { status: 200 };
+    };
+    const now = (await call("location_now", { fresh: true })).json;
+    expect(now).toMatchObject({ fresh: true, reported: "when midna asked", accuracy_m: 5, where: "37.40000,-122.10000" });
+    expect(now.fix_age).toMatch(/^\d+ s ago$/);
+    const s = sent.find((x) => x.body.midna === "locate")!;
+    expect(s.body).toEqual(locatePayload());
+    expect(locatePayload()).toEqual({ aps: { "content-available": 1 }, midna: "locate" });
+    expect(s.headers).toMatchObject({ "apns-push-type": "background", "apns-priority": "5", "apns-topic": "sh.midna.mobile" });
+    expect(Number(s.headers["apns-expiration"]) - Date.now() / 1000).toBeLessThanOrEqual(61);
+  });
+
+  test("a place saved without coordinates is where the phone is now", async () => {
+    answer = (s) => {
+      if (s.body.midna === "locate") setTimeout(() => void phone.reportLocation({ fixes: [{ lat: 37.5, lon: -122.2, at: Date.now(), accuracy: 8, source: "requested" }] }), 100);
+      return { status: 200 };
+    };
+    const saved = (await call("place_save", { name: "Cafe" })).json;
+    expect(saved).toMatchObject({ name: "Cafe", at: "37.50000,-122.20000", from_fix: { fresh: true, accuracy_m: 8 } });
+  });
+
+  test("when Apple won't take the ask, location_now says so at once and gives the last fix", async () => {
+    answer = () => ({ status: 500, reason: "InternalServerError" });
+    const started = Date.now();
+    const now = (await call("location_now", { fresh: true })).json;
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(now.fresh).toBe(false);
+    expect(now.note).toContain("couldn't ask the phone (500 InternalServerError)");
+    expect(now.where).toBe("37.50000,-122.20000");
   });
 });

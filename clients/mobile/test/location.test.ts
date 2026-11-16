@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LocationFix, Place } from "@midna/protocol";
-import { QUEUE_MAX, ago, crossing, dequeue, enqueue, fromTask, keepWatched, placeOf, regionId, regionsKey } from "../src/locationQueue";
+import { QUEUE_MAX, SEND_EVERY_MS, ago, crossing, dequeue, enqueue, fromTask, keepWatched, placeOf, regionId, regionsKey, sendNow } from "../src/locationQueue";
 
 const fix = (at: number, source: LocationFix["source"] = "significant"): LocationFix => ({ at, lat: 1, lon: 2, source });
 const place = (id: number, lat = 37.33, radius = 150): Place => ({ id, name: `p${id}`, lat, lon: -122, radius, created_at: 0, updated_at: 0 });
@@ -11,6 +11,20 @@ describe("the phone's location", () => {
       { at: 1_700_000_000_123, lat: 37.3, lon: -122, accuracy: 65, altitude: null, speed: null, source: "significant" },
     ]);
     expect(fromTask([{ coords: { latitude: Number.NaN, longitude: 1 }, timestamp: 1 }])).toEqual([]);
+  });
+
+  test("each fix keeps where it came from: precise, significant, or midna asking", () => {
+    const at = (source?: "precise" | "significant" | "requested") => fromTask([{ coords: { latitude: 1, longitude: 2 }, timestamp: 5, ...(source ? { source } : {}) }])[0]!.source;
+    expect([at("precise"), at("significant"), at("requested"), at()]).toEqual(["precise", "significant", "requested", "significant"]);
+  });
+
+  test("precise fixes go together, at most once a minute; anything else goes at once", () => {
+    const now = 10_000_000;
+    expect(sendNow([fix(1, "precise")], now - 5_000, now)).toBe(false);
+    expect(sendNow([fix(1, "precise")], now - SEND_EVERY_MS, now)).toBe(true);
+    expect(sendNow([fix(1, "precise")], null, now)).toBe(true);
+    expect(sendNow([fix(1, "precise"), fix(2, "requested")], now - 5_000, now)).toBe(true);
+    expect(sendNow([fix(1, "arrive")], now - 5_000, now)).toBe(true);
   });
 
   test("the queue keeps each fix once, oldest first, and only what midna hasn't taken", () => {

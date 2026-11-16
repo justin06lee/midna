@@ -48,6 +48,11 @@ export class Location {
     return this.db.query(`SELECT ${POINT_COLUMNS} ORDER BY l.at DESC, l.id DESC LIMIT 1`).get() as LocationPoint | null;
   }
 
+  /** The latest fix among those that arrived at or after `since` (ms): what the phone sent once midna asked. */
+  receivedSince(since: number): LocationPoint | null {
+    return this.db.query(`SELECT ${POINT_COLUMNS} WHERE l.received_at >= $since ORDER BY l.at DESC, l.id DESC LIMIT 1`).get({ since }) as LocationPoint | null;
+  }
+
   /** Fixes taken from `from` to `to`, oldest first; at most `limit`, the latest ones when there are more. */
   history(from: number, to: number, limit = 500): LocationPoint[] {
     const rows = this.db

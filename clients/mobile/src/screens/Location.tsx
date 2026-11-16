@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, AppState, Linking, Pressable, ScrollView, Sty
 import { PLACE_RADIUS_DEFAULT, type LocationState, type Place } from "@midna/protocol";
 import type { PhoneConnection } from "../connection";
 import { draftKey, useDraft } from "../drafts";
-import { here, lastSent, locationSetup, turnOff, turnOn, watch, type LocationSetup } from "../location";
+import { here, lastSent, locationSetup, preciseAccuracy, turnOff, turnOn, watch, type LocationSetup } from "../location";
 import { ago } from "../locationQueue";
 import { useTheme } from "../theme";
 import { Button, Card, Field, Problem, time } from "../ui";
@@ -94,11 +94,11 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
 
       {setup === "off" || setup === "denied" ? (
         <>
-          <Text style={[s.lede, { color: t.dim }]}>midna can know roughly where you are, so it can help with what's around you and notice when you get home or leave work.</Text>
+          <Text style={[s.lede, { color: t.dim }]}>midna can know where you are, so it can help with what's around you and notice when you get home or leave work.</Text>
           <Card>
-            <Text style={[s.para, { color: t.ink2 }]}>Your iPhone tells midna when you've moved about half a kilometre, and when you arrive at or leave a place you've saved. Nothing in between: it never follows you with GPS.</Text>
+            <Text style={[s.para, { color: t.ink2 }]}>Your iPhone sends midna your precise location as you move, every few tens of metres, and when you arrive at or leave a place you've saved. It stops while you stay put. midna can also ask where you are right now.</Text>
             <Text style={[s.para, { color: t.ink2 }]}>It goes only to your midna, on your own machine, and is kept there as your history.</Text>
-            <Text style={[s.para, { color: t.ink2 }]}>iOS asks twice. Allow while using the app, then change to Always, so midna hears about a move while the app is closed.</Text>
+            <Text style={[s.para, { color: t.ink2 }]}>iOS asks twice. Allow while using the app, then change to Always, and keep Precise Location on, so it works while the app is closed.</Text>
           </Card>
           <Problem text={problem} />
           {setup === "denied" ? (
@@ -117,7 +117,13 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
           </Card>
           {setup === "while-using" ? (
             <>
-              <Text style={[s.note, { color: t.dim }]}>With Always, midna hears about a move or an arrival while the app is closed. In iPhone Settings, choose Location → Always.</Text>
+              <Text style={[s.note, { color: t.dim }]}>With Always, your iPhone sends where you are while the app is closed, and midna can ask. In iPhone Settings, choose Location → Always.</Text>
+              <Button small label="Open iPhone Settings" onPress={() => void Linking.openSettings()} style={{ alignSelf: "flex-start" }} />
+            </>
+          ) : null}
+          {!preciseAccuracy() ? (
+            <>
+              <Text style={[s.note, { color: t.dim }]}>Precise Location is off, so midna only gets roughly where you are, a few kilometres wide. In iPhone Settings, choose Location and turn on Precise Location.</Text>
               <Button small label="Open iPhone Settings" onPress={() => void Linking.openSettings()} style={{ alignSelf: "flex-start" }} />
             </>
           ) : null}

@@ -484,6 +484,30 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE wakeups ADD COLUMN recoveries INTEGER NOT NULL DEFAULT 0;
   `,
+  // Precise location: the phone's background fixes while it moves ("precise")
+  // and the one it takes when midna asks ("requested"). SQLite can't change a
+  // CHECK, so the table is made again with every fix in it.
+  `
+  CREATE TABLE location_points_next (
+    id INTEGER PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    at INTEGER NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    accuracy_m REAL,
+    altitude_m REAL,
+    speed_mps REAL,
+    source TEXT NOT NULL CHECK (source IN ('precise','significant','arrive','leave','app','requested')),
+    place_id INTEGER REFERENCES places(id),
+    received_at INTEGER NOT NULL
+  );
+  INSERT INTO location_points_next SELECT id, device_id, at, lat, lon, accuracy_m, altitude_m, speed_mps, source, place_id, received_at FROM location_points;
+  DROP TABLE location_points;
+  ALTER TABLE location_points_next RENAME TO location_points;
+  CREATE UNIQUE INDEX location_points_once ON location_points(device_id, at, source);
+  CREATE INDEX location_points_at ON location_points(at);
+  CREATE INDEX location_points_received ON location_points(received_at);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

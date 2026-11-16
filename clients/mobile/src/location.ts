@@ -3,15 +3,18 @@ import * as SecureStore from "expo-secure-store";
 import Storage from "expo-sqlite/kv-store";
 import * as TaskManager from "expo-task-manager";
 import { MidnaError, type LocationFix, type MidnaClient, type Place } from "@midna/protocol";
-import MidnaLocation from "./significantChanges";
+import MidnaLocation from "./midnaLocation";
 import { clientFor, type PhoneConnection } from "./connection";
-import { REPORT_MAX, crossing, dequeue, enqueue, fromTask, keepWatched, placeOf, regionsFor, regionsKey, type Inside, type TaskLocation } from "./locationQueue";
+import { REPORT_MAX, crossing, dequeue, enqueue, fromTask, keepWatched, placeOf, regionsFor, regionsKey, sendNow, type Inside, type TaskLocation } from "./locationQueue";
 
 /**
- * Where the phone is, for midna: iOS's significant location changes (about
- * 500 m, modules/midna-location) and arriving at or leaving a saved place
- * (geofences). Never continuous GPS. Each fix waits in SQLite until midna
- * has it, and goes straight to midna's host and nowhere else.
+ * Where the phone is, for midna (modules/midna-location): with Always, a
+ * precise fix every 30 m while the phone moves (iOS pauses the GPS while it
+ * sits still); significant changes (about 500 m) as the net that brings the
+ * app back when iOS has ended it; arriving at or leaving a saved place
+ * (geofences); a fix each time the app is opened; and one whenever midna
+ * asks, by a silent push. Each fix waits in SQLite until midna has it, and
+ * goes straight to midna's host and nowhere else.
  *
  * Most fixes come while the phone is locked, when the pairing's token can't
  * be read (it is readable only while the phone is unlocked). So the
@@ -20,7 +23,8 @@ import { REPORT_MAX, crossing, dequeue, enqueue, fromTask, keepWatched, placeOf,
  * and never synced off the phone.
  */
 
-const SIGNIFICANT_TASK = "midna-significant-changes";
+/** The native task (its name is from before precise fixes; iOS keeps it registered under it). */
+const TRACKING_TASK = "midna-significant-changes";
 const PLACES_TASK = "midna-places";
 
 const QUEUE = "midna.location.queue";
@@ -65,10 +69,12 @@ async function reporter(): Promise<Reporter | null> {
 // ── the background tasks ───────────────────────────────────────────────
 // Defined when the app's JavaScript loads (index.ts imports this first), so iOS relaunching the app for a location event finds them.
 
-TaskManager.defineTask<{ locations: TaskLocation[] }>(SIGNIFICANT_TASK, async ({ data, error }) => {
-  if (error || !data?.locations?.length) return;
-  remember(fromTask(data.locations));
-  await send();
+TaskManager.defineTask<{ locations: TaskLocation[]; flush?: boolean }>(TRACKING_TASK, async ({ data, error }) => {
+  if (error || !data) return;
+  const fixes = fromTask(data.locations ?? []);
+  remember(fixes);
+  // The updates paused (the phone sits still): what waits goes now, before iOS lets the app sleep.
+  if (data.flush ? readJson<LocationFix[]>(QUEUE, []).length : fixes.length && sendNow(fixes, Math.max(lastSent() ?? 0, lastTry) || null, Date.now())) await send();
 });
 
 TaskManager.defineTask<{ eventType: Location.LocationGeofencingEventType; region: Location.LocationRegion }>(PLACES_TASK, async ({ data, error }) => {
@@ -95,6 +101,8 @@ function remember(fixes: LocationFix[]) {
 }
 
 let sending: Promise<void> | null = null;
+/** When a send was last tried, ms: offline, precise fixes don't each try again. */
+let lastTry = 0;
 
 /**
  * Send what waits, a report at a time, with the location-only token; then
@@ -103,6 +111,7 @@ let sending: Promise<void> | null = null;
  */
 export function send(): Promise<void> {
   return (sending ??= (async () => {
+    lastTry = Date.now();
     const r = await reporter();
     if (!r) return;
     const client = clientFor(r.url, r.token);
@@ -171,9 +180,9 @@ async function ensureReporter(client: MidnaClient, connection: PhoneConnection):
 
 /**
  * Turn location on: iOS asks while-using first, then Always. Whatever the
- * answers, what they allow starts: significant changes need only
- * while-using to run while the app is open; with Always they run while it is
- * closed too, and the saved places are watched.
+ * answers, what they allow starts: with while-using, significant changes
+ * while the app is open; with Always, precise fixes in the background, and
+ * the saved places are watched.
  */
 export async function turnOn(client: MidnaClient, connection: PhoneConnection): Promise<LocationSetup> {
   let fg = await Location.getForegroundPermissionsAsync();
@@ -189,7 +198,7 @@ export async function turnOn(client: MidnaClient, connection: PhoneConnection): 
 /** Stop reporting. What midna has kept stays on midna; the location-only token goes. */
 export async function turnOff(): Promise<void> {
   Storage.removeItemSync(CHOSEN);
-  await MidnaLocation.stopSignificantChanges(SIGNIFICANT_TASK).catch(() => {});
+  await MidnaLocation.stopTracking(TRACKING_TASK).catch(() => {});
   if (await Location.hasStartedGeofencingAsync(PLACES_TASK).catch(() => false)) await Location.stopGeofencingAsync(PLACES_TASK).catch(() => {});
   Storage.removeItemSync(WATCHED);
   Storage.removeItemSync(INSIDE);
@@ -219,10 +228,30 @@ export async function start(client: MidnaClient, connection: PhoneConnection): P
     if (err instanceof MidnaError && err.status === 404) return;
     throw err;
   }
-  if (!(await MidnaLocation.hasStartedSignificantChanges(SIGNIFICANT_TASK))) await MidnaLocation.startSignificantChanges(SIGNIFICANT_TASK);
-  await send();
+  // Precise with Always; started again each time, as Always may have been given or taken away in iPhone Settings meanwhile.
+  const always = (await Location.getBackgroundPermissionsAsync()).granted;
+  await MidnaLocation.startTracking(TRACKING_TASK, always);
+  await Promise.all([fixNow("app").catch((err: Error) => console.warn(`location: no fix on opening: ${err.message}`)), send()]);
   await watch(await client.places());
 }
+
+/** One fix now, sent to midna: `source` says why. */
+async function fixNow(source: "app"): Promise<LocationFix> {
+  const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+  const fix: LocationFix = { ...fromTask([p])[0]!, source };
+  remember([fix]);
+  await send();
+  return fix;
+}
+
+/** Whether iOS gives midna the precise location; with it off, every fix is a few kilometres wide. */
+export const preciseAccuracy = (): boolean => {
+  try {
+    return MidnaLocation.hasPreciseAccuracy();
+  } catch {
+    return true;
+  }
+};
 
 /**
  * Where the phone is right now, asked once because the user tapped to save

@@ -6,11 +6,14 @@
  */
 import type { LocationFix, Place } from "@midna/protocol";
 
-/** What iOS hands the significant-changes task, one entry per fix (modules/midna-location). */
+/** What iOS hands the location task, one entry per fix (modules/midna-location); expo-location's fixes have no source. */
 export interface TaskLocation {
   coords: { latitude: number; longitude: number; accuracy?: number | null; altitude?: number | null; speed?: number | null };
   timestamp: number;
+  source?: "precise" | "significant" | "requested";
 }
+
+const TASK_SOURCES = new Set(["precise", "significant", "requested"]);
 
 /** Fixes that wait past this many are dropped oldest first: a phone off the network for weeks still keeps the latest. */
 export const QUEUE_MAX = 5_000;
@@ -29,9 +32,21 @@ export function fromTask(locations: TaskLocation[]): LocationFix[] {
       accuracy: n(l.coords.accuracy),
       altitude: n(l.coords.altitude),
       speed: n(l.coords.speed) !== null && l.coords.speed! >= 0 ? l.coords.speed! : null,
-      source: "significant" as const,
+      source: l.source && TASK_SOURCES.has(l.source) ? l.source : ("significant" as const),
     }));
 }
+
+/**
+ * Precise fixes come every 30 m while the phone moves (about once a second
+ * in a car), so they're sent together, at most this often; anything else
+ * (an arrival, midna asking, the app opening) goes at once, and so does
+ * what waits when the updates pause.
+ */
+export const SEND_EVERY_MS = 60_000;
+
+/** Whether to send now what waits, `fixes` just added. */
+export const sendNow = (fixes: LocationFix[], lastSent: number | null, now: number): boolean =>
+  fixes.some((f) => f.source !== "precise") || lastSent === null || now - lastSent >= SEND_EVERY_MS;
 
 /** Add fixes to the queue, oldest first, the same one (time and source) only once, at most QUEUE_MAX. */
 export function enqueue(queue: LocationFix[], fixes: LocationFix[]): LocationFix[] {

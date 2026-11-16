@@ -86,6 +86,11 @@ export function payload(item: OutboxItem, name: string): Record<string, unknown>
   };
 }
 
+/** The silent push that asks the phone where it is now (modules/midna-location/ios/MidnaLocationModule.swift looks for `midna: "locate"`). */
+export function locatePayload(): Record<string, unknown> {
+  return { aps: { "content-available": 1 }, midna: "locate" };
+}
+
 /** The real transport: one HTTP/2 session per APNs host, opened again when it closes. */
 export function http2Transport(): ApnsTransport & { close(): void } {
   const sessions = new Map<Environment, ClientHttp2Session>();
@@ -194,7 +199,7 @@ export class PushSender {
 
   private async send(item: OutboxItem, tokens: ReturnType<Store["push"]["tokens"]>): Promise<PushState> {
     const body = JSON.stringify(payload(item, this.store.settings().name));
-    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, item, body)));
+    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, { "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600), "apns-collapse-id": `outbox-${item.id}` })));
     const sent = results.filter((r) => r === null).length;
     const errors = [...new Set(results.filter((r): r is string => r !== null))];
     const state: PushState = sent ? "sent" : "failed";
@@ -203,15 +208,32 @@ export class PushSender {
     return state;
   }
 
+  /**
+   * Ask every phone for where it is now: a silent background push
+   * (content-available, nothing shown) that wakes the app to take one fix
+   * and report it. Apple delivers it at once or not at all (it expires in a
+   * minute), and may hold back background pushes to a phone in Low Power
+   * Mode or to an app the user swiped away. How many phones Apple took it
+   * for, and why the others didn't.
+   */
+  async requestLocation(): Promise<{ sent: number; errors: string[] }> {
+    const tokens = this.store.push.tokens();
+    if (!this.apns) return { sent: 0, errors: ["no APNs key"] };
+    if (!tokens.length) return { sent: 0, errors: ["no phone registered for push"] };
+    const body = JSON.stringify(locatePayload());
+    const headers = { "apns-push-type": "background", "apns-priority": "5", "apns-expiration": String(Math.floor(Date.now() / 1000) + 60), "apns-collapse-id": "midna-locate" };
+    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, headers).catch((err: Error) => err.message)));
+    const errors = [...new Set(results.filter((r): r is string => r !== null))];
+    if (errors.length) console.error(`[midna] push: location request: ${errors.join("; ")}`);
+    return { sent: results.filter((r) => r === null).length, errors };
+  }
+
   /** One phone; null when Apple took it, else why not. Learns a token's environment, and drops a dead token. */
-  private async toPhone(token: string, env: Environment, item: OutboxItem, body: string): Promise<string | null> {
+  private async toPhone(token: string, env: Environment, body: string, kind: Record<string, string>): Promise<string | null> {
     const headers = (fresh = false) => ({
       authorization: `bearer ${this.providerToken(fresh)}`,
       "apns-topic": this.apns!.bundleId,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600),
-      "apns-collapse-id": `outbox-${item.id}`,
+      ...kind,
     });
     let r = await this.transport(env, token, headers(), body);
     if (r.status === 403 && r.reason === "ExpiredProviderToken") r = await this.transport(env, token, headers(true), body);

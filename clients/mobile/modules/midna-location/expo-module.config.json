@@ -1,6 +1,7 @@
 {
   "platforms": ["apple"],
   "apple": {
-    "modules": ["MidnaLocationModule"]
+    "modules": ["MidnaLocationModule"],
+    "appDelegateSubscribers": ["MidnaLocationAppDelegateSubscriber"]
   }
 }

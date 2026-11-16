@@ -1,15 +1,21 @@
 # Location
 
-midna knows roughly where Justin is, from his iPhone, so it can help with what's around him and notice when he gets home or leaves work.
+midna knows where Justin is, from his iPhone, so it can help with what's around him and notice when he gets home or leaves work.
 
 ## What the phone sends, and when
 
-- **Only two things make it report:** iOS's significant location changes (about 500 m, from cell towers and Wi-Fi; no GPS), and arriving at or leaving a saved place (geofences). Nothing continuous, and no blue location indicator.
-  - expo-location's own background updates also start the GPS (`startUpdatingLocation`), so the app doesn't use them. `clients/mobile/modules/midna-location` is a small native module whose task consumer only calls `startMonitoringSignificantLocationChanges`. expo-task-manager restores it at every launch, so it carries on after the app is closed or the phone restarts, and iOS relaunches the app in the background to deliver a move.
+Precise logging (Justin's call, 2026-11-16, replacing "significant changes only").
+
+- **Precise fixes, with Always** (source `precise`): standard updates, `kCLLocationAccuracyBest`, a fix every 30 m of movement (`distanceFilter`), in the background too (`allowsBackgroundLocationUpdates`, `UIBackgroundModes: location`, no blue indicator with Always). `pausesLocationUpdatesAutomatically` lets iOS turn the GPS off once the phone sits still; on a pause the phone sends what waits and watches a 100 m region around where it stopped, and leaving it starts the updates again. On the phone, precise fixes are sent together at most once a minute (`sendNow` in `locationQueue.ts`); everything else goes at once.
+- **Significant changes, always** (source `significant`): the safety net. When iOS ends the app, significant changes (about 500 m) relaunch it in the background; expo-task-manager restores the task, which starts the precise updates again.
+  - Both live in `clients/mobile/modules/midna-location`, one task consumer (`MidnaSignificantChangesConsumer`, a name kept because expo-task-manager saves it with the task) with a manager each. With only "while using", the precise updates don't run.
+- **The app opening** (source `app`): each launch and each return to the foreground takes one fix and sends it.
+- **midna asking** (source `requested`): a silent push (`content-available`, `apns-push-type: background`, priority 5, expires in a minute, `{ midna: "locate" }`). `MidnaLocationAppDelegateSubscriber` takes one `requestLocation()` fix with a separate manager, hands it to the task, and tells iOS it's done once the JavaScript has sent it (at most 25 s). iOS may hold back background pushes in Low Power Mode or after the app was swiped away; then midna gets no answer and says so. Needs the phone registered for push (notifications allowed).
   - Geofences are expo-location's (`startGeofencingAsync`), one per saved place. iOS reports every region's state each time they're registered and sometimes reports a crossing twice. The phone keeps the last state of each place and sends only a change from it; the first state heard for a place is just noted (`locationQueue.ts`).
   - "Save here" on a place asks iOS for one fix, because Justin tapped it. That fix goes to midna too, as source `app`.
 - **Where it goes:** straight to midna's host over the connection the chat uses, `POST /v1/location`, and nowhere else. No third-party service. Each fix waits in SQLite on the phone (`midna.location.queue`, up to 5,000) until midna has it, so nothing is lost offline. The same fix sent twice is kept once.
-- **Permission:** "Always". iOS asks twice: while using the app first, then Always. Settings → Location explains this before iOS asks. With only "while using", significant changes run only while the app is open, places aren't watched, and Settings says so and offers iPhone Settings.
+- **Permission:** "Always", and Precise Location on. iOS asks twice: while using the app first, then Always. Settings → Location explains this before iOS asks. With only "while using", significant changes run only while the app is open, there are no precise fixes, places aren't watched, and Settings says so and offers iPhone Settings. With Precise Location off, it says that too.
+- **Battery:** the GPS runs only while the phone moves; sitting still, iOS pauses it. A day with an hour or two of travel costs a few percent; a long drive, more.
 
 ## The token used while the phone is locked
 
@@ -23,22 +29,22 @@ The pairing's token is readable only while the phone is unlocked (docs/mobile.md
 
 ## What midna keeps
 
-Migration 14: `location_points` (every fix, forever: when the phone took it, where, accuracy, altitude, speed, why it was sent, the saved place it was in, when it arrived) and `places`. A deleted place is only hidden (`deleted_at`), so fixes taken there keep its name. Nothing deletes fixes.
+Migration 14 (sources `precise` and `requested`: migration 16): `location_points` (every fix, forever: when the phone took it, where, accuracy, altitude, speed, why it was sent, the saved place it was in, when it arrived) and `places`. A deleted place is only hidden (`deleted_at`), so fixes taken there keep its name. Nothing deletes fixes.
 
 ## Places
 
 - Home, the office, the gym, the masjid: the app suggests these, saved where the phone is when Justin taps "Save here".
 - Each has a size, 100 to 2,000 m across (150 m by default; iOS is unreliable under 100 m).
-- At most 20, which is iOS's limit for one app.
+- At most 19: iOS watches 20 regions for one app, and the phone keeps one for resuming the precise updates.
 - A name is one place, in any case: saving "home" again moves Home.
 - Where places overlap, the smallest one around the fix is the one he's in.
 - The phone learns of a change midna made the next time it reports (every report's answer carries the places) or the app is opened.
 
 ## midna's tools
 
-- `location_now`: the latest fix, the saved place it's in and since when (or the nearest place and how far), how old the fix is, and a maps link. An old fix usually means he hasn't moved.
+- `location_now`: the latest fix, the saved place it's in and since when (or the nearest place and how far), how old the fix is, and a maps link. An old fix usually means he hasn't moved. `fresh: true` sends the silent push and waits up to 20 s for a fix that arrives after it (`receivedSince`); otherwise it gives the last fix with `fresh: false` and a note on why.
 - `location_history`: fixes between two times (default: the last 24 hours), oldest first, each with its place and why it was sent.
-- `places_list`, `place_save` (without coordinates, a new place goes where the phone last was; `here: true` moves one there), `place_delete`.
+- `places_list`, `place_save` (without coordinates, a new place goes where the phone is now: it asks, as `fresh` does, and falls back to the last fix; `here: true` moves one there; `from_fix` says how old the fix was), `place_delete`.
 
 These are midna's own MCP tools, so every brain behind yagami has them. Hermes (`midna model hermes`) doesn't.
 

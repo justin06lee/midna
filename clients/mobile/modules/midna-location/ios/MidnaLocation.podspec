@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name           = 'MidnaLocation'
   s.version        = '0.1.0'
-  s.summary        = 'iOS significant location changes, and nothing more, through expo-task-manager'
+  s.summary        = 'Precise background location, significant changes as a safety net, and one fix on a silent push, through expo-task-manager'
   s.description    = s.summary
   s.license        = 'UNLICENSED'
   s.author         = 'midna'

@@ -28,7 +28,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "6",
+      "buildNumber": "7",
       "appleTeamId": "65UN46K6FA"
     },
     "plugins": [
@@ -53,18 +53,18 @@
       [
         "expo-notifications",
         {
-          "enableBackgroundRemoteNotifications": false
+          "enableBackgroundRemoteNotifications": true
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "midna uses where you are to help with what's around you. Your iPhone tells your midna only when you've moved about half a kilometre, or arrived at or left a place you saved.",
-          "locationAlwaysAndWhenInUsePermission": "With Always, midna hears about a move or an arrival while the app is closed. It never follows you with GPS, and where you are goes only to your own midna.",
-          "locationAlwaysPermission": "With Always, midna hears about a move or an arrival while the app is closed. It never follows you with GPS, and where you are goes only to your own midna.",
+          "locationWhenInUsePermission": "midna uses where you are to help with what's around you. Your location goes only to your own midna, which keeps it as your history.",
+          "locationAlwaysAndWhenInUsePermission": "With Always, your iPhone sends your precise location to your own midna as you move, even while the app is closed, and midna can ask where you are. It goes nowhere else.",
+          "locationAlwaysPermission": "With Always, your iPhone sends your precise location to your own midna as you move, even while the app is closed, and midna can ask where you are. It goes nowhere else.",
           "locationFullAccuracyPermission": false,
           "motionUsagePermission": false,
-          "isIosBackgroundLocationEnabled": false
+          "isIosBackgroundLocationEnabled": true
         }
       ]
     ]

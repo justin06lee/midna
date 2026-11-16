@@ -1,14 +1,21 @@
 import { z } from "zod";
 
 /**
- * Where the user is, as their phone reports it: only iOS's significant
- * location changes (about 500 m) and arriving at or leaving a saved place.
- * The phone sends its points to midna's host and nowhere else; the host keeps
- * every one. After 0.13.2.
+ * Where the user is, as their phone reports it: precise background fixes
+ * every few tens of metres while it moves (iOS pauses them while it sits
+ * still), iOS's significant location changes (about 500 m) as the net when
+ * iOS has stopped the app, arriving at or leaving a saved place, a fix each
+ * time the app is opened, and one when midna asks (a silent push). The
+ * phone sends its points to midna's host and nowhere else; the host keeps
+ * every one. After 0.13.2; "precise" and "requested" after 0.13.3.
  */
 
-/** What made the phone report: a significant change, arriving at or leaving a saved place, or the app being opened. */
-export const LocationSource = z.enum(["significant", "arrive", "leave", "app"]);
+/**
+ * What made the phone report: a precise background fix while moving, a
+ * significant change, arriving at or leaving a saved place, the app being
+ * opened, or midna asking.
+ */
+export const LocationSource = z.enum(["precise", "significant", "arrive", "leave", "app", "requested"]);
 export type LocationSource = z.infer<typeof LocationSource>;
 
 /** One fix, as the phone took it. */
@@ -48,8 +55,8 @@ export interface Place {
 export const PLACE_RADIUS_MIN = 100;
 export const PLACE_RADIUS_MAX = 2_000;
 export const PLACE_RADIUS_DEFAULT = 150;
-/** iOS watches at most 20 regions per app. */
-export const MAX_PLACES = 20;
+/** iOS watches at most 20 regions per app, and the phone keeps one for itself: where it stopped, to wake the precise fixes when it moves on. */
+export const MAX_PLACES = 19;
 
 /** POST /v1/places: a new place, or one already named so moved; PATCH /v1/places/:id changes any of it. */
 export const PlaceSave = z.object({
