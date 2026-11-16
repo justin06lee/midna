@@ -45,4 +45,16 @@ describe("systemPrompt", () => {
     expect(bare).not.toContain("# Pinned memories");
     expect(bare).not.toContain("# The user's computers");
   });
+
+  test("tells how to get at passwords only where ghostly is installed", () => {
+    const withVault = systemPrompt(settings, env, { vault: true });
+    expect(withVault).toContain("# Passwords and secrets\n");
+    expect(withVault).toContain("check `ghostly list`");
+    expect(withVault).toContain("ghostly get \"<title>\" --field pass | ssh host 'sudo -S …'");
+    expect(withVault).toContain("offer to save it there with `ghostly put`");
+    expect(withVault).toBe(systemPrompt(settings, env, { vault: true }));
+    const without = systemPrompt(settings, env, { vault: false });
+    expect(without).not.toContain("ghostly");
+    expect(without).toBe(systemPrompt(settings, env));
+  });
 });

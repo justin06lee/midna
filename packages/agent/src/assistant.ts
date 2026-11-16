@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { MAIN, HOUR, contextSections, fmt, logTail, pinnedFacts, renderNow, type ContextSection, type Message, type Store, type Wakeup } from "@midna/core";
 import { EVENT_WINDOW_MS, type Account, type Attachment, type BrainHealth, type EventReceipt, type InReplyTo, type ReplyFallback, type ReplyRef } from "@midna/protocol";
 import { capKey, otherAccount } from "./accounts.ts";
@@ -502,7 +503,7 @@ export class Assistant {
       try {
         const result = await this.brain({
           prompt: hermes ? e.prompt : `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
-          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0, midTurn: midTurnBrain(e.model) }),
+          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0, vault: hasGhostly(opts.env.home), midTurn: midTurnBrain(e.model) }),
           ...(e.files?.length ? { files: e.files } : {}),
           ...(approve ? { onApproval: (req: { summary: string; tool?: string }) => approve(req, { episodeId, signal: abort.signal }) } : {}),
           model: e.model,
@@ -915,6 +916,9 @@ const sameBrain = (a: BrainChoice, b: BrainChoice) => a.model === b.model && a.a
 
 /** Whether a model's harness takes the user's messages mid-turn (Claude Code does); the others are interrupted for them. */
 const midTurnBrain = (model: string) => !isHermes(model) && resolveModel(model).provider === "claude";
+
+/** Whether the user's password vault's CLI (ghostly) is installed here, for the system prompt to say how to use it. */
+const hasGhostly = (home: string) => existsSync(join(home, ".local/bin/ghostly"));
 
 /**
  * What a conversation's brain session is kept under: the model, and for the
