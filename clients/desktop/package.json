@@ -12,6 +12,7 @@
     "app": "bun scripts/app.ts",
     "app:dev": "bun scripts/sidecar.ts && tauri dev",
     "app:build": "bun scripts/app.ts --no-install",
+    "app:universal": "bun scripts/app.ts --universal --no-install",
     "signing": "bun scripts/signing.ts"
   },
   "dependencies": {

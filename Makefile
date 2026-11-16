@@ -1,7 +1,7 @@
 PREFIX ?= $(HOME)/.local
 BIN    := $(PREFIX)/bin/midna
 
-.PHONY: all build install app app-dev signing check tenet-check tenet-cargo-test update testflight
+.PHONY: all build install app app-universal app-dev signing check tenet-check tenet-cargo-test update testflight
 
 # The golden path: the CLI on your PATH, and the desktop app built for this machine.
 all: build install app
@@ -34,6 +34,13 @@ app:
 # on a Mac without a Developer ID identity (with one, app builds use that and this isn't needed).
 signing:
 	cd clients/desktop && bun run signing
+
+# One midna.app for Apple silicon and Intel Macs (arm64 + x86_64), signed and notarized like `make app`,
+# left in clients/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos, not installed.
+# Needs: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+app-universal:
+	bun install
+	cd clients/desktop && bun run app:universal
 
 app-dev:
 	cd clients/desktop && bun run app:dev

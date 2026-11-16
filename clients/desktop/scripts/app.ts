@@ -11,6 +11,10 @@
  * granted survive the update; without either the build is ad hoc, and loses
  * them. A build is only installed where nothing is lost by it (guard.ts).
  * MIDNA_NOTARIZE=0 signs with Developer ID but skips notarizing.
+ *
+ * `--universal` (macOS) builds one midna.app for Apple silicon and Intel Macs: the Tauri
+ * binary and the bundled CLI each carry arm64 and x86_64, signed and notarized the same way.
+ * It needs both Rust targets (rustup target add aarch64-apple-darwin x86_64-apple-darwin).
  */
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -19,7 +23,8 @@ import { BUNDLE_ID, refuseInstall, signer, type Signer } from "./guard.ts";
 import { NOTARY_PROFILE, SIGNING_IDENTITY, developerId, hasSigningIdentity, signingIdentity } from "./signing.ts";
 
 const here = join(import.meta.dir, "..");
-const bundleDir = join(here, "src-tauri", "target", "release", "bundle");
+const universal = process.argv.includes("--universal");
+const bundleDir = join(here, "src-tauri", "target", ...(universal ? ["universal-apple-darwin"] : []), "release", "bundle");
 const has = (cmd: string) => Bun.which(cmd) !== null;
 const run = (argv: string[], cwd = here) => {
   const r = Bun.spawnSync(argv, { cwd, stdout: "inherit", stderr: "inherit", stdin: "inherit" });
@@ -27,6 +32,12 @@ const run = (argv: string[], cwd = here) => {
 };
 
 const kind = process.platform === "darwin" ? "app" : has("dpkg") ? "deb" : has("rpm") ? "rpm" : "appimage";
+if (universal) {
+  if (kind !== "app") throw new Error("--universal is a macOS build");
+  const targets = Bun.spawnSync(["rustup", "target", "list", "--installed"]).stdout.toString().split("\n");
+  const missing = ["aarch64-apple-darwin", "x86_64-apple-darwin"].filter((t) => !targets.includes(t));
+  if (missing.length) throw new Error(`a universal build needs these Rust targets: rustup target add ${missing.join(" ")}`);
+}
 const install = !process.argv.includes("--no-install");
 const dest = join(homedir(), "Applications", "midna.app");
 
@@ -53,8 +64,8 @@ if (kind === "app" && install) {
   guard(conf.identifier, !identity ? "adhoc" : identity.developerId ? "developer id" : "midna dev");
 }
 
-run(["bun", "scripts/sidecar.ts"]);
-run(["bun", "run", "tauri", "build", "--bundles", kind]);
+run(["bun", "scripts/sidecar.ts", ...(universal ? ["--universal"] : [])]);
+run(["bun", "run", "tauri", "build", "--bundles", kind, ...(universal ? ["--target", "universal-apple-darwin"] : [])]);
 
 const built = (sub: string, ext: string) => {
   const dir = join(bundleDir, sub);
@@ -109,7 +120,18 @@ function notarize(app: string): void {
   run(["spctl", "-a", "-vv", app]);
 }
 
+/** A universal build fails here rather than on an Intel Mac: every binary in Contents/MacOS has both slices. */
+function checkArchs(app: string): void {
+  const macos = join(app, "Contents", "MacOS");
+  for (const f of readdirSync(macos)) {
+    const archs = Bun.spawnSync(["lipo", "-archs", join(macos, f)]).stdout.toString().trim();
+    console.log(`${f}: ${archs}`);
+    if (!archs.split(" ").includes("arm64") || !archs.split(" ").includes("x86_64")) throw new Error(`${join(macos, f)} is ${archs || "not Mach-O"}, not arm64 + x86_64`);
+  }
+}
+
 if (kind === "app") {
+  if (universal) checkArchs(built("macos", ".app"));
   sign(built("macos", ".app"));
   if (identity?.developerId && process.env.MIDNA_NOTARIZE !== "0") notarize(built("macos", ".app"));
 }
