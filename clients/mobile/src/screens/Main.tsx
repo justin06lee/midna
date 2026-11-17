@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PhoneConnection } from "../connection";
+import { onFocusTap } from "../focus";
 import { useTheme } from "../theme";
 import { Button } from "../ui";
 import { useMidna } from "../useMidna";
@@ -20,6 +21,15 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
   const insets = useSafeAreaInsets();
   const midna = useMidna(connection);
   const [tab, setTab] = useState<Tab>("chat");
+  // A shield's "Ask midna" opens Screen Time's lift, which asks why.
+  const [focusAsk, setFocusAsk] = useState(0);
+  useEffect(() => {
+    const sub = onFocusTap(() => {
+      setTab("settings");
+      setFocusAsk((n) => n + 1);
+    });
+    return () => sub.remove();
+  }, []);
   const waiting = [...midna.approvals.values()].filter((a) => a.state === "pending").length;
   const offline = midna.link === "lost";
 
@@ -45,7 +55,7 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
         {tab === "chat" && <Chat midna={midna} connection={connection} onOpenApprovals={() => setTab("approvals")} />}
         {tab === "approvals" && <Approvals midna={midna} />}
         {tab === "vault" && <Vault midna={midna} connection={connection} />}
-        {tab === "settings" && <Settings midna={midna} connection={connection} onPairAgain={onPairAgain} onUnpaired={onUnpaired} />}
+        {tab === "settings" && <Settings midna={midna} connection={connection} onPairAgain={onPairAgain} onUnpaired={onUnpaired} focusAsk={focusAsk} />}
       </View>
       <View style={[s.tabs, { paddingBottom: Math.max(insets.bottom, 8), borderTopColor: t.line, backgroundColor: t.bg }]}>
         {(Object.keys(TABS) as Tab[]).map((k) => (
