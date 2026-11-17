@@ -19,9 +19,12 @@ Notifications.setNotificationHandler({
 export function phonePush(client: MidnaClient) {
   return pushRegistration({
     permitted: async () => {
-      let { status } = await Notifications.getPermissionsAsync();
-      if (status === "undetermined") ({ status } = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } }));
-      return status === "granted";
+      let p = await Notifications.getPermissionsAsync();
+      // Builds before 8 asked without the badge; asking again adds it without a prompt once notifications are allowed.
+      if (p.status === "undetermined" || (p.status === "granted" && p.ios?.allowsBadge === false)) {
+        p = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: true } });
+      }
+      return p.status === "granted";
     },
     token: async () => String((await Notifications.getDevicePushTokenAsync()).data),
     // TestFlight and App Store builds talk to production; a build run from Xcode to development. The host corrects a wrong guess.
@@ -43,8 +46,11 @@ export function phonePush(client: MidnaClient) {
   });
 }
 
-/** The app is open: what the notifications said is in the chat now. */
-export const clearDelivered = () => void Notifications.dismissAllNotificationsAsync().catch(() => {});
+/** The app is open: what the notifications said is in the chat now, and the badge (pushes since the app was last used) goes. */
+export const clearDelivered = () => {
+  void Notifications.dismissAllNotificationsAsync().catch(() => {});
+  void Notifications.setBadgeCountAsync(0).catch(() => {});
+};
 
 /** iOS handed the app a token: a new one, or the same again after any ask for it. */
 export const onTokenChange = (fn: (token: string) => void) => Notifications.addPushTokenListener((t) => fn(String(t.data)));

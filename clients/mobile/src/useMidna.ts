@@ -119,7 +119,8 @@ export function useMidna(connection: PhoneConnection) {
       void registration.register().then((p) => live && setPush(p));
     };
     register();
-    const fg = AppState.addEventListener("change", (s) => s === "active" && register());
+    // midna counts a push's badge from this phone's last request: leaving the app is the last time it was looked at.
+    const fg = AppState.addEventListener("change", (s) => (s === "active" ? register() : s === "background" && void client.status().catch(() => {})));
     const token = onTokenChange((t) => void registration.tokenChanged(t)?.then((p) => live && setPush(p)));
     return () => {
       live = false;

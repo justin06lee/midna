@@ -76,6 +76,11 @@ export class Push {
       .run({ id: outboxId, state, detail, now });
   }
 
+  /** Pushes Apple took or is taking since `since`: what a phone's badge counts while its app is away. */
+  sentSince(since: number): number {
+    return (this.db.query("SELECT COUNT(*) AS n FROM push_sends WHERE at > $since AND state IN ('pending', 'sent')").get({ since }) as { n: number }).n;
+  }
+
   /** What became of an alert's push; null when none was recorded (Telegram-only, or before 0.12). */
   outcome(outboxId: number, now = Date.now()): { state: PushState; detail: string | null } | null {
     const row = this.db.query("SELECT state, detail, at FROM push_sends WHERE outbox_id = $id").get({ id: outboxId }) as

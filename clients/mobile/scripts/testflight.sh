@@ -50,6 +50,24 @@ if [ -f "$kc" ]; then
   security unlock-keychain -p "$(security find-generic-password -s midna-signing-keychain -w)" "$kc"
 fi
 
+# The export signs with $PROFILE, which holds only the capabilities the app id had when it was made:
+# an entitlement app.json asks for that the profile lacks fails the export after a long archive, so stop now.
+# After turning a capability on (developer site → Identifiers → sh.midna.mobile), edit and save the profile, and install it again.
+profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+granted=""
+for f in "$profiles"/*.mobileprovision; do
+  [ -f "$f" ] || continue
+  plist=$(security cms -D -i "$f" 2>/dev/null) || continue
+  [ "$(printf '%s' "$plist" | plutil -extract Name raw -o - - 2>/dev/null)" = "$PROFILE" ] || continue
+  granted=$(printf '%s' "$plist" | plutil -extract Entitlements json -o - - 2>/dev/null)
+done
+if [ -n "$granted" ]; then
+  missing=$(GRANTED="$granted" bun -e 'const g = JSON.parse(process.env.GRANTED); console.log(Object.keys(require("./app.json").expo.ios.entitlements ?? {}).filter((k) => !(k in g)).join(" "))')
+  [ -z "$missing" ] || { echo "the profile \"$PROFILE\" lacks $missing: turn it on for sh.midna.mobile, then save and install the profile again (docs/mobile.md)" >&2; exit 1; }
+else
+  echo "no installed profile named \"$PROFILE\" in $profiles; the export will say what it needs" >&2
+fi
+
 CI=1 bunx expo prebuild -p ios --clean
 mkdir -p "$out"
 rm -rf "$out/midna.xcarchive" "$out/export"

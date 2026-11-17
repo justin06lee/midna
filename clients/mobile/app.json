@@ -28,6 +28,9 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
+      },
       "buildNumber": "7",
       "appleTeamId": "65UN46K6FA"
     },

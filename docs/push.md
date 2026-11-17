@@ -1,6 +1,6 @@
 # Push notifications
 
-midna sends the iPhone app a push notification for each **alert**: reminders, questions and cards (`ask_user`), and urgent or normal notifications (`message_user`). These are the same items Telegram's alerts mode carries (`isAlert` in `packages/protocol`). Chat replies and anything fyi stay in the app.
+midna sends the iPhone app a push notification for each **alert**: reminders, questions and cards (`ask_user`), and urgent or normal notifications (`message_user`). These are the same items Telegram's alerts mode carries (`isAlert` in `packages/protocol`). It also pushes each **chat reply when the user last wrote from the phone** (`wantsPush` in `packages/daemon/src/push.ts`): the app is usually closed by the time a reply comes. A reply to what was said on the desktop, Telegram or the CLI arrives there, not on the phone. Anything fyi stays in the app.
 
 ## Where alerts go: `midna alerts`
 
@@ -33,5 +33,18 @@ How the fallback works: the daemon pushes each alert as it is released and recor
 
 - **Apple:** token-based auth (ES256 JWT, reused for 40 min), HTTP/2 to `api.push.apple.com`, or `api.sandbox.push.apple.com` for a build run from Xcode. A token Apple calls `BadDeviceToken` is tried once in the other environment, and the one that works is kept. `Unregistered` (410) drops it.
 - **A token belongs to the pairing** that registered it (`push_tokens`, migration 12). Revoking the pairing stops its pushes. The host's own token can't register a phone.
-- **The notification:** midna's name as title; the text (cut at 1,200 characters), a question's choices, and the name of a file sent with it. Urgent ones start with ❗ and are time-sensitive. Pushes for the same item collapse into one. While the app is open the chat shows the item, so no banner appears, and opening the app clears what was delivered.
-- **Not yet:** answering a question from the notification itself, and pushes for chat replies while the app is closed.
+- **The notification:** midna's name as title; the text (cut at 1,200 characters), a question's choices, and the name of a file sent with it, with the default sound. Urgent alerts start with ❗. Urgent alerts and replies are **time-sensitive**: they break through a Focus that allows time-sensitive notifications and skip the scheduled summary. That needs the app's `com.apple.developer.usernotifications.time-sensitive` entitlement (`app.json`, from build 8). Without it iOS treats them as ordinary. Pushes for the same item collapse into one. While the app is open the chat shows the item, so no banner appears, and opening the app clears what was delivered.
+- **The badge** counts the pushes since the phone last asked midna for anything (`devices.last_seen_at`). The app makes a request as it goes to the background, so what was read in the app isn't counted, and it sets the badge to 0 when opened.
+- **On the phone:** Settings → Notifications → midna: Allow, Sounds, Badges and Time Sensitive Notifications on. To get replies during a Focus, either keep that Focus's "Time Sensitive Notifications" on (Settings → Focus → the Focus → Apps), or add midna to its allowed apps.
+- **Not yet:** answering a question from the notification itself.
+
+## Turning on time-sensitive (once, before build 8)
+
+The App Store profile holds only the capabilities the app id had when the profile was made, and `scripts/testflight.sh` stops if it lacks an entitlement `app.json` asks for. On the developer site: Identifiers → `sh.midna.mobile` → tick **Time Sensitive Notifications** → Save. Then Profiles → "midna App Store" → Edit → Save → Download, and open the file to install it.
+
+## When notifications don't land
+
+1. `midna status` on the host: `alerts  push and Telegram · 1 phone for push`. "no APNs key" or 0 phones means the host never pushes. The host's log says why for each push that failed (`push: outbox #N reached no phone (…)`).
+2. The app's Settings → Notifications should say On. "Failed" means the host didn't take the token.
+3. TestFlight builds use the production APNs host. The app says so when it registers. If a token is sent with the wrong environment, Apple answers `BadDeviceToken`; midna then tries the other host once and keeps the one that works.
+4. The phone itself: Settings → Notifications → midna, and Settings → Focus (above).

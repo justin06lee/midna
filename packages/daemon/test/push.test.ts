@@ -9,7 +9,7 @@ import type { Brain } from "@midna/agent";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { locatePayload, payload, type ApnsResponse } from "../src/push.ts";
+import { locatePayload, payload, wantsPush, type ApnsResponse } from "../src/push.ts";
 
 /**
  * Push notifications: a phone registers its Apple push token, each alert
@@ -142,12 +142,37 @@ describe("alerts", () => {
     expect(await phone.delivery(id, 5_000)).toEqual({ channel: "both", push: "sent", bridges: true });
   });
 
-  test("a chat reply and anything fyi are not pushed", async () => {
+  /** The user writes from a client, as POST /v1/messages logs it. */
+  const wrote = (client: string) => daemon.store.log.addMessage({ conversationId: MAIN, role: "user", text: "what's next?", client, seen: true });
+
+  test("a reply to what was said elsewhere, and anything fyi, are not pushed", async () => {
+    wrote("desktop");
     tell({ kind: "message" });
     tell({ priority: "fyi" });
     const id = tell({ text: "the one that counts" });
     await until("the alert's push", () => sent.find((s) => s.body.outboxId === id));
     expect(sent).toHaveLength(1);
+  });
+
+  test("a reply to what was said on the phone is pushed, time-sensitive, with a badge counting what came since the app was last used", async () => {
+    await phone.status(); // the app was just used
+    await Bun.sleep(5);
+    wrote("mobile");
+    const first = tell({ kind: "message", text: "Here's the plan." });
+    const s = await until("the reply's push", () => sent.find((x) => x.body.outboxId === first));
+    expect(s.body.aps.alert.body).toBe("Here's the plan.");
+    expect(s.body.aps["interruption-level"]).toBe("time-sensitive");
+    expect(s.body.aps.sound).toBe("default");
+    expect(s.body.aps.badge).toBe(1);
+    const second = tell({ kind: "message", text: "And one more thing." });
+    expect((await until("the second push", () => sent.find((x) => x.body.outboxId === second))).body.aps.badge).toBe(2);
+    // Opening the app (any request) starts the count again.
+    await Bun.sleep(5);
+    await phone.status();
+    const third = tell({ kind: "message", text: "Later." });
+    expect((await until("the third push", () => sent.find((x) => x.body.outboxId === third))).body.aps.badge).toBe(1);
+    // A reply never holds Telegram back, whatever the alerts setting: bridges only ask about alerts.
+    wrote("desktop");
   });
 
   test("under \"push\", Telegram stays out of what a push carried", async () => {
@@ -247,6 +272,22 @@ describe("payload", () => {
     expect(urgent.aps.alert.body).toBe("❗ Hi");
     expect(urgent.aps["interruption-level"]).toBe("time-sensitive");
     expect((payload(item(), "midna") as { aps: Record<string, any> }).aps["interruption-level"]).toBe("active");
+    expect((payload(item({ kind: "message" }), "midna") as { aps: Record<string, any> }).aps["interruption-level"]).toBe("time-sensitive");
+  });
+
+  test("a badge only when there is something to count", () => {
+    expect((payload(item(), "midna", 3) as any).aps.badge).toBe(3);
+    expect("badge" in (payload(item(), "midna", 0) as any).aps).toBe(false);
+  });
+
+  test("which items go to the phones", () => {
+    const last = (client: string | null) => () => client;
+    expect(wantsPush(item(), last(null))).toBe(true);
+    expect(wantsPush(item({ priority: "fyi" }), last("mobile"))).toBe(false);
+    expect(wantsPush(item({ kind: "message" }), last("mobile"))).toBe(true);
+    expect(wantsPush(item({ kind: "message" }), last("desktop"))).toBe(false);
+    expect(wantsPush(item({ kind: "message", priority: "fyi" }), last("mobile"))).toBe(false);
+    expect(wantsPush(item({ kind: "message", conversationId: null }), last("mobile"))).toBe(false);
   });
 
   test("the notification says the words, not the markdown", () => {

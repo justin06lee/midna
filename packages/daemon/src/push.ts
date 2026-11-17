@@ -7,9 +7,10 @@ import { isAlert, plainText, type Delivery, type OutboxItem, type PushRegistrati
 
 /**
  * Push notifications to the iPhone app, through Apple's push service (APNs)
- * with a token-signing (.p8) key. Alerts only, as Telegram's alerts mode
- * carries them; the alerts setting says whether Telegram sends them too, or
- * only what no push carried.
+ * with a token-signing (.p8) key. Alerts, as Telegram's alerts mode
+ * carries them, and midna's replies to what was said on the phone; the
+ * alerts setting says whether Telegram sends alerts too, or only what no
+ * push carried.
  */
 
 /** `push.apns` in config.json. The key stays a private file beside the database. */
@@ -66,8 +67,28 @@ export function loadApns(config: ApnsConfig | undefined, home: string): { keyId:
   }
 }
 
-/** The notification an alert becomes: midna's name over its text as plain text (iOS draws no markdown), a question's choices, a word on its files. */
-export function payload(item: OutboxItem, name: string): Record<string, unknown> {
+/** The client the phone app writes as (clients/mobile/src/useMidna.ts). */
+export const PHONE_CLIENT = "mobile";
+
+/**
+ * Whether an outbox item goes to the phones: every alert, and a chat reply
+ * when the user last wrote from the phone — the app is closed or away by the
+ * time most replies come, and nothing else tells them one came. A reply to
+ * what was said on the desktop, Telegram or the CLI arrives there.
+ */
+export function wantsPush(item: Pick<OutboxItem, "kind" | "priority" | "conversationId">, lastUserClient: (conversationId: string) => string | null): boolean {
+  if (isAlert(item)) return true;
+  return item.kind === "message" && item.priority !== "fyi" && item.conversationId !== null && lastUserClient(item.conversationId) === PHONE_CLIENT;
+}
+
+/**
+ * The notification an item becomes: midna's name over its text as plain text
+ * (iOS draws no markdown), a question's choices, a word on its files.
+ * Urgent alerts and replies are time-sensitive: they break through a Focus
+ * that allows time-sensitive notifications, and stay on the lock screen for
+ * an hour. `badge` is the number of pushes since the phone last used the app.
+ */
+export function payload(item: OutboxItem, name: string, badge?: number): Record<string, unknown> {
   let body = plainText(item.text);
   if (item.options?.length) body += `\n${item.options.map(plainText).join(" · ")}`;
   const files = item.attachments.length;
@@ -79,7 +100,8 @@ export function payload(item: OutboxItem, name: string): Record<string, unknown>
       alert: { title: name, body },
       sound: "default",
       "thread-id": item.conversationId ?? "midna",
-      "interruption-level": item.priority === "urgent" ? "time-sensitive" : "active",
+      "interruption-level": item.priority === "urgent" || item.kind === "message" ? "time-sensitive" : "active",
+      ...(badge ? { badge } : {}),
     },
     outboxId: item.id,
     kind: item.kind,
@@ -177,9 +199,9 @@ export class PushSender {
     return new Set(this.store.push.tokens().map((t) => t.device_id)).size;
   }
 
-  /** A released outbox item: push it if it is an alert and the alerts setting wants pushes. */
+  /** A released outbox item: push it if the phones want it (wantsPush) and the alerts setting wants pushes. */
   onOutbox(item: OutboxItem): void {
-    if (!isAlert(item) || this.store.settings().alerts === "telegram") return;
+    if (this.store.settings().alerts === "telegram" || !wantsPush(item, (c) => this.store.log.lastUserClient(c))) return;
     const tokens = this.store.push.tokens();
     if (!this.apns || !tokens.length) {
       this.store.push.record(item.id, "none", this.apns ? "no phone registered" : "no APNs key");
@@ -198,8 +220,10 @@ export class PushSender {
   }
 
   private async send(item: OutboxItem, tokens: ReturnType<Store["push"]["tokens"]>): Promise<PushState> {
-    const body = JSON.stringify(payload(item, this.store.settings().name));
-    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, { "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600), "apns-collapse-id": `outbox-${item.id}` })));
+    const name = this.store.settings().name;
+    // Each phone's badge counts the pushes since its app last asked midna for anything, this one included.
+    const body = (deviceId: string) => JSON.stringify(payload(item, name, this.store.push.sentSince(this.store.devices.get(deviceId)?.last_seen_at ?? 0)));
+    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body(t.device_id), { "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600), "apns-collapse-id": `outbox-${item.id}` })));
     const sent = results.filter((r) => r === null).length;
     const errors = [...new Set(results.filter((r): r is string => r !== null))];
     const state: PushState = sent ? "sent" : "failed";

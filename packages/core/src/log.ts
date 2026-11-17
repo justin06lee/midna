@@ -128,6 +128,12 @@ export class Log {
     return (row as { id: number } | null)?.id ?? null;
   }
 
+  /** Which client the user last wrote from in this conversation ("mobile", "desktop", "telegram"…); null before they have. */
+  lastUserClient(conversationId: string): string | null {
+    const row = this.db.query("SELECT client FROM messages WHERE conversation_id = $c AND role = 'user' ORDER BY id DESC LIMIT 1").get({ c: conversationId }) as { client: string | null } | null;
+    return row?.client ?? null;
+  }
+
   unseen(conversationId: string): Message[] {
     return this.db
       .query("SELECT * FROM messages WHERE conversation_id = $c AND seen_by_brain = 0 ORDER BY id")
