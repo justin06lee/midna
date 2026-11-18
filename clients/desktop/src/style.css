@@ -183,6 +183,9 @@ body {
 /* Rendered messages: quiet typography, phone-like density. */
 .prose-midna p { margin: 0 0 0.55em; }
 .prose-midna p:last-child { margin-bottom: 0; }
+/* Nothing midna writes makes the chat scroll sideways: a long path or link wraps, and code blocks and tables scroll inside themselves. */
+.prose-midna { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.prose-midna pre, .prose-midna .md-table { max-width: 100%; }
 .prose-midna ul, .prose-midna ol { margin: 0.2em 0 0.55em; padding-left: 1.25em; }
 .prose-midna ul { list-style: disc; }
 .prose-midna ol { list-style: decimal; }

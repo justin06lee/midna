@@ -245,7 +245,7 @@ export function Chat({
   return (
     <Media.Provider value={media}>
       <div className="relative flex h-full min-h-0 flex-col" {...drag}>
-        <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scroller} onScroll={onScroll} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div ref={content} className="mx-auto w-full max-w-[720px] px-6 pt-4 pb-6">
             {lines.length === 0 && !thinking && (
               <div className="flex flex-col items-center pt-24 text-center">
