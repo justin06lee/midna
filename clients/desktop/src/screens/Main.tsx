@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
 import { draftKey } from "../drafts";
-import { inApp, macTitleBar, openTerminal, setHandsPaused } from "../host";
+import { enableNotifications, inApp, macTitleBar, onNotificationOpen, openTerminal, setHandsPaused } from "../host";
 import { useHands } from "../useHands";
+import { useNotifications } from "../useNotifications";
 import { Button, Icon, Loading, Mark, Spinner, StateMark } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
@@ -33,10 +34,25 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
   const [overviewTry, setOverviewTry] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
   const { hands } = useHands();
+  // Off, or never allowed: say so until they're on (watched closely once asked, since allowing them sends no event).
+  const [askedNotifications, setAskedNotifications] = useState(false);
+  const { notifications } = useNotifications(askedNotifications);
+  const notificationsOff = notifications?.state === "ask" || notifications?.state === "off";
 
   useEffect(() => {
     if (m.link === "unpaired") onUnpaired();
   }, [m.link, onUnpaired]);
+
+  // A click on one of midna's notifications brings the window forward on the chat.
+  useEffect(() => {
+    let off = () => {};
+    let gone = false;
+    void onNotificationOpen(() => setView("chat")).then((f) => (gone ? f() : (off = f)));
+    return () => {
+      gone = true;
+      off();
+    };
+  }, []);
 
   // The dashboards refresh when shown, and whenever midna has just done something.
   // A request that never answers gives up, so the screen can say so rather than spin.
@@ -140,6 +156,23 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
             </span>
             <Button size="sm" onClick={() => void setHandsPaused(true)} icon={<Icon name="pause" className="size-3.5" />}>
               Pause
+            </Button>
+          </div>
+        )}
+        {notificationsOff && (
+          <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
+            <span className="flex-1 text-[12.5px]">
+              <span className="font-medium">Notifications are off on this computer.</span> <span className="text-dim">You won't hear when midna replies or needs you.</span>
+            </span>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                setAskedNotifications(true);
+                void enableNotifications();
+              }}
+            >
+              Turn on
             </Button>
           </div>
         )}

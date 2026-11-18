@@ -10,6 +10,7 @@
 //! with the window closed. And be midna's hands on this computer (`hands`).
 
 mod hands;
+mod notify;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -411,12 +412,18 @@ pub fn run() {
             hands::permission_open,
             hands::hands_approvals,
             hands::hands_answer,
-            hands::relaunch
+            hands::relaunch,
+            notify::notifications_status,
+            notify::notifications_enable,
+            notify::notifications_test
         ])
         .setup(|app| {
             app.manage(hands::init(app.handle()));
             app.manage(hands::conn::Poke(std::sync::Arc::new(tokio::sync::Notify::new())));
             hands::conn::start(app.handle().clone());
+            // What midna says reaches the user from here, window open or not.
+            app.manage(notify::Notifications::default());
+            notify::start(app.handle().clone());
             // ⌃⌥⌘P pauses or resumes midna's hands from anywhere; a registered hotkey needs no Input Monitoring.
             {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -465,6 +472,10 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+            }
+            // Looked at: nothing is unread any more.
+            if let WindowEvent::Focused(true) = event {
+                notify::seen(window.app_handle());
             }
         })
         .run(tauri::generate_context!())

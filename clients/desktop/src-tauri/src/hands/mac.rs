@@ -130,7 +130,7 @@ pub fn full_disk_access() -> PermissionState {
 }
 
 /// Notification center calls need a real app bundle; `tauri dev` runs a bare binary.
-fn bundled() -> bool {
+pub(crate) fn bundled() -> bool {
     use objc2_foundation::NSBundle;
     let bundle = NSBundle::mainBundle();
     bundle.bundleIdentifier().is_some() && bundle.bundlePath().to_string().ends_with(".app")
@@ -155,6 +155,8 @@ pub fn notifications() -> PermissionState {
     }
 }
 
+/// Ask for notifications: banners, their sound and the Dock badge. macOS asks the first time only;
+/// after that this just adds what a grant from before the badge left out.
 pub fn request_notifications() {
     use objc2::runtime::Bool;
     use objc2_foundation::NSError;
@@ -163,8 +165,10 @@ pub fn request_notifications() {
         return;
     }
     let block = block2::RcBlock::new(|_granted: Bool, _error: *mut NSError| {});
-    UNUserNotificationCenter::currentNotificationCenter()
-        .requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound, &block);
+    UNUserNotificationCenter::currentNotificationCenter().requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge,
+        &block,
+    );
 }
 
 /// The System Settings pane for one permission.

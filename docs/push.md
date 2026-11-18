@@ -1,6 +1,6 @@
 # Push notifications
 
-midna sends the iPhone app a push notification for each **alert**: reminders, questions and cards (`ask_user`), and urgent or normal notifications (`message_user`). These are the same items Telegram's alerts mode carries (`isAlert` in `packages/protocol`). It also pushes each **chat reply when the user last wrote from the phone** (`wantsPush` in `packages/daemon/src/push.ts`): the app is usually closed by the time a reply comes. A reply to what was said on the desktop, Telegram or the CLI arrives there, not on the phone. Anything fyi stays in the app.
+midna sends the iPhone app a push notification for each **alert**: reminders, questions and cards (`ask_user`), and urgent or normal notifications (`message_user`). These are the same items Telegram's alerts mode carries (`isAlert` in `packages/protocol`). It also pushes each **chat reply when the user last wrote from the phone** (`wantsPush` in `packages/daemon/src/push.ts`): the app is usually closed by the time a reply comes. A reply to what was said on the desktop, Telegram or the CLI arrives there, not on the phone. Anything fyi stays in the app. The Mac app's own notifications are in [desktop-notifications.md](desktop-notifications.md).
 
 ## Where alerts go: `midna alerts`
 

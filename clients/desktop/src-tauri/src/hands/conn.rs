@@ -25,11 +25,11 @@ pub struct Poke(pub Arc<Notify>);
 
 /// What connection.json holds that matters here.
 #[derive(Deserialize, Clone)]
-struct Connection {
-    url: String,
-    token: String,
+pub(crate) struct Connection {
+    pub(crate) url: String,
+    pub(crate) token: String,
     #[serde(default)]
-    device: Option<String>,
+    pub(crate) device: Option<String>,
     /// The daemon's key as /v1/pair gave it (hosts from 0.8 on): trusted from the start, not from the first hello.
     #[serde(default, rename = "daemonKey")]
     daemon_key: Option<String>,
@@ -161,7 +161,7 @@ pub async fn answer(app: &AppHandle, id: &str, answer: &str) -> Result<(), Strin
     }
 }
 
-fn connection(app: &AppHandle) -> Option<Connection> {
+pub(crate) fn connection(app: &AppHandle) -> Option<Connection> {
     let file = app.path().app_config_dir().ok()?.join("connection.json");
     serde_json::from_slice(&std::fs::read(file).ok()?).ok()
 }

@@ -186,15 +186,13 @@ export async function copySecret(text: string, clearMs = 30_000): Promise<void> 
   }, clearMs);
 }
 
-/** A system notification, when the window isn't what the user is looking at. */
+/**
+ * A system notification from the browser build, when the window isn't what
+ * the user is looking at. In the app they come from its Rust side
+ * (src-tauri/src/notify.rs), which hears midna with the window closed too.
+ */
 export async function notify(title: string, body: string): Promise<void> {
-  if (document.hasFocus()) return;
-  if (inApp) {
-    const n = await import("@tauri-apps/plugin-notification");
-    if (!(await n.isPermissionGranted()) && (await n.requestPermission()) !== "granted") return;
-    n.sendNotification({ title, body });
-    return;
-  }
+  if (inApp || document.hasFocus()) return;
   if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body });
 }
 
@@ -204,6 +202,31 @@ export async function launchAtLogin(on?: boolean): Promise<boolean> {
   if (on === true) await a.enable();
   if (on === false) await a.disable();
   return a.isEnabled();
+}
+
+// ── notifications on this computer (desktop app only) ───────────────────
+
+/** Whether midna's notifications reach the user here: on, never asked, or off (refused, or turned off in System Settings). */
+export interface NotificationSetup {
+  state: "on" | "ask" | "off" | "unknown";
+  /** Why the last one didn't go, when it didn't. */
+  problem: string | null;
+}
+export async function notificationSetup(): Promise<NotificationSetup | null> {
+  return inApp ? (await import("@tauri-apps/api/core")).invoke<NotificationSetup>("notifications_status") : null;
+}
+/** Turn them on: the system asks if it never has; refused before, its settings open at midna. */
+export async function enableNotifications(): Promise<void> {
+  if (inApp) await (await import("@tauri-apps/api/core")).invoke("notifications_enable");
+}
+/** One now, as a reply would come. Rejects with why when the system wouldn't take it. */
+export async function testNotification(): Promise<void> {
+  if (inApp) await (await import("@tauri-apps/api/core")).invoke("notifications_test");
+}
+/** A notification was clicked: the window is coming forward. */
+export async function onNotificationOpen(listener: () => void): Promise<() => void> {
+  if (!inApp) return () => {};
+  return (await import("@tauri-apps/api/event")).listen("notification-open", listener);
 }
 
 // ── midna's hands on this computer (desktop app only) ───────────────────

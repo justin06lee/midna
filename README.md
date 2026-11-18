@@ -61,7 +61,7 @@ The app has five views (the iPhone app has Chat, Approvals, Vault and Settings):
 
 **Where you are:** turn on Location in the iPhone app's Settings, and your phone sends midna its precise location as you move (iOS pauses the GPS while you sit still), when you arrive at or leave a saved place (home, the office, …), and whenever midna asks. The points go only to your midna, which keeps every one. midna's tools answer where you are (asking the phone for a fresh fix if need be), how old that fix is, where you've been, and manage the places. See [docs/location.md](docs/location.md).
 
-Closing the window keeps midna in the tray, and notifications arrive while you're elsewhere. If midna can't think (its brain is signed out or missing), a banner says so and offers the fix; if the app can't reach midna for more than a few seconds, a banner says that too, and it keeps trying.
+Closing the window keeps midna in the tray, and notifications arrive while you're elsewhere: a banner with a sound for each reply and alert, a count on the Dock icon, and a click that opens the chat ([docs/desktop-notifications.md](docs/desktop-notifications.md)). If midna can't think (its brain is signed out or missing), a banner says so and offers the fix; if the app can't reach midna for more than a few seconds, a banner says that too, and it keeps trying.
 
 From a terminal:
 

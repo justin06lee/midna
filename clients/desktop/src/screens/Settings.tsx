@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import type { BrainInfo, BridgeInfo, BridgeSetupResult, Connection, DeviceInfo, MidnaClient, Status } from "@midna/protocol";
 import { loadAppearance, setAppearance, type Appearance } from "../appearance";
 import { draftKey, useDraft, useSecretDraft } from "../drafts";
-import { copy, inApp, launchAtLogin, openUrl } from "../host";
+import { copy, enableNotifications, inApp, launchAtLogin, openUrl, testNotification } from "../host";
 import { Button, Icon, Section, Segmented, StateMark } from "../ui";
+import { useNotifications } from "../useNotifications";
 
 const SUGGESTED = ["claude:opus", "claude:sonnet", "claude:haiku", "codex", "gemini", "opencode"];
 
@@ -203,6 +204,7 @@ export function Settings({
               ]}
             />
           </Row>
+          {inApp && <NotificationsRow />}
           {inApp && (
             <Row label="Open at login">
               <Segmented
@@ -259,6 +261,45 @@ export function Settings({
 
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="sheet rounded-xl px-4 py-3.5">{children}</div>;
+}
+
+/** Whether midna's notifications reach the user here, a way to turn them on, and one to try. */
+function NotificationsRow() {
+  const [asked, setAsked] = useState(false);
+  const { notifications, refresh } = useNotifications(asked);
+  const [tried, setTried] = useState<string | null>(null);
+  if (!notifications) return null;
+  const on = notifications.state === "on";
+  const test = async () => {
+    setTried(null);
+    await testNotification().then(
+      () => setTried("Sent. Nothing came? This computer may be in a Focus, or midna is set to no banners in System Settings."),
+      (err: unknown) => setTried(`macOS didn't take it: ${String(err)}`),
+    );
+    refresh();
+  };
+  return (
+    <Row label="Notifications">
+      <span className="text-[12.5px]">{on ? "On" : notifications.state === "unknown" ? "Unknown" : "Off"}</span>
+      {on ? (
+        <Button size="sm" onClick={() => void test()}>
+          Send a test
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="primary"
+          onClick={() => {
+            setAsked(true);
+            void enableNotifications();
+          }}
+        >
+          Turn on
+        </Button>
+      )}
+      <span className="text-[12px] text-dimmer">{tried ?? notifications.problem ?? (on ? "replies and alerts, with a sound and a Dock badge" : "so you hear when midna replies or needs you")}</span>
+    </Row>
+  );
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

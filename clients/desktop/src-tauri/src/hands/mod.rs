@@ -10,7 +10,7 @@
 
 pub mod conn;
 #[cfg(target_os = "macos")]
-mod mac;
+pub(crate) mod mac;
 mod ops;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -170,11 +170,11 @@ fn dir(app: &AppHandle) -> PathBuf {
     app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir())
 }
 
-fn load<T: for<'de> Deserialize<'de> + Default>(app: &AppHandle, name: &str) -> T {
+pub(crate) fn load<T: for<'de> Deserialize<'de> + Default>(app: &AppHandle, name: &str) -> T {
     std::fs::read(dir(app).join(name)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-fn save<T: Serialize>(app: &AppHandle, name: &str, value: &T) {
+pub(crate) fn save<T: Serialize>(app: &AppHandle, name: &str, value: &T) {
     let d = dir(app);
     let _ = std::fs::create_dir_all(&d);
     if let Ok(bytes) = serde_json::to_vec_pretty(value) {
@@ -556,10 +556,9 @@ async fn run(app: &AppHandle, link: &Link, op: &str, args: &Value) -> Result<Out
             .map_err(|e| Refusal::new("failed", e.to_string()))?
         }
         "notify" => {
-            use tauri_plugin_notification::NotificationExt;
             let title = args.get("title").and_then(Value::as_str).unwrap_or("midna");
             let body = args.get("body").and_then(Value::as_str).unwrap_or("");
-            app.notification().builder().title(title).body(body).show().map_err(|e| failed(e.to_string()))?;
+            crate::notify::show(app, title, body).map_err(|e| failed(e))?;
             Ok(Outcome { data: json!({}), files: vec![] })
         }
         "click" | "move" | "drag" | "scroll" | "type" | "key" => ops::input(app, op, args).await,
