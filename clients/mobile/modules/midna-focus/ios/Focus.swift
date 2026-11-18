@@ -22,6 +22,8 @@ enum Focus {
 
   static let usage = DeviceActivityName("midna.usage")
   static let lift = DeviceActivityName("midna.lift")
+  /** A hold that ends by itself: its interval ends when the hold does. */
+  static let hold = DeviceActivityName("midna.hold")
   static let windowPrefix = "midna.window."
   /** iOS monitors at most about 20 activities per app: usage, a lift, and the windows. */
   static let maxWindows = 8
@@ -61,10 +63,37 @@ enum Focus {
 
   // MARK: holding and lifting
 
-  /** Held on demand, until let go. */
+  /** Held on demand, until let go or `heldUntil`. */
   static var held: Bool {
     get { defaults.bool(forKey: "held") }
     set { defaults.set(newValue, forKey: "held") }
+  }
+
+  /** When an on-demand hold ends by itself (seconds since 1970), else nil. */
+  static var heldUntil: Double? {
+    get { defaults.object(forKey: "heldUntil") as? Double }
+    set { defaults.set(newValue, forKey: "heldUntil") }
+  }
+
+  /** Hold now, until let go or until `until`; the monitor extension lets go then, with the app closed. */
+  static func setHold(_ on: Bool, until: Date?, now: Date = Date()) throws {
+    center.stopMonitoring([hold])
+    held = on
+    heldUntil = on ? until?.timeIntervalSince1970 : nil
+    if on, let until, until > now {
+      let parts: Set<Calendar.Component> = [.year, .month, .day, .hour, .minute, .second]
+      let end = max(until, now.addingTimeInterval(minInterval))
+      try center.startMonitoring(hold, during: DeviceActivitySchedule(intervalStart: Calendar.current.dateComponents(parts, from: now), intervalEnd: Calendar.current.dateComponents(parts, from: end), repeats: false))
+    }
+    apply(now: now)
+  }
+
+  /** The hold's time is up. */
+  static func endHold() {
+    center.stopMonitoring([hold])
+    held = false
+    heldUntil = nil
+    apply()
   }
 
   /** Windows running now, by activity name. */
@@ -84,6 +113,7 @@ enum Focus {
   /** Put the shield where it should be now. */
   static func apply(now: Date = Date()) {
     if let until = liftedUntil, until <= now.timeIntervalSince1970 { liftedUntil = nil }
+    if let until = heldUntil, until <= now.timeIntervalSince1970 { held = false; heldUntil = nil }
     let up = (held || !inWindows.isEmpty) && liftedUntil == nil && chosen
     if up {
       let s = selection
@@ -130,6 +160,67 @@ enum Focus {
   // MARK: windows
 
   /** Daily windows, each as minutes after midnight; one that ends before it starts runs past midnight. */
+  // MARK: midna's rules
+
+  /**
+   * midna's rules (FocusRules in packages/protocol/src/focus.ts), from a fetch
+   * or a silent push: the hold, the windows, the offer, and a lift this phone
+   * hasn't applied yet, if it is still meant to run.
+   */
+  static func applyRules(_ rules: [String: Any], now: Date = Date()) throws {
+    let wantHeld = rules["held"] as? Bool ?? false
+    let until = (rules["heldUntil"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
+    if wantHeld != held || until?.timeIntervalSince1970 != heldUntil { try setHold(wantHeld, until: until, now: now) }
+
+    let list = (rules["windows"] as? [[String: Any]] ?? []).compactMap { w -> (start: Int, end: Int)? in
+      guard let start = w["start"] as? Int, let end = w["end"] as? Int else { return nil }
+      return (start, end)
+    }
+    if list.map({ [$0.start, $0.end] }) != windows.map({ [$0.start, $0.end] }) { try setWindows(list) }
+
+    let offer = rules["offer"] as? [String: Any]
+    setOffer(title: offer?["title"] as? String, url: offer?["url"] as? String)
+
+    if let lift = rules["lift"] as? [String: Any], let id = lift["id"] as? String, id != defaults.string(forKey: "lift.applied"),
+      let minutes = lift["minutes"] as? Int, let at = lift["at"] as? Double
+    {
+      defaults.set(id, forKey: "lift.applied")
+      // A lift that came late still runs, but not past its own time.
+      let ends = Date(timeIntervalSince1970: at / 1000).addingTimeInterval(max(minInterval, TimeInterval(minutes * 60)))
+      if ends > now { try liftFor(minutes: minutes, now: now) }
+    }
+    apply(now: now)
+  }
+
+  /** A lift this phone made itself: marked applied, so the rules carrying it back don't lift again. */
+  static func markLiftApplied(_ id: String) {
+    defaults.set(id, forKey: "lift.applied")
+  }
+
+  /** What midna is told: the last two weeks' minutes and shields met, and how Screen Time stands now (FocusReport). */
+  static func report(now: Date = Date()) -> [String: Any] {
+    let minutes = defaults.dictionary(forKey: "usage.history") as? [String: Int] ?? [:]
+    let hits = defaults.dictionary(forKey: "hits.history") as? [String: Int] ?? [:]
+    let days = Set(minutes.keys).union(hits.keys).sorted().suffix(14)
+    let s = selection
+    return [
+      "days": days.map { ["day": $0, "minutes": min(1440, minutes[$0] ?? 0), "hits": hits[$0] ?? 0] },
+      "authorized": AuthorizationCenter.shared.authorizationStatus == .approved,
+      "shielded": shielded,
+      "apps": s.applicationTokens.count,
+      "categories": s.categoryTokens.count,
+      "sites": s.webDomainTokens.count,
+    ]
+  }
+
+  /** Keep a day's number in a two-week history. */
+  private static func remember(_ key: String, day: String, value: Int) {
+    var h = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
+    h[day] = max(h[day] ?? 0, value)
+    for old in h.keys.sorted().dropLast(14) { h.removeValue(forKey: old) }
+    defaults.set(h, forKey: key)
+  }
+
   static var windows: [(start: Int, end: Int)] {
     (defaults.array(forKey: "windows") as? [[Int]] ?? []).compactMap { $0.count == 2 ? ($0[0], $0[1]) : nil }
   }
@@ -169,6 +260,7 @@ enum Focus {
     let had = defaults.string(forKey: "usage.day") == day ? defaults.integer(forKey: "usage.minutes") : 0
     defaults.set(day, forKey: "usage.day")
     defaults.set(max(had, minutes), forKey: "usage.minutes")
+    remember("usage.history", day: day, value: max(had, minutes))
   }
 
   /** Times a shield was met today. */
@@ -182,8 +274,10 @@ enum Focus {
     if now.timeIntervalSince1970 - last < 60 { return }
     let day = today(now)
     defaults.set(now.timeIntervalSince1970, forKey: "hits.last")
-    defaults.set((defaults.string(forKey: "hits.day") == day ? defaults.integer(forKey: "hits.count") : 0) + 1, forKey: "hits.count")
+    let count = (defaults.string(forKey: "hits.day") == day ? defaults.integer(forKey: "hits.count") : 0) + 1
+    defaults.set(count, forKey: "hits.count")
     defaults.set(day, forKey: "hits.day")
+    remember("hits.history", day: day, value: count)
   }
 
   /** Watch today's use of the chosen apps, all day every day, in `usageStep` steps. Again whenever the choice changes. */

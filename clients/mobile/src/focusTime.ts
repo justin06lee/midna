@@ -25,6 +25,3 @@ export function parseWindow(text: string): Window | null {
   const end = Math.min(h2 * 60 + m2, 23 * 60 + 59);
   return start === end ? null : { start, end };
 }
-
-/** What Justin tells midna when he lifts the shield: the reason is the point. */
-export const liftMessage = (minutes: number, reason: string) => `[Screen Time] I lifted the shield for ${minutes} min: ${reason.trim()}`;

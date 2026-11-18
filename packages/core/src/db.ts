@@ -508,6 +508,24 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX location_points_at ON location_points(at);
   CREATE INDEX location_points_received ON location_points(received_at);
   `,
+  // Screen Time: each day the phone reported (minutes in the held apps, shields
+  // met) and every lift with its reason. The rules are kept in settings.
+  `
+  CREATE TABLE focus_days (
+    day TEXT PRIMARY KEY,
+    minutes INTEGER NOT NULL,
+    hits INTEGER NOT NULL,
+    reported_at INTEGER NOT NULL
+  );
+  CREATE TABLE focus_lifts (
+    id TEXT PRIMARY KEY,
+    minutes INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    by TEXT NOT NULL CHECK (by IN ('phone','midna')),
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX focus_lifts_at ON focus_lifts(at);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

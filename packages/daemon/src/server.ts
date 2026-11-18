@@ -29,6 +29,10 @@ import {
   type Delivery,
   type HandsStreamEvent,
   type Health,
+  FocusLiftAsk,
+  FocusReport,
+  FocusRulesPatch,
+  type FocusRules,
   type LocationReceipt,
   type LocationToken,
   type MessageReceipt,
@@ -138,15 +142,15 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation() } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation(), syncFocus: () => deps.push!.syncFocus(store.focus.rules()) } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
   });
 
   // ── everything else needs a paired device ────────────────────────────
   app.use("/v1/*", async (c, next) => {
     const device = store.devices.authenticate(bearer(c));
     if (!device) return c.json({ error: "unauthorized — pair this device first" }, 401);
-    // A phone's location-only token reports where the phone is, and opens nothing else.
-    if (device.kind === LOCATION_KIND && !(c.req.method === "POST" && c.req.path === "/v1/location")) return c.json({ error: "this token only reports the phone's location" }, 403);
+    // A phone's location-only token reports where the phone is, and how its Screen Time day went (both while locked), and opens nothing else.
+    if (device.kind === LOCATION_KIND && !(c.req.method === "POST" && (c.req.path === "/v1/location" || c.req.path === "/v1/focus/report"))) return c.json({ error: "this token only reports the phone's location and Screen Time" }, 403);
     c.set("device", device);
     await next();
   });
@@ -528,6 +532,44 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   });
 
   app.get("/v1/location", (c) => locationViewer(c) ?? c.json(store.location.state()));
+
+  // ── Screen Time: midna holds the rules, the phone carries them out and says how the day went ──
+  /** New rules go to the phones at once, in a silent push; a phone also fetches them when it opens. */
+  const sendFocus = (rules: FocusRules) => void deps.push?.syncFocus(rules).catch((err: Error) => console.error(`[midna] push: screen time rules: ${err.message}`));
+
+  app.get("/v1/focus", (c) => locationViewer(c) ?? c.json(store.focus.state(Math.min(60, Number(c.req.query("days") ?? 7) || 7))));
+
+  app.patch("/v1/focus/rules", async (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const p = FocusRulesPatch.safeParse(await c.req.json().catch(() => null));
+    if (!p.success) return c.json({ error: p.error.issues[0]?.message ?? "rules are needed" }, 400);
+    const before = store.focus.rules();
+    if (p.data.held === false && before.held) return c.json({ error: "letting go of a hold is a lift: POST /v1/focus/lift with a reason" }, 409);
+    const rules = store.focus.setRules(p.data);
+    console.log(`[midna] focus: ${c.get("device").name} changed the rules (${Object.keys(p.data).join(", ")})`);
+    sendFocus(rules);
+    return c.json(rules);
+  });
+
+  app.post("/v1/focus/lift", async (c) => {
+    if (c.get("device").kind !== "mobile") return c.json({ error: "the shield is lifted on the phone, or by midna when asked with a reason" }, 403);
+    const a = FocusLiftAsk.safeParse(await c.req.json().catch(() => null));
+    if (!a.success) return c.json({ error: a.error.issues[0]?.message ?? "a lift needs minutes and a reason" }, 400);
+    const rules = store.focus.lift(a.data, "phone");
+    console.log(`[midna] focus: lifted on ${c.get("device").name} for ${a.data.minutes} min: ${a.data.reason}`);
+    sendFocus(rules);
+    return c.json(rules);
+  });
+
+  app.post("/v1/focus/report", async (c) => {
+    const d = c.get("device");
+    if (d.kind !== "mobile" && d.kind !== LOCATION_KIND) return c.json({ error: "only the phone reports its Screen Time" }, 403);
+    const r = FocusReport.safeParse(await c.req.json().catch(() => null));
+    if (!r.success) return c.json({ error: r.error.issues[0]?.message ?? "a report is needed" }, 400);
+    store.focus.report(r.data);
+    return c.json({ ok: true as const });
+  });
 
   app.post("/v1/location/token", (c) => {
     const d = c.get("device");

@@ -14,6 +14,8 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     super.intervalDidEnd(for: activity)
     if activity == Focus.lift {
       Focus.endLift()
+    } else if activity == Focus.hold {
+      Focus.endHold()
     } else if activity.rawValue.hasPrefix(Focus.windowPrefix) {
       Focus.inWindows.remove(activity.rawValue)
       Focus.apply()

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { clock, focus, focusStatus, liftMessage, minutes, parseWindow, type FocusStatus } from "../focus";
+import type { FocusRules, FocusRulesPatch } from "@midna/protocol";
+import type { PhoneConnection } from "../connection";
+import { clock, focus, focusStatus, minutes, parseWindow, syncFocus, type FocusStatus } from "../focus";
 import { useTheme } from "../theme";
 import { Button, Card, Field, Problem, time } from "../ui";
 import type { Midna } from "../useMidna";
@@ -10,11 +12,12 @@ import { Back, Row } from "./Location";
 const LIFTS = [5, 15, 30];
 
 /**
- * Screen Time, in Settings: the apps midna holds back, whether the shield is
- * up, a lift with a reason (the reason goes to midna), the daily windows,
- * today's minutes, and what a shield offers instead.
+ * Screen Time, in Settings: the apps held back (chosen here: the choice
+ * never leaves the phone), whether the shield is up, a lift with a reason,
+ * the daily windows, today's minutes, and what a shield offers instead. midna
+ * holds the rules: a change goes to midna, and what midna answers is applied.
  */
-export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => void }) {
+export function FocusSettings({ midna, connection, onBack }: { midna: Midna; connection: PhoneConnection; onBack: () => void }) {
   const t = useTheme();
   const [st, setSt] = useState<FocusStatus | null>(focusStatus);
   const [problem, setProblem] = useState("");
@@ -24,6 +27,8 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
   const [offer, setOffer] = useState(st?.offer?.title ?? "");
   const [offerUrl, setOfferUrl] = useState(st?.offer?.url ?? "");
   const refresh = useCallback(() => setSt(focusStatus()), []);
+  // midna's rules as they are now, and the numbers to midna.
+  useEffect(() => void syncFocus(midna.client, connection).then(refresh, () => {}), [midna.client, connection, refresh]);
   useEffect(() => {
     const sub = AppState.addEventListener("change", (a) => a === "active" && refresh());
     const tick = setInterval(refresh, 30_000);
@@ -48,24 +53,28 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
   if (!st || !fx) return null;
   const chosen = [st.apps && `${st.apps} app${st.apps === 1 ? "" : "s"}`, st.categories && `${st.categories} categor${st.categories === 1 ? "y" : "ies"}`, st.sites && `${st.sites} site${st.sites === 1 ? "" : "s"}`].filter(Boolean).join(", ");
   const lifted = st.liftedUntil && st.liftedUntil > Date.now();
-  const shield = lifted ? `lifted until ${time(st.liftedUntil!)}` : st.shielded ? (st.inWindow && !st.held ? "up (window)" : "up") : "down";
+  const shield = lifted ? `lifted until ${time(st.liftedUntil!)}` : st.shielded ? (st.inWindow && !st.held ? "up (window)" : st.heldUntil ? `up until ${time(st.heldUntil)}` : "up") : "down";
 
-  const doLift = () =>
+  /** A change to midna's rules: midna keeps it, and the phone applies what midna answers. */
+  const change = (patch: FocusRulesPatch) => act(async () => fx.applyRules(await midna.client.setFocusRules(patch)));
+  /** A lift: midna keeps it with its reason, and it starts now. With `endHold`, the hold is let go too. */
+  const doLift = (endHold = false) =>
     act(async () => {
-      fx.lift(lift);
-      await midna.send(liftMessage(lift, reason));
+      const rules: FocusRules = await midna.client.liftFocus({ minutes: lift, reason: reason.trim(), ...(endHold ? { endHold } : {}) });
+      fx.lift(lift, rules.lift?.id ?? null);
+      fx.applyRules(rules);
       setReason("");
     });
   const addWindow = () => {
     const w = parseWindow(window);
     if (!w) return setProblem("A window looks like 21:00-23:30.");
-    void act(() => fx.setWindows([...st.windows, w]));
+    void change({ windows: [...st.windows, w] });
     setWindow("");
   };
   const dropWindow = (i: number) =>
     Alert.alert(`Remove ${clock(st.windows[i]!.start)}–${clock(st.windows[i]!.end)}?`, undefined, [
       { text: "Cancel", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => void act(() => fx.setWindows(st.windows.filter((_, j) => j !== i))) },
+      { text: "Remove", style: "destructive", onPress: () => void change({ windows: st.windows.filter((_, j) => j !== i) }) },
     ]);
 
   return (
@@ -82,7 +91,7 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
       ) : (
         <>
           <Card style={s.card}>
-            <Pressable accessibilityRole="button" onPress={() => void act(() => fx.pick())} style={({ pressed }) => [s.kv, { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
+            <Pressable accessibilityRole="button" onPress={() => void act(async () => (await fx.pick()) && (await syncFocus(midna.client, connection)))} style={({ pressed }) => [s.kv, { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
               <Text style={[s.key, { color: t.dim }]}>Held back</Text>
               <Text style={[s.value, { color: chosen ? t.ink : t.warn }]}>
                 {chosen || "Choose apps"} <Text style={{ color: t.dimmer }}>›</Text>
@@ -91,20 +100,14 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
             <Row k="Shield" v={shield} />
             <Row k="Today" v={`${minutes(st.minutesToday)} · met the shield ${st.hitsToday}×`} last />
           </Card>
-          {chosen ? (
-            st.held ? (
-              <Button label="Let them go" onPress={() => void act(() => fx.hold(false))} />
-            ) : (
-              <Button kind="primary" label="Hold them now" onPress={() => void act(() => fx.hold(true))} />
-            )
-          ) : null}
+          {chosen && !st.held ? <Button kind="primary" label="Hold them now" onPress={() => void change({ held: true, heldUntil: null })} /> : null}
 
           {lifted ? (
             <Button label="Put the shield back" onPress={() => void act(() => fx.endLift())} />
           ) : st.shielded ? (
             <View style={s.group}>
               <Text style={[s.heading, { color: t.ink }]}>Lift it</Text>
-              <Field label="Why" value={reason} onChangeText={setReason} placeholder="Replying to Sam's DM" hint="midna gets this, with how long." />
+              <Field label="Why" value={reason} onChangeText={setReason} placeholder="Replying to Sam's DM" hint="midna keeps this, with how long, for your reviews." />
               <View style={s.chips}>
                 {LIFTS.map((m) => (
                   <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: lift === m }} onPress={() => setLift(m)} style={[s.chip, { borderColor: t.line, backgroundColor: lift === m ? t.ink : "transparent" }]}>
@@ -113,6 +116,7 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
                 ))}
               </View>
               <Button label={`Lift for ${lift} min of use`} disabled={reason.trim().length < 3} onPress={() => void doLift()} />
+              {st.held ? <Button label="Let go of the hold" disabled={reason.trim().length < 3} onPress={() => void doLift(true)} /> : null}
             </View>
           ) : null}
 
@@ -138,7 +142,7 @@ export function FocusSettings({ midna, onBack }: { midna: Midna; onBack: () => v
             <Text style={[s.heading, { color: t.ink }]}>Instead</Text>
             <Field label="What a shield offers" value={offer} onChangeText={setOffer} placeholder="Justice" />
             <Field label="Link that opens it" value={offerUrl} onChangeText={setOfferUrl} placeholder="ibooks://… or https://…" autoCapitalize="none" keyboardType="url" />
-            <Button small label="Save" onPress={() => void act(() => fx.setOffer(offer.trim() || null, offerUrl.trim() || null))} style={{ alignSelf: "flex-start" }} />
+            <Button small label="Save" onPress={() => void change({ offer: offer.trim() ? { title: offer.trim(), url: offerUrl.trim() || null } : null })} style={{ alignSelf: "flex-start" }} />
           </View>
         </>
       )}

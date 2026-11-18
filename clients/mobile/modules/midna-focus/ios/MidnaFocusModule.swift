@@ -4,10 +4,10 @@ import SwiftUI
 
 /**
  * Screen Time for midna, on Justin's own phone (FamilyControls with
- * individual authorization): choose the apps that eat the day, hold them
- * behind a shield on demand or in daily windows, lift it for a while, and
- * read today's minutes in them. The state is in Focus.swift, shared with the
- * monitor and shield extensions in targets/.
+ * individual authorization): choose the apps that eat the day, and carry out
+ * midna's rules for them (a shield on demand or in daily windows, lifts with
+ * a reason), and say how the days went. The state is in Focus.swift, shared
+ * with the monitor and shield extensions in targets/.
  *
  * A build without the Family Controls entitlement (MidnaFocus in Info.plist
  * is false, see app.config.js) says so in `status().available`, and the app
@@ -33,6 +33,7 @@ public class MidnaFocusModule: Module {
         "hitsToday": Focus.hitsToday,
       ]
       if let until = Focus.liftedUntil { status["liftedUntil"] = until * 1000 }
+      if let until = Focus.heldUntil { status["heldUntil"] = until * 1000 }
       if let offer = Focus.offer { status["offer"] = ["title": offer.title, "url": offer.url as Any] }
       return status
     }
@@ -66,14 +67,19 @@ public class MidnaFocusModule: Module {
       top.present(sheet!, animated: true)
     }.runOnQueue(.main)
 
-    /** Hold the chosen apps now, until let go; letting go ends a lift too. Windows still hold them while they run. */
-    Function("hold") { (on: Bool) in
-      Focus.held = on
-      if on { Focus.endLift() } else { Focus.apply() }
+    /** midna's rules (FocusRules), fetched or from a silent push: the hold, the windows, the offer, and a lift not yet applied. */
+    Function("applyRules") { (rules: [String: Any]) throws in
+      try Focus.applyRules(rules)
     }
 
-    /** Lift the shield for this many minutes of use (at least a quarter hour of the clock). */
-    Function("lift") { (minutes: Int) throws in
+    /** What midna is told (FocusReport): two weeks of minutes and shields met, and how Screen Time stands. */
+    Function("report") { () -> [String: Any] in
+      Focus.report()
+    }
+
+    /** Lift the shield at once for this many minutes of use, for the lift midna recorded as `id` (so its rules don't lift again). */
+    Function("lift") { (minutes: Int, id: String?) throws in
+      if let id { Focus.markLiftApplied(id) }
       try Focus.liftFor(minutes: minutes)
     }
 
@@ -81,22 +87,7 @@ public class MidnaFocusModule: Module {
     Function("endLift") {
       Focus.endLift()
     }
-
-    /** The daily windows that hold the apps: minutes after midnight, at most 8. */
-    Function("setWindows") { (windows: [Window]) throws in
-      try Focus.setWindows(windows.map { ($0.start, $0.end) })
-    }
-
-    /** What a shield offers instead (Justice, a study block) and the link that opens it. */
-    Function("setOffer") { (title: String?, url: String?) in
-      Focus.setOffer(title: title, url: url)
-    }
   }
-}
-
-struct Window: Record {
-  @Field var start: Int = 0
-  @Field var end: Int = 0
 }
 
 struct PickSheet: View {

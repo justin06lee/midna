@@ -55,7 +55,7 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired, focusAsk 
       },
     ]);
 
-  if (showFocus) return <FocusSettings midna={midna} onBack={() => setShowFocus(false)} />;
+  if (showFocus) return <FocusSettings midna={midna} connection={connection} onBack={() => setShowFocus(false)} />;
   if (showLocation) return <LocationSettings midna={midna} connection={connection} onBack={() => setShowLocation(false)} />;
 
   return (

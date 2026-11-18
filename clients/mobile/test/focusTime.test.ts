@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { clock, liftMessage, minutes, parseWindow } from "../src/focusTime";
+import { clock, minutes, parseWindow } from "../src/focusTime";
 
 describe("Screen Time's words and times", () => {
   test("minutes read the way Justin says them", () => {
@@ -19,9 +19,5 @@ describe("Screen Time's words and times", () => {
     for (const bad of ["", "21-23", "25:00-26:00", "21:60-22:00", "21:00-21:00", "nine to five"]) expect(parseWindow(bad)).toBeNull();
     expect(clock(1410)).toBe("23:30");
     expect(clock(60)).toBe("01:00");
-  });
-
-  test("lifting tells midna why", () => {
-    expect(liftMessage(15, "  replying to Sam ")).toBe("[Screen Time] I lifted the shield for 15 min: replying to Sam");
   });
 });

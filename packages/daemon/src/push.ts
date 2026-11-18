@@ -3,7 +3,7 @@ import { createPrivateKey, sign, type KeyObject } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "@midna/core";
-import { isAlert, plainText, type Delivery, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
+import { isAlert, plainText, type Delivery, type FocusRules, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
 
 /**
  * Push notifications to the iPhone app, through Apple's push service (APNs)
@@ -111,6 +111,15 @@ export function payload(item: OutboxItem, name: string, badge?: number): Record<
 /** The silent push that asks the phone where it is now (modules/midna-location/ios/MidnaLocationModule.swift looks for `midna: "locate"`). */
 export function locatePayload(): Record<string, unknown> {
   return { aps: { "content-available": 1 }, midna: "locate" };
+}
+
+/**
+ * The silent push that carries midna's Screen Time rules to the phone, and asks
+ * it how the day went (clients/mobile/src/focus.ts looks for `midna: "focus"`).
+ * The rules ride in the push, so the phone applies them without fetching them.
+ */
+export function focusPayload(rules: FocusRules): Record<string, unknown> {
+  return { aps: { "content-available": 1 }, midna: "focus", rules };
 }
 
 /** The real transport: one HTTP/2 session per APNs host, opened again when it closes. */
@@ -249,6 +258,23 @@ export class PushSender {
     const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, headers).catch((err: Error) => err.message)));
     const errors = [...new Set(results.filter((r): r is string => r !== null))];
     if (errors.length) console.error(`[midna] push: location request: ${errors.join("; ")}`);
+    return { sent: results.filter((r) => r === null).length, errors };
+  }
+
+  /**
+   * Give every phone the Screen Time rules, and ask it to say how the day
+   * went: a silent background push. Unlike a location ask it stays useful
+   * late, so Apple may hold it a day; a newer one replaces it.
+   */
+  async syncFocus(rules: FocusRules): Promise<{ sent: number; errors: string[] }> {
+    const tokens = this.store.push.tokens();
+    if (!this.apns) return { sent: 0, errors: ["no APNs key"] };
+    if (!tokens.length) return { sent: 0, errors: ["no phone registered for push"] };
+    const body = JSON.stringify(focusPayload(rules));
+    const headers = { "apns-push-type": "background", "apns-priority": "5", "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600), "apns-collapse-id": "midna-focus" };
+    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, headers).catch((err: Error) => err.message)));
+    const errors = [...new Set(results.filter((r): r is string => r !== null))];
+    if (errors.length) console.error(`[midna] push: screen time rules: ${errors.join("; ")}`);
     return { sent: results.filter((r) => r === null).length, errors };
   }
 

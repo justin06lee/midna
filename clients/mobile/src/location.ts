@@ -56,7 +56,7 @@ const readJson = <T>(key: string, fallback: T): T => {
 };
 const writeJson = (key: string, v: unknown) => Storage.setItemSync(key, JSON.stringify(v));
 
-async function reporter(): Promise<Reporter | null> {
+export async function reporter(): Promise<Reporter | null> {
   const s = await SecureStore.getItemAsync(REPORTER, reporterOpts).catch(() => null);
   if (!s) return null;
   try {
@@ -171,7 +171,7 @@ export async function locationSetup(): Promise<LocationSetup> {
 export const lastSent = (): number | null => Number(Storage.getItemSync(LAST_SENT)) || null;
 
 /** The location-only token for this pairing: kept, or minted now. */
-async function ensureReporter(client: MidnaClient, connection: PhoneConnection): Promise<void> {
+export async function ensureReporter(client: MidnaClient, connection: PhoneConnection): Promise<void> {
   const r = await reporter();
   if (r && r.phone === connection.device && r.url === connection.url) return;
   const made = await client.locationToken();
