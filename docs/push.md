@@ -40,7 +40,7 @@ How the fallback works: the daemon pushes each alert as it is released and recor
 
 ## Turning on time-sensitive (once, before build 8)
 
-The App Store profile holds only the capabilities the app id had when the profile was made, and `scripts/testflight.sh` stops if it lacks an entitlement `app.json` asks for. On the developer site: Identifiers → `sh.midna.mobile` → tick **Time Sensitive Notifications** → Save. Then Profiles → "midna App Store" → Edit → Save → Download, and open the file to install it.
+The App Store profile holds only the capabilities the app id had when the profile was made. `scripts/testflight.sh` checks it against `app.json`. If an entitlement is missing, it runs `scripts/profile.ts`, which turns the capability on through the App Store Connect API, makes the profile again and installs it, then checks once more. To do it by hand instead: developer site → Identifiers → `sh.midna.mobile` → tick **Time Sensitive Notifications** → Save. Then Profiles → "midna App Store" → Edit → Save → Download, and open the file to install it.
 
 ## When notifications don't land
 
