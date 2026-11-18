@@ -62,6 +62,20 @@ export function startOfLocalDay(ms: number, tz: string): number {
 }
 
 /**
+ * The next time the clock in `tz` reads `minutes` after midnight on one of
+ * `days` (ISO weekdays, 1 is Monday), strictly after `now`; null without days.
+ */
+export function nextLocalTime(minutes: number, days: number[], tz: string, now = Date.now()): number | null {
+  const p = parts(now, tz);
+  for (let d = 0; d <= 7; d++) {
+    const ms = fromLocal(+p.year!, +p.month!, +p.day! + d, Math.floor(minutes / 60), minutes % 60, tz);
+    const iso = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(parts(ms, tz).weekday!) + 1;
+    if (ms > now && days.includes(iso)) return ms;
+  }
+  return null;
+}
+
+/**
  * Parse a time the agent or user wrote. Accepts ISO 8601 with an offset or Z,
  * local "YYYY-MM-DD", "YYYY-MM-DD HH:mm" / "YYYY-MM-DDTHH:mm" (in `tz`), and
  * relative "+30m", "+2h", "+3d", "+1w".

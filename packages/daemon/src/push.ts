@@ -3,7 +3,7 @@ import { createPrivateKey, sign, type KeyObject } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Store } from "@midna/core";
-import { isAlert, plainText, type Delivery, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
+import { isAlert, plainText, type Alarm, type Delivery, type OutboxItem, type PushRegistration, type PushState } from "@midna/protocol";
 
 /**
  * Push notifications to the iPhone app, through Apple's push service (APNs)
@@ -111,6 +111,20 @@ export function payload(item: OutboxItem, name: string, badge?: number): Record<
 /** The silent push that asks the phone where it is now (modules/midna-location/ios/MidnaLocationModule.swift looks for `midna: "locate"`). */
 export function locatePayload(): Record<string, unknown> {
   return { aps: { "content-available": 1 }, midna: "locate" };
+}
+
+/** A push with more than this in it leaves the alarms out, and the phone fetches them: APNs takes 4 KB. */
+const ALARMS_PAYLOAD_MAX = 3_500;
+
+/**
+ * The silent push that brings the phone its alarms (clients/mobile/src/alarms.ts
+ * looks for `midna: "alarms"`). The list rides in the push, so the phone
+ * sets them without fetching; a list too long for a push is fetched.
+ */
+export function alarmsPayload(alarms: Alarm[]): Record<string, unknown> {
+  const bare = { aps: { "content-available": 1 }, midna: "alarms" };
+  const full = { ...bare, alarms };
+  return Buffer.byteLength(JSON.stringify(full)) <= ALARMS_PAYLOAD_MAX ? full : bare;
 }
 
 /** The real transport: one HTTP/2 session per APNs host, opened again when it closes. */
@@ -249,6 +263,24 @@ export class PushSender {
     const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, headers).catch((err: Error) => err.message)));
     const errors = [...new Set(results.filter((r): r is string => r !== null))];
     if (errors.length) console.error(`[midna] push: location request: ${errors.join("; ")}`);
+    return { sent: results.filter((r) => r === null).length, errors };
+  }
+
+  /**
+   * Give every phone the alarms: a silent background push, which wakes the
+   * app to hand them to iOS and say back what iOS holds. Unlike a location
+   * ask it stays useful late, so Apple may hold it a day for a phone that's
+   * off; a newer one replaces it.
+   */
+  async syncAlarms(alarms: Alarm[]): Promise<{ sent: number; errors: string[] }> {
+    const tokens = this.store.push.tokens();
+    if (!this.apns) return { sent: 0, errors: ["no APNs key"] };
+    if (!tokens.length) return { sent: 0, errors: ["no phone registered for push"] };
+    const body = JSON.stringify(alarmsPayload(alarms));
+    const headers = { "apns-push-type": "background", "apns-priority": "5", "apns-expiration": String(Math.floor(Date.now() / 1000) + 24 * 3600), "apns-collapse-id": "midna-alarms" };
+    const results = await Promise.all(tokens.map((t) => this.toPhone(t.token, t.environment, body, headers).catch((err: Error) => err.message)));
+    const errors = [...new Set(results.filter((r): r is string => r !== null))];
+    if (errors.length) console.error(`[midna] push: alarms: ${errors.join("; ")}`);
     return { sent: results.filter((r) => r === null).length, errors };
   }
 

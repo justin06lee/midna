@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { FACT_KINDS, HORIZONS, MAIN, fmt, parseWhen, type Job, type PermissionRecord, type Store } from "@midna/core";
-import { MAX_ATTACHMENTS_PER_MESSAGE, PLACE_RADIUS_DEFAULT, PLACE_RADIUS_MAX, PLACE_RADIUS_MIN, metresBetween, type Attachment, type LocationPoint, type Op, type Place } from "@midna/protocol";
+import { FACT_KINDS, HORIZONS, MAIN, fmt, nextRing, parseWhen, type Job, type PermissionRecord, type Store } from "@midna/core";
+import { ALARM_LABEL_MAX, MAX_ATTACHMENTS_PER_MESSAGE, PLACE_RADIUS_DEFAULT, PLACE_RADIUS_MAX, PLACE_RADIUS_MIN, metresBetween, onPhone, type Alarm, type Attachment, type LocationPoint, type Op, type Place } from "@midna/protocol";
 import { attach, liftLocalImages, workspaceCopy, type FileRef } from "./attachments.ts";
 import type { HandsHandle, HandsOutcome, HandsRequest } from "./hands.ts";
 import { took } from "./prompt.ts";
@@ -31,6 +31,8 @@ export interface ToolContext {
   askLocation?: () => Promise<{ sent: number; errors: string[] }>;
   /** Asks for midna's permission from programs the user runs (the daemon's PermissionDesk). */
   permissions?: PermissionsHandle;
+  /** Give the phones the alarms now (a silent push). Without it, the phone gets them the next time the app is opened. */
+  syncAlarms?: () => Promise<{ sent: number; errors: string[] }>;
 }
 
 /** What the permission tools need of the daemon. */
@@ -341,6 +343,93 @@ export function createToolServer(ctx: ToolContext): McpServer {
     const x = store.location.place(id);
     if (!x || !store.location.deletePlace(id)) throw new Error(`no place ${id}`);
     return `deleted ${x.name}`;
+  });
+
+  // ── alarms: they ring on the user's iPhone, as the Clock app's do ────
+  // midna holds the list; the phone fetches it (a silent push, the app opening, now and then in the background) and gives
+  // each alarm to iOS, then says what iOS holds. Until it has said so, an alarm isn't known to be on the phone.
+  const DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+  const repeats = (a: Alarm) => (a.days.length === 7 ? "every day" : a.days.map((d) => DAY_NAMES[d - 1]).join(", "));
+  const OPEN_THE_APP = "the phone gets it the next time the midna app is opened: ask the user to open it, and check with alarm_list before relying on the alarm";
+  /** Whether the phones hold it, and what stands in the way when they don't. */
+  const phoneSide = (a: Alarm) => {
+    const phones = store.alarms.phones();
+    if (onPhone(a, phones)) return { on_phone: true };
+    const p = phones[0];
+    const refused = p?.problems?.find((x) => x.id.toLowerCase() === a.id)?.error;
+    const why = !p
+      ? "no phone has reported its alarms yet (the midna app needs the build with alarms, opened once)"
+      : p.authorization === "unsupported"
+        ? "the phone can't hold alarms (they need iOS 26 and the midna build with alarms)"
+        : p.authorization !== "authorized"
+          ? "the user hasn't allowed alarms for midna on the phone: they open the midna app and tap Allow (or iPhone Settings → midna → Alarms)"
+          : refused
+            ? `iOS refused it: ${refused}`
+            : `the phone hasn't taken it yet (it last reported ${t(p.reportedAt)})`;
+    return { on_phone: false, why };
+  };
+  const alarmOut = (a: Alarm) => ({
+    id: a.id,
+    label: a.label,
+    ...(a.time !== null ? { time: a.time, repeats: repeats(a) } : {}),
+    rings: t(nextRing(a, tz())),
+    ...phoneSide(a),
+  });
+  /** Push the list to the phones; what to tell the model when that didn't go. */
+  async function pushAlarms(): Promise<string | undefined> {
+    if (!ctx.syncAlarms) return `push isn't set up on this midna: ${OPEN_THE_APP}`;
+    const r = await ctx.syncAlarms();
+    return r.sent ? undefined : `the phone couldn't be reached (${r.errors.join("; ") || "no phone"}): ${OPEN_THE_APP}`;
+  }
+
+  tool(
+    "alarm_set",
+    `Set an alarm that rings on the user's iPhone like the Clock app's: out loud, through silent mode and any Focus, until they stop it. Use it for what must wake them or can't be missed at a time (waking up, Fajr, leaving for a flight); a reminder is only a notification. Either at (rings once) or time (repeats on days, every day when none are given; read on the phone's own clock). For a time that moves from day to day, like a prayer time, set a one-off for each day. Pass id to change one. The phone is sent the alarm at once and this waits up to ${FRESH_WAIT_MS / 1000} s for it to say iOS holds it: on_phone says whether it does. When it's false the alarm will NOT ring yet: tell the user what's needed (why says), and check alarm_list again before they rely on it.`,
+    {
+      label: z.string().min(1).max(ALARM_LABEL_MAX).describe('Shown over the ringing alarm, e.g. "Wake up: caveira call at 5"'),
+      at: when.optional().describe("A one-off alarm: when it rings"),
+      time: z.string().regex(/^\d{1,2}:\d{2}$/).optional().describe('A repeating alarm: "04:30"'),
+      days: z.array(z.enum(DAY_NAMES)).max(7).optional().describe("With time: the days it rings on (default every day)"),
+      id: z.string().optional().describe("Change this alarm instead of setting a new one"),
+    },
+    async (a) => {
+      if ((a.at === undefined) === (a.time === undefined)) throw new Error("give at (rings once) or time (repeats), one of them");
+      if (a.days && a.time === undefined) throw new Error("days go with time");
+      const time = a.time === undefined ? undefined : a.time.padStart(5, "0");
+      if (time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error(`${a.time} isn't a time of day`);
+      const set = store.alarms.set({
+        ...(a.id ? { id: a.id } : {}),
+        label: a.label,
+        ...(a.at !== undefined ? { at: at(a.at)! } : { time: time!, ...(a.days ? { days: a.days.map((d) => DAY_NAMES.indexOf(d) + 1) } : {}) }),
+      });
+      const note = await pushAlarms();
+      // The phone answers the push with what iOS holds now.
+      if (!note) for (const end = Date.now() + FRESH_WAIT_MS; Date.now() < end && !ctx.signal?.aborted && !onPhone(set, store.alarms.phones()); await Bun.sleep(250));
+      return { ...alarmOut(set), ...(note ? { note } : {}) };
+    },
+  );
+
+  tool(
+    "alarm_list",
+    "The alarms set on the user's iPhone: when each rings next, and whether the phone has said iOS holds it (on_phone; when false, why). An alarm that isn't on the phone will not ring. Check it before the user sleeps on an alarm you set.",
+    {},
+    () => {
+      const phones = store.alarms.phones();
+      return {
+        alarms: store.alarms
+          .list()
+          .filter((a) => nextRing(a, tz()) !== null)
+          .map(alarmOut),
+        phones: phones.map((p) => ({ name: p.name, alarms_allowed: p.authorization === "authorized" ? true : p.authorization, reported: t(p.reportedAt) })),
+      };
+    },
+  );
+
+  tool("alarm_cancel", "Cancel an alarm on the user's iPhone (id from alarm_list). The phone is told at once; an alarm it hasn't heard about yet could still ring, so say so when the phone can't be reached.", { id: z.string() }, async ({ id }) => {
+    const was = store.alarms.cancel(id);
+    if (!was) throw new Error(`no alarm ${id}`);
+    const note = await pushAlarms();
+    return { cancelled: was.label, ...(note ? { note: note.replace(OPEN_THE_APP, "it is taken off the phone the next time the midna app is opened") } : {}) };
   });
 
   // ── permission: programs the user runs ask, midna decides ────────────

@@ -6,6 +6,8 @@ import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
 import { QUEUE_PREFIX, accountEmails, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
+  AlarmReport,
+  AlarmSet,
   AnswerApproval,
   HandsHello,
   HandsResult,
@@ -33,6 +35,7 @@ import {
   PERMISSION_TIMEOUT_MAX_MS,
   PermissionAsk,
   SERVICE_KIND,
+  type AlarmsState,
   type LocationReceipt,
   type LocationToken,
   type MessageReceipt,
@@ -85,6 +88,12 @@ const SERVICE_ROUTES: Array<[string, RegExp]> = [
 
 /** The kind of a phone's location-only token (POST /v1/location/token). */
 export const LOCATION_KIND = "location";
+/** All it opens: what the phone does while locked. */
+const LOCATION_ROUTES: Array<[string, string]> = [
+  ["POST", "/v1/location"],
+  ["GET", "/v1/alarms"],
+  ["POST", "/v1/alarms/report"],
+];
 
 const safeEqual = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const bearer = (c: Context) => c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
@@ -152,15 +161,15 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation() } : {}), ...(deps.permissions ? { permissions: deps.permissions } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation(), syncAlarms: () => deps.push!.syncAlarms(store.alarms.list()) } : {}), ...(deps.permissions ? { permissions: deps.permissions } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
   });
 
   // ── everything else needs a paired device ────────────────────────────
   app.use("/v1/*", async (c, next) => {
     const device = store.devices.authenticate(bearer(c));
     if (!device) return c.json({ error: "unauthorized — pair this device first" }, 401);
-    // A phone's location-only token reports where the phone is, and opens nothing else.
-    if (device.kind === LOCATION_KIND && !(c.req.method === "POST" && c.req.path === "/v1/location")) return c.json({ error: "this token only reports the phone's location" }, 403);
+    // A phone's location-only token reports where the phone is, reads and reports its alarms (both while locked), and opens nothing else.
+    if (device.kind === LOCATION_KIND && !LOCATION_ROUTES.some(([method, path]) => c.req.method === method && c.req.path === path)) return c.json({ error: "this token only reports the phone's location and alarms" }, 403);
     // A service sends midna events and asks its permission. It can't speak as the user, answer an approval or change anything.
     if (device.kind === SERVICE_KIND && !SERVICE_ROUTES.some(([method, path]) => c.req.method === method && path.test(c.req.path))) {
       return c.json({ error: "a service's token sends events (POST /v1/inbound) and asks permission (/v1/permissions), nothing else" }, 403);
@@ -569,6 +578,48 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   });
 
   app.get("/v1/location", (c) => locationViewer(c) ?? c.json(store.location.state()));
+
+  // ── alarms: midna holds the list, the phone gives it to iOS and says what iOS holds ──
+  /** A changed list goes to the phones at once, in a silent push; a phone also fetches it when it opens. */
+  const sendAlarms = () => void deps.push?.syncAlarms(store.alarms.list()).catch((err: Error) => console.error(`[midna] push: alarms: ${err.message}`));
+  const alarmViewer = (c: Context<Env>) => (c.get("device").kind === LOCATION_KIND ? null : locationViewer(c));
+
+  app.get("/v1/alarms", (c) => alarmViewer(c) ?? c.json({ alarms: store.alarms.list(), phones: store.alarms.phones() } satisfies AlarmsState));
+
+  app.post("/v1/alarms", async (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const a = AlarmSet.safeParse(await c.req.json().catch(() => null));
+    if (!a.success) return c.json({ error: a.error.issues[0]?.message ?? "an alarm needs a label and a time" }, 400);
+    try {
+      const { id, label, at, time, days } = a.data;
+      const set = store.alarms.set({ label, ...(id ? { id } : {}), ...(at !== undefined ? { at } : {}), ...(time !== undefined ? { time } : {}), ...(days ? { days } : {}) });
+      console.log(`[midna] alarms: ${c.get("device").name} set "${set.label}"`);
+      sendAlarms();
+      return c.json(set);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  app.delete("/v1/alarms/:id", (c) => {
+    const refused = locationViewer(c);
+    if (refused) return refused;
+    const was = store.alarms.cancel(c.req.param("id"));
+    if (!was) return c.json({ error: "no such alarm" }, 404);
+    console.log(`[midna] alarms: ${c.get("device").name} cancelled "${was.label}"`);
+    sendAlarms();
+    return c.json({ ok: true as const });
+  });
+
+  app.post("/v1/alarms/report", async (c) => {
+    const d = c.get("device");
+    if (d.kind !== "mobile" && d.kind !== LOCATION_KIND) return c.json({ error: "only the phone reports its alarms" }, 403);
+    const r = AlarmReport.safeParse(await c.req.json().catch(() => null));
+    if (!r.success) return c.json({ error: r.error.issues[0]?.message ?? "a report is needed" }, 400);
+    store.alarms.report(store.devices.owner(d.id), r.data);
+    return c.json({ ok: true as const });
+  });
 
   app.post("/v1/location/token", (c) => {
     const d = c.get("device");

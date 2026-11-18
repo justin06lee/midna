@@ -10,6 +10,8 @@ import { z } from "zod";
 export * from "./hands.ts";
 export * from "./location.ts";
 export * from "./permissions.ts";
+export * from "./alarms.ts";
+import type { Alarm, AlarmReport, AlarmSet, AlarmsState } from "./alarms.ts";
 import type { AskedPermission, PermissionAsk } from "./permissions.ts";
 import type { LocationReceipt, LocationReport, LocationState, LocationToken, Place, PlacePatch, PlaceSave } from "./location.ts";
 import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
@@ -721,6 +723,22 @@ export class MidnaClient {
   /** An ask this device made, and what became of it; with `waitMs`, once it's decided or that long has passed. */
   permission(id: string, waitMs = 0, signal?: AbortSignal): Promise<AskedPermission> {
     return this.call("GET", `/v1/permissions/${encodeURIComponent(id)}?wait=${waitMs}`, undefined, signal, undefined, waitMs + 10_000);
+  }
+  // Alarms on the phone: midna holds the list, the phone carries it out.
+  /** The alarms the phone should hold, and what each phone said it holds. The phone's location-only token may ask too. */
+  alarms(signal?: AbortSignal): Promise<AlarmsState> {
+    return this.call("GET", "/v1/alarms", undefined, signal);
+  }
+  /** A new alarm, or with `id` a change to one. */
+  setAlarm(alarm: AlarmSet): Promise<Alarm> {
+    return this.call("POST", "/v1/alarms", alarm);
+  }
+  cancelAlarm(id: string): Promise<{ ok: true }> {
+    return this.call("DELETE", `/v1/alarms/${encodeURIComponent(id)}`);
+  }
+  /** The phone: what iOS holds now. */
+  reportAlarms(report: AlarmReport): Promise<{ ok: true }> {
+    return this.call("POST", "/v1/alarms/report", report);
   }
   /** A token that can only report this phone's location, for the phone to use while it is locked. A new one retires the last. */
   locationToken(): Promise<LocationToken> {

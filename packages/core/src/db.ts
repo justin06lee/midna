@@ -529,6 +529,28 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX permissions_grant ON permissions(device_id, scope, approved_until);
   `,
+  // Alarms midna sets on the user's phone: one-off (at) or recurring (time on
+  // the phone's clock, days as a JSON array of ISO weekdays), and what each
+  // phone last said iOS holds.
+  `
+  CREATE TABLE alarms (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    at INTEGER,
+    time TEXT,
+    days TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK ((at IS NULL) <> (time IS NULL))
+  );
+  CREATE TABLE alarm_phones (
+    device_id TEXT PRIMARY KEY REFERENCES devices(id),
+    authorization TEXT NOT NULL,
+    scheduled TEXT NOT NULL,
+    problems TEXT NOT NULL,
+    reported_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(path: string): Database {
