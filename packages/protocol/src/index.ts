@@ -11,6 +11,8 @@ export * from "./hands.ts";
 export * from "./location.ts";
 export * from "./permissions.ts";
 export * from "./alarms.ts";
+export * from "./focus.ts";
+import type { FocusLiftAsk, FocusReport, FocusRules, FocusRulesPatch, FocusState } from "./focus.ts";
 import type { Alarm, AlarmReport, AlarmSet, AlarmsState } from "./alarms.ts";
 import type { AskedPermission, PermissionAsk } from "./permissions.ts";
 import type { LocationReceipt, LocationReport, LocationState, LocationToken, Place, PlacePatch, PlaceSave } from "./location.ts";
@@ -739,6 +741,22 @@ export class MidnaClient {
   /** The phone: what iOS holds now. */
   reportAlarms(report: AlarmReport): Promise<{ ok: true }> {
     return this.call("POST", "/v1/alarms/report", report);
+  }
+  /** Screen Time: the rules midna holds, the days the phone reported, and the lifts. */
+  focus(signal?: AbortSignal): Promise<FocusState> {
+    return this.call("GET", "/v1/focus", undefined, signal);
+  }
+  /** Change the rules; the phones get them in a silent push. */
+  setFocusRules(patch: FocusRulesPatch): Promise<FocusRules> {
+    return this.call("PATCH", "/v1/focus/rules", patch);
+  }
+  /** Lift the shield for a while, for a reason. */
+  liftFocus(ask: FocusLiftAsk): Promise<FocusRules> {
+    return this.call("POST", "/v1/focus/lift", ask);
+  }
+  /** The phone says how the last days went; the location-only token may send it too. */
+  reportFocus(report: FocusReport): Promise<{ ok: true }> {
+    return this.call("POST", "/v1/focus/report", report);
   }
   /** A token that can only report this phone's location, for the phone to use while it is locked. A new one retires the last. */
   locationToken(): Promise<LocationToken> {

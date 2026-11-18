@@ -8,6 +8,7 @@ import { clientFor, type PhoneConnection } from "./connection";
 import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
 import { start as startLocation } from "./location";
 import { ECHO_WINDOW_MS, fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
+import { syncFocus } from "./focus";
 import { clearDelivered, onTokenChange, phonePush, type PushSetup } from "./push";
 
 export type Link = "connecting" | "live" | "lost" | "unpaired";
@@ -112,6 +113,14 @@ export function useMidna(connection: PhoneConnection) {
   // Alarms: iOS brought up to midna's list and midna told what it holds, now and on each return; iOS asks to allow them the first time.
   useEffect(() => {
     const go = () => void syncAlarms(client, connection, { ask: true }).catch((err: Error) => console.warn(`alarms: ${err.message}`));
+    go();
+    const fg = AppState.addEventListener("change", (s) => s === "active" && go());
+    return () => fg.remove();
+  }, [client, connection]);
+
+  // Screen Time, in a build that has it: midna's rules applied and the numbers sent, now and on each return.
+  useEffect(() => {
+    const go = () => void syncFocus(client, connection).catch((err: Error) => console.warn(`screen time: ${err.message}`));
     go();
     const fg = AppState.addEventListener("change", (s) => s === "active" && go());
     return () => fg.remove();

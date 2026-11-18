@@ -364,3 +364,72 @@ describe("asking the phone where it is", () => {
     expect(now.where).toBe("37.50000,-122.20000");
   });
 });
+
+describe("Screen Time: midna holds the rules, the phone carries them out", () => {
+  let tools: Client;
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const r = (await tools.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+    const text = r.content[0]!.text;
+    return { text, error: !!r.isError, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
+  };
+  const report = (minutes: number, day = "2026-11-18") => ({ days: [{ day, minutes, hits: 4 }], authorized: true, shielded: true, apps: 3, categories: 0, sites: 1 });
+
+  beforeAll(async () => {
+    await phone.registerPush({ token: TOKEN, environment: "production" });
+    if (!mcp) await phone.send({ text: "hi" });
+    const m = await until("a brain run", () => mcp);
+    tools = new Client({ name: "fake-brain", version: "0" });
+    await tools.connect(new StreamableHTTPClientTransport(new URL(m.url), { requestInit: { headers: { authorization: `Bearer ${m.token}` } } }));
+  });
+  afterAll(() => tools.close().catch(() => {}));
+
+  test("before the phone has reported, screen_time says it isn't set up", async () => {
+    expect((await call("screen_time")).text).toStartWith("Screen Time isn't set up on the phone yet");
+  });
+
+  test("the phone reports with its location-only token, and a later report of a day replaces the earlier", async () => {
+    const reporter = new MidnaClient(daemon.url, (await phone.locationToken()).token);
+    await reporter.reportFocus(report(30));
+    await reporter.reportFocus(report(45));
+    const s = await host.focus();
+    expect(s.days).toEqual([{ day: "2026-11-18", minutes: 45, hits: 4, reportedAt: expect.any(Number) }]);
+    expect(s.phone).toMatchObject({ authorized: true, apps: 3 });
+    // It still opens nothing else.
+    expect(((await reporter.focus().catch((e) => e)) as MidnaError).status).toBe(403);
+  });
+
+  test("midna puts the shield up with no reason needed, and the rules ride a silent push to the phone", async () => {
+    sent.length = 0;
+    const r = (await call("screen_time_rules", { held: true, until: "+2h", windows: [{ start: "21:00", end: "23:30" }], offer: { title: "Justice", url: "https://books.apple.com/justice" } })).json;
+    expect(r.rules).toMatchObject({ held: expect.stringMatching(/^until /), windows: ["21:00–23:30"], offer: { title: "Justice" } });
+    const s = await until("the rules' push", () => sent.find((x) => x.body.midna === "focus"));
+    expect(s.headers["apns-push-type"]).toBe("background");
+    expect(s.body.aps).toEqual({ "content-available": 1 });
+    expect(s.body.rules).toMatchObject({ held: true, windows: [{ start: 1260, end: 1410 }], offer: { title: "Justice" } });
+  });
+
+  test("letting go of a hold is a lift: it needs a reason, and is kept with it", async () => {
+    const refused = (await host.setFocusRules({ held: false }).catch((e) => e)) as MidnaError;
+    expect(refused.status).toBe(409);
+    const r = (await call("screen_time_lift", { minutes: 15, reason: "Replying to Sam's DM about Friday", end_hold: true })).json;
+    expect(r.rules).toMatchObject({ held: false, latest_lift: { minutes: 15, by: "midna", reason: "Replying to Sam's DM about Friday" } });
+    expect((await call("screen_time_lift", { minutes: 15, reason: "" })).error).toBe(true);
+  });
+
+  test("the phone lifts with a reason; only the phone does", async () => {
+    const rules = await phone.liftFocus({ minutes: 5, reason: "Checking the event time" });
+    expect(rules.lift).toMatchObject({ minutes: 5, by: "phone", reason: "Checking the event time" });
+    expect(((await host.liftFocus({ minutes: 5, reason: "because" }).catch((e) => e)) as MidnaError).status).toBe(403);
+  });
+
+  test("screen_time fresh asks the phone and waits for its numbers", async () => {
+    answer = (s) => {
+      if (s.body.midna === "focus") setTimeout(() => void phone.reportFocus(report(60)), 200);
+      return { status: 200 };
+    };
+    const s = (await call("screen_time", { fresh: true })).json;
+    expect(s.note).toBeUndefined();
+    expect(s.days.at(-1)).toEqual({ day: "2026-11-18", minutes_in_held_apps: 60, shields_met: 4 });
+    expect(s.lifts.map((l: { by: string }) => l.by)).toEqual(["midna", "phone"]);
+  });
+});

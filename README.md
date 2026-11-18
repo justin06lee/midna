@@ -63,6 +63,8 @@ The app has five views (the iPhone app has Chat, Approvals, Vault and Settings):
 
 **Alarms:** ask midna to wake you, and it sets an alarm on your iPhone that rings like the Clock app's, through silent mode and a Focus (iOS 26). midna holds the list, the phone carries it out and tells midna what iOS holds, so midna knows the alarm will really ring. See [docs/alarms.md](docs/alarms.md).
 
+**Screen Time:** on your iPhone you pick the apps that eat your day; midna holds the rules for them (a shield now, or in daily windows, and what the shield offers instead), the phone carries them out, and a lift needs your stated reason. Coarse daily minutes come back to midna for the morning brief and evening review. It needs Apple's Family Controls entitlement for TestFlight, so it stays out of builds until `MIDNA_FOCUS=1`. See [docs/screen-time.md](docs/screen-time.md).
+
 Closing the window keeps midna in the tray, and notifications arrive while you're elsewhere: a banner with a sound for each reply and alert, a count on the Dock icon, and a click that opens the chat ([docs/desktop-notifications.md](docs/desktop-notifications.md)). If midna can't think (its brain is signed out or missing), a banner says so and offers the fix; if the app can't reach midna for more than a few seconds, a banner says that too, and it keeps trying.
 
 From a terminal:

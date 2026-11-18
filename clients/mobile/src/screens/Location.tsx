@@ -261,7 +261,7 @@ function PlaceEditor({ midna, place, places, draft, onBack, onDone }: { midna: M
   );
 }
 
-function Back({ label, onPress }: { label: string; onPress: () => void }) {
+export function Back({ label, onPress }: { label: string; onPress: () => void }) {
   const t = useTheme();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`Back to ${label}`} onPress={onPress} hitSlop={12} style={s.back}>
@@ -270,7 +270,7 @@ function Back({ label, onPress }: { label: string; onPress: () => void }) {
   );
 }
 
-function Row({ k, v, warn, last }: { k: string; v: string; warn?: boolean; last?: boolean }) {
+export function Row({ k, v, warn, last }: { k: string; v: string; warn?: boolean; last?: boolean }) {
   const t = useTheme();
   return (
     <View style={[s.kv, !last && { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }]}>

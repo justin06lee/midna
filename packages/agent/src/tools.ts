@@ -31,6 +31,8 @@ export interface ToolContext {
   askLocation?: () => Promise<{ sent: number; errors: string[] }>;
   /** Asks for midna's permission from programs the user runs (the daemon's PermissionDesk). */
   permissions?: PermissionsHandle;
+  /** Give the phones the Screen Time rules and ask how the day went (a silent push). Without it, rules wait for the phone to open. */
+  syncFocus?: () => Promise<{ sent: number; errors: string[] }>;
   /** Give the phones the alarms now (a silent push). Without it, the phone gets them the next time the app is opened. */
   syncAlarms?: () => Promise<{ sent: number; errors: string[] }>;
 }
@@ -344,6 +346,92 @@ export function createToolServer(ctx: ToolContext): McpServer {
     if (!x || !store.location.deletePlace(id)) throw new Error(`no place ${id}`);
     return `deleted ${x.name}`;
   });
+
+  // ── Screen Time: the apps the user holds back on their phone ─────────
+  const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const clockWindow = z.object({ start: z.string().regex(/^\d{1,2}:\d{2}$/).describe('"21:00"'), end: z.string().regex(/^\d{1,2}:\d{2}$/).describe('"23:30"; earlier than start runs past midnight') });
+  const toMinutes = (v: string) => {
+    const [h, m] = v.split(":").map(Number) as [number, number];
+    if (h > 23 || m > 59) throw new Error(`${v} isn't a time of day`);
+    return h * 60 + m;
+  };
+  const rulesOut = (r: ReturnType<typeof store.focus.rules>) => ({
+    held: r.held ? (r.heldUntil ? `until ${t(r.heldUntil)}` : "until let go") : false,
+    windows: r.windows.map((w) => `${hm(w.start)}–${hm(w.end)}`),
+    offer: r.offer,
+    ...(r.lift && r.lift.at + r.lift.minutes * 60_000 > Date.now() - 15 * 60_000 ? { latest_lift: { minutes: r.lift.minutes, reason: r.lift.reason, by: r.lift.by, at: t(r.lift.at) } } : {}),
+  });
+  /** Push the rules to the phone; what to tell the model when that didn't go. */
+  async function pushFocus(): Promise<string | undefined> {
+    if (!ctx.syncFocus) return "push isn't set up: the phone gets the rules next time the app is opened";
+    const r = await ctx.syncFocus();
+    return r.sent ? undefined : `the phone couldn't be reached (${r.errors.join("; ") || "no phone"}): it gets the rules next time the app is opened`;
+  }
+
+  tool(
+    "screen_time",
+    `The user's Screen Time on their phone, as midna's rules for the apps they hold back (Apple's picker chose them; the phone never names them, so speak of "the held apps"): per day, the minutes spent in them (known in quarter hours) and how often a shield stopped them, every lift with its reason, and the rules now. fresh=true asks the phone to report now and waits up to ${FRESH_WAIT_MS / 1000} s. Use it for the morning brief and the evening review, and to nudge them toward what the shield offers instead.`,
+    { days: z.number().int().min(1).max(30).optional().describe("Days back (default 7)"), fresh: z.boolean().optional().describe("Ask the phone for its numbers now, waiting up to 20 s") },
+    async (a) => {
+      // Never set up: nothing to ask the phone (a build without Screen Time has nothing to answer with).
+      if (!store.focus.reportedAt()) return "Screen Time isn't set up on the phone yet: no report has come.";
+      let note: string | undefined;
+      if (a.fresh) {
+        const asked = Date.now();
+        note = await pushFocus();
+        if (!note) {
+          for (const end = asked + FRESH_WAIT_MS; Date.now() < end && !ctx.signal?.aborted && store.focus.reportedAt() < asked; await Bun.sleep(250));
+          if (store.focus.reportedAt() < asked) note = `the phone didn't answer within ${FRESH_WAIT_MS / 1000} s (off or offline, Low Power Mode, or the app swiped away): these are its last numbers`;
+        }
+      }
+      const s = store.focus.state(a.days ?? 7);
+      if (!s.phone) return "Screen Time isn't set up on the phone yet: no report has come.";
+      return {
+        rules: rulesOut(s.rules),
+        phone: { allowed: s.phone.authorized, shield_up: s.phone.shielded, held: { apps: s.phone.apps, categories: s.phone.categories, sites: s.phone.sites }, reported: t(s.phone.reportedAt) },
+        days: s.days.map((d) => ({ day: d.day, minutes_in_held_apps: d.minutes, shields_met: d.hits })),
+        lifts: s.lifts.map((l) => ({ at: t(l.at), minutes: l.minutes, reason: l.reason, by: l.by })),
+        ...(note ? { note } : {}),
+      };
+    },
+  );
+
+  tool(
+    "screen_time_rules",
+    "Put the shield up over the user's held apps, now (held=true, optionally until a time) or in daily windows, and set what a shield offers instead (a book, a study block, with a link that opens it). Putting it up needs no reason: do it when they ask, or when it's what they set out to do. Removing a window or letting go of a hold lowers it: only when the user says so (use screen_time_lift for a lift). The phone gets the rules in a silent push.",
+    {
+      held: z.literal(true).optional().describe("Shield the held apps now"),
+      until: maybeWhen.describe("When the hold ends by itself (with held); null holds until let go"),
+      windows: z.array(clockWindow).max(8).optional().describe("Every daily window, replacing the ones there are"),
+      offer: z.object({ title: z.string().min(1).max(80), url: z.string().max(500).nullable().optional() }).nullable().optional().describe('What a shield offers, e.g. {title:"Justice", url:"…"}; null for none'),
+    },
+    async (a) => {
+      const until = at(a.until);
+      if (until != null && until <= Date.now()) throw new Error("until is in the past");
+      const rules = store.focus.setRules({
+        ...(a.held ? { held: true, heldUntil: until ?? null } : {}),
+        ...(a.windows ? { windows: a.windows.map((w) => ({ start: toMinutes(w.start), end: toMinutes(w.end) })) } : {}),
+        ...(a.offer !== undefined ? { offer: a.offer ? { title: a.offer.title, url: a.offer.url ?? null } : null } : {}),
+      });
+      const note = await pushFocus();
+      return { rules: rulesOut(rules), ...(note ? { note } : {}) };
+    },
+  );
+
+  tool(
+    "screen_time_lift",
+    "Lift the shield over the user's held apps for some minutes of use, or let go of a hold (end_hold). Only when the user asked for it themselves AND said why: put their reason in their own words. Without a stated reason, ask for one instead of lifting. The lift is kept with its reason for the reviews.",
+    {
+      minutes: z.number().int().min(1).max(120).describe("Minutes of use of the held apps before the shield is back (at least a quarter hour of the clock)"),
+      reason: z.string().min(3).max(500).describe("Why, as the user said it"),
+      end_hold: z.boolean().optional().describe("Also let go of the on-demand hold, so the shield stays down after the lift (windows still hold)"),
+    },
+    async (a) => {
+      const rules = store.focus.lift({ minutes: a.minutes, reason: a.reason, ...(a.end_hold ? { endHold: true } : {}) }, "midna");
+      const note = await pushFocus();
+      return { rules: rulesOut(rules), ...(note ? { note } : {}) };
+    },
+  );
 
   // ── alarms: they ring on the user's iPhone, as the Clock app's do ────
   // midna holds the list; the phone fetches it (a silent push, the app opening, now and then in the background) and gives

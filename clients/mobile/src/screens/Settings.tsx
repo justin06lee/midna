@@ -7,15 +7,20 @@ import { locationSetup, type LocationSetup } from "../location";
 import { useTheme } from "../theme";
 import { Button, Card, Problem } from "../ui";
 import type { Midna } from "../useMidna";
+import { focusStatus, minutes } from "../focus";
+import { FocusSettings } from "./Focus";
 import { LocationSettings } from "./Location";
 
-/** Which midna this phone talks to, location, and the way out: pair again, or unpair. */
-export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna: Midna; connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
+/** Which midna this phone talks to, location, Screen Time, and the way out: pair again, or unpair. `focusAsk` changes when a shield's "Ask midna" was tapped: Screen Time opens. */
+export function Settings({ midna, connection, onPairAgain, onUnpaired, focusAsk = 0 }: { midna: Midna; connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void; focusAsk?: number }) {
   const t = useTheme();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [location, setLocation] = useState<LocationSetup | null>(null);
   const [showLocation, setShowLocation] = useState(false);
+  const [showFocus, setShowFocus] = useState(focusAsk > 0);
+  useEffect(() => void (focusAsk > 0 && setShowFocus(true)), [focusAsk]);
+  const focus = showFocus ? null : focusStatus();
   useEffect(() => {
     if (showLocation) return;
     void locationSetup().then(setLocation);
@@ -70,6 +75,7 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
       },
     ]);
 
+  if (showFocus) return <FocusSettings midna={midna} connection={connection} onBack={() => setShowFocus(false)} />;
   if (showLocation) return <LocationSettings midna={midna} connection={connection} onBack={() => setShowLocation(false)} />;
 
   return (
@@ -92,6 +98,14 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
             {locationLabel(location)} <Text style={{ color: t.dimmer }}>›</Text>
           </Text>
         </Pressable>
+        {focus ? (
+          <Pressable testID="settings-focus" accessibilityRole="button" onPress={() => setShowFocus(true)} style={({ pressed }) => [s.row, s.last, { borderTopColor: t.line, borderTopWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
+            <Text style={[s.key, { color: t.dim }]}>Screen Time</Text>
+            <Text style={[s.value, { color: t.ink }]}>
+              {!focus.authorized ? "Off" : focus.shielded ? `Held · ${minutes(focus.minutesToday)} today` : `${minutes(focus.minutesToday)} today`} <Text style={{ color: t.dimmer }}>›</Text>
+            </Text>
+          </Pressable>
+        ) : null}
       </Card>
       <Card style={s.card}>
         <Pressable

@@ -8,6 +8,9 @@
 #   UPLOAD=0 scripts/testflight.sh   archive and export an .ipa only
 #   MIDNA_ALARMS=0 scripts/testflight.sh   a build without the alarms module (modules/midna-alarms),
 #                                    should its Swift ever stop a build: the app runs without it
+#   MIDNA_FOCUS=1 scripts/testflight.sh    a build with Screen Time (docs/screen-time.md): only once Apple has
+#                                    granted the team Family Controls (Distribution); without it the module
+#                                    (modules/midna-focus) stays out of the build
 #
 # Each upload needs a build number App Store Connect hasn't seen: raise
 # expo.ios.buildNumber in app.json first.
@@ -66,7 +69,8 @@ missing() {
     granted=$(printf '%s' "$plist" | plutil -extract Entitlements json -o - - 2>/dev/null)
   done
   [ -n "$granted" ] || { echo "no installed profile"; return; }
-  GRANTED="$granted" bun -e 'const g = JSON.parse(process.env.GRANTED); console.log(Object.keys(require("./app.json").expo.ios.entitlements ?? {}).filter((k) => !(k in g)).join(" "))'
+  # With Screen Time, app.config.js asks for two more than app.json does.
+  GRANTED="$granted" bun -e 'const g = JSON.parse(process.env.GRANTED); const focus = process.env.MIDNA_FOCUS === "1" ? ["com.apple.developer.family-controls", "com.apple.security.application-groups"] : []; console.log([...Object.keys(require("./app.json").expo.ios.entitlements ?? {}), ...focus].filter((k) => !(k in g)).join(" "))'
 }
 lacks=$(missing)
 if [ -n "$lacks" ]; then
@@ -76,13 +80,20 @@ if [ -n "$lacks" ]; then
   [ -z "$lacks" ] || { echo "the profile \"$PROFILE\" still lacks $lacks: see docs/push.md" >&2; exit 1; }
 fi
 
-# Without the alarms: its module is hidden from autolinking for this build, and put back whatever happens.
-if [ "${MIDNA_ALARMS:-1}" = 0 ]; then
-  alarms=modules/midna-alarms/expo-module.config.json
-  mv "$alarms" "$alarms.off"
-  trap 'mv "$alarms.off" "$alarms"' EXIT
-  echo "building without the alarms module"
-fi
+# A module left out of this build is hidden from autolinking, and put back whatever happens: the alarms when
+# asked (MIDNA_ALARMS=0), Screen Time unless asked for (MIDNA_FOCUS=1; app.config.js adds its entitlement and extensions).
+hidden=""
+hide() {
+  mv "modules/$1/expo-module.config.json" "modules/$1/expo-module.config.json.off"
+  hidden="$hidden $1"
+  echo "building without modules/$1"
+}
+unhide() {
+  for m in $hidden; do mv "modules/$m/expo-module.config.json.off" "modules/$m/expo-module.config.json"; done
+}
+trap unhide EXIT
+[ "${MIDNA_ALARMS:-1}" = 0 ] && hide midna-alarms
+[ "${MIDNA_FOCUS:-0}" = 1 ] || hide midna-focus
 
 CI=1 bunx expo prebuild -p ios --clean
 mkdir -p "$out"
@@ -97,6 +108,15 @@ run "$out/archive.log" xcodebuild -workspace ios/midna.xcworkspace -scheme midna
 
 dest=export
 [ "$UPLOAD" = 1 ] && dest=upload
+# Screen Time's three extensions each sign with an App Store profile of their own, made by hand once Apple
+# has granted Family Controls (docs/screen-time.md).
+extensions=""
+if [ "${MIDNA_FOCUS:-0}" = 1 ]; then
+  for e in focus-monitor focus-shield focus-shield-action; do
+    extensions="$extensions
+    <key>sh.midna.mobile.$e</key><string>midna $e App Store</string>"
+  done
+fi
 cat > "$out/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -108,7 +128,9 @@ cat > "$out/ExportOptions.plist" <<PLIST
   <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
   <key>provisioningProfiles</key>
-  <dict><key>sh.midna.mobile</key><string>$PROFILE</string></dict>
+  <dict>
+    <key>sh.midna.mobile</key><string>$PROFILE</string>$extensions
+  </dict>
   <key>manageAppVersionAndBuildNumber</key><false/>
   <key>uploadSymbols</key><true/>
   <key>testFlightInternalTestingOnly</key><true/>

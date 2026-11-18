@@ -6,6 +6,7 @@ export { Hands, SUMMARY_MAX, type HandsRecord, type HandsSnapshot } from "./hand
 export { Inbound, type InboundEvent } from "./inbound.ts";
 export { Location } from "./location.ts";
 export { Alarms, nextRing } from "./alarms.ts";
+export { Focus } from "./focus.ts";
 export { Permissions, asAnswer, type PermissionRecord } from "./permissions.ts";
 export { Jobs, LOG_TAIL_BYTES, logTail, type Job, type JobStatus } from "./jobs.ts";
 export { Log, MAIN, replyRef, spendKind, type Conversation, type Message, type TurnTokens } from "./log.ts";
