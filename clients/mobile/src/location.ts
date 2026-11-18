@@ -56,7 +56,8 @@ const readJson = <T>(key: string, fallback: T): T => {
 };
 const writeJson = (key: string, v: unknown) => Storage.setItemSync(key, JSON.stringify(v));
 
-async function reporter(): Promise<Reporter | null> {
+/** The location-only token, where a background task can read it; null before the app made one, or once location was turned off until the app is next opened. */
+export async function reporter(): Promise<Reporter | null> {
   const s = await SecureStore.getItemAsync(REPORTER, reporterOpts).catch(() => null);
   if (!s) return null;
   try {
@@ -75,7 +76,12 @@ TaskManager.defineTask<{ locations: TaskLocation[]; flush?: boolean }>(TRACKING_
   remember(fixes);
   // The updates paused (the phone sits still): what waits goes now, before iOS lets the app sleep.
   if (data.flush ? readJson<LocationFix[]>(QUEUE, []).length : fixes.length && sendNow(fixes, Math.max(lastSent() ?? 0, lastTry) || null, Date.now())) await send();
+  await Promise.all(wakers.map((fn) => fn().catch(() => {})));
 });
+
+/** What else runs when a move wakes the app in the background (the alarms look for midna's list): each paces itself. */
+const wakers: Array<() => Promise<void>> = [];
+export const onBackgroundWake = (fn: () => Promise<void>) => void wakers.push(fn);
 
 TaskManager.defineTask<{ eventType: Location.LocationGeofencingEventType; region: Location.LocationRegion }>(PLACES_TASK, async ({ data, error }) => {
   if (error || !data?.region) return;
@@ -170,12 +176,19 @@ export async function locationSetup(): Promise<LocationSetup> {
 /** When midna last took a report from this phone; null before the first. */
 export const lastSent = (): number | null => Number(Storage.getItemSync(LAST_SENT)) || null;
 
-/** The location-only token for this pairing: kept, or minted now. */
-async function ensureReporter(client: MidnaClient, connection: PhoneConnection): Promise<void> {
-  const r = await reporter();
-  if (r && r.phone === connection.device && r.url === connection.url) return;
-  const made = await client.locationToken();
-  await SecureStore.setItemAsync(REPORTER, JSON.stringify({ url: connection.url, token: made.token, phone: connection.device } satisfies Reporter), reporterOpts);
+let ensuring: Promise<void> | null = null;
+/**
+ * The location-only token for this pairing: kept, or minted now. One at a
+ * time: location and the alarms both ask on launch, and a second token
+ * retires the first.
+ */
+export function ensureReporter(client: MidnaClient, connection: PhoneConnection): Promise<void> {
+  return (ensuring ??= (async () => {
+    const r = await reporter();
+    if (r && r.phone === connection.device && r.url === connection.url) return;
+    const made = await client.locationToken();
+    await SecureStore.setItemAsync(REPORTER, JSON.stringify({ url: connection.url, token: made.token, phone: connection.device } satisfies Reporter), reporterOpts);
+  })().finally(() => (ensuring = null)));
 }
 
 /**

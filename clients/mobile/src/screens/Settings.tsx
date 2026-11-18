@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import type { AlarmAuthorization } from "@midna/protocol";
+import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { alarmAuthorization, heldOf, syncAlarms, upcoming, type AlarmsOnPhone } from "../alarms";
 import type { PhoneConnection } from "../connection";
 import { locationSetup, type LocationSetup } from "../location";
 import { useTheme } from "../theme";
@@ -20,6 +22,24 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
     const sub = AppState.addEventListener("change", (a) => a === "active" && void locationSetup().then(setLocation));
     return () => sub.remove();
   }, [showLocation]);
+  // Alarms: what iOS holds of midna's list, looked at again whenever Settings shows or the app comes back.
+  const [alarms, setAlarms] = useState<AlarmsOnPhone | null>(null);
+  const [allowed, setAllowed] = useState(alarmAuthorization);
+  const lookAtAlarms = useCallback(
+    (ask = false) =>
+      void syncAlarms(midna.client, connection, { ask })
+        .then(setAlarms)
+        .catch(() => {})
+        .finally(() => setAllowed(alarmAuthorization())),
+    [midna.client, connection],
+  );
+  useEffect(() => {
+    lookAtAlarms();
+    const sub = AppState.addEventListener("change", (a) => a === "active" && lookAtAlarms());
+    return () => sub.remove();
+  }, [lookAtAlarms]);
+  const wanted = alarms ? upcoming(alarms.alarms) : [];
+  const ringing = alarms ? upcoming(heldOf(alarms)) : [];
   const rows: Array<[string, string]> = [
     ["midna", midna.status?.name ?? connection.name],
     ["Address", connection.url],
@@ -73,6 +93,18 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired }: { midna
           </Text>
         </Pressable>
       </Card>
+      <Card style={s.card}>
+        <Pressable
+          testID="settings-alarms"
+          accessibilityRole="button"
+          onPress={() => (allowed === "denied" ? void Linking.openSettings() : lookAtAlarms(true))}
+          style={({ pressed }) => [s.row, s.last, pressed && { opacity: 0.6 }]}
+        >
+          <Text style={[s.key, { color: t.dim }]}>Alarms</Text>
+          <Text style={[s.value, { color: allowed === "authorized" && ringing.length === wanted.length ? t.ink : t.warn }]}>{alarmsLabel(allowed, wanted.length, ringing.length)}</Text>
+        </Pressable>
+      </Card>
+      <Text style={[s.note, { color: t.dim }]}>{alarmsNote(allowed)}</Text>
       <Problem text={problem} />
       <Button label="Pair again" onPress={onPairAgain} disabled={busy} />
       <Button label="Unpair this phone" kind="danger" busy={busy} onPress={unpair} />
@@ -97,6 +129,21 @@ function locationLabel(l: LocationSetup | null): string {
   if (l === "denied") return "Off in iPhone Settings";
   if (l === "off") return "Off";
   return "—";
+}
+
+/** Whether midna's alarms will ring on this phone: how many iOS holds, of how many midna set. */
+function alarmsLabel(allowed: AlarmAuthorization, wanted: number, held: number): string {
+  if (allowed === "unsupported") return "Needs iOS 26";
+  if (allowed === "denied") return "Off in iPhone Settings";
+  if (allowed === "notDetermined") return "Tap to allow";
+  if (wanted === 0) return "None set";
+  return held === wanted ? `${held} set` : `${held} of ${wanted} set`;
+}
+
+function alarmsNote(allowed: AlarmAuthorization): string {
+  if (allowed === "unsupported") return "midna's alarms need iOS 26.";
+  if (allowed === "authorized") return "Alarms midna sets ring here like the Clock app's, through silent mode and a Focus. Ask midna to set, change or cancel one.";
+  return "Allow alarms and midna can wake you: its alarms ring like the Clock app's, through silent mode and a Focus.";
 }
 
 /** Where reminders and questions reach the user while the app is closed. */

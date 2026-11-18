@@ -21,6 +21,8 @@ import { alarmsPayload, type ApnsResponse } from "../src/push.ts";
 const TZ = "Asia/Seoul";
 const KEY_ID = "TESTKEY123";
 const MIN = 60_000;
+/** Two days on, to the minute: the same words name the same instant each time. */
+const WAKE_AT = new Date(Math.floor(Date.now() / MIN) * MIN + 2 * 24 * 60 * MIN).toISOString();
 const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
 
 interface Sent {
@@ -115,13 +117,27 @@ describe("midna sets alarms", () => {
   test("when the phone can't be reached, the alarm is kept and midna is told it isn't on the phone", async () => {
     answer = () => ({ status: 500, reason: "InternalServerError" });
     const started = Date.now();
-    const set = await tool("alarm_set", { label: "Wake up: caveira call at 5", at: "+2d" });
+    const set = await tool("alarm_set", { label: "Wake up: caveira call at 5", at: WAKE_AT });
     expect(set.error).toBe(false);
     expect(Date.now() - started).toBeLessThan(3_000);
     expect(set.json).toMatchObject({ label: "Wake up: caveira call at 5", on_phone: false });
     expect(set.json.why).toContain("no phone has reported");
     expect(set.json.note).toContain("couldn't be reached (500 InternalServerError)");
     expect(set.json.rings).toBe(fmt((await phone.alarms()).alarms[0]!.at, TZ));
+  });
+
+  test("a phone that has never reported alarms (a build before them) isn't waited for", async () => {
+    const started = Date.now();
+    const set = (await tool("alarm_set", { label: "Wake up: caveira call at 5", at: WAKE_AT })).json;
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(sent.some((x) => x.body.midna === "alarms")).toBe(true);
+    expect(set).toMatchObject({ on_phone: false });
+    expect(set.note).toBeUndefined();
+    expect(set.why).toContain("no phone has reported");
+    // The same time again is the same alarm.
+    expect((await phone.alarms()).alarms.length).toBe(1);
+    // The new build is installed and opened: alarms allowed, none held yet.
+    await phone.reportAlarms({ authorization: "authorized", scheduled: [] });
   });
 
   test("the list rides to the phone in a silent push, and the alarm counts once the phone says iOS holds it", async () => {
@@ -132,6 +148,8 @@ describe("midna sets alarms", () => {
     const s = sent.find((x) => x.body.midna === "alarms")!;
     expect(s.headers).toMatchObject({ "apns-push-type": "background", "apns-priority": "5", "apns-topic": "sh.midna.mobile", "apns-collapse-id": "midna-alarms" });
     expect(s.body.aps).toEqual({ "content-available": 1 });
+    expect(Math.abs(s.body.asOf - Date.now())).toBeLessThan(30_000);
+    expect(Math.abs((await locked.alarms()).asOf - Date.now())).toBeLessThan(5_000);
     expect(s.body.alarms.map((a: Alarm) => a.label)).toEqual(["Wake up: caveira call at 5", "Fajr"]);
     expect(s.body.alarms[1]).toMatchObject({ id: set.id, time: null, days: [] });
     // The first one went along, so it is on the phone now too.
@@ -241,7 +259,7 @@ describe("times", () => {
 
   test("a list too long for one push is left for the phone to fetch", () => {
     const one: Alarm = { id: "0b0f6f0e-6d0a-4c50-9a51-0f8a0c1d2e3f", label: "가".repeat(60), at: null, time: "04:30", days: [1, 2, 3, 4, 5, 6, 7], updatedAt: 1_763_000_000_000 };
-    expect(alarmsPayload([one])).toMatchObject({ midna: "alarms", alarms: [one] });
+    expect(alarmsPayload([one], 5)).toEqual({ aps: { "content-available": 1 }, midna: "alarms", alarms: [one], asOf: 5 });
     const many = alarmsPayload(Array.from({ length: 20 }, () => one));
     expect(many).toEqual({ aps: { "content-available": 1 }, midna: "alarms" });
   });

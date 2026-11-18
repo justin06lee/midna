@@ -584,7 +584,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   const sendAlarms = () => void deps.push?.syncAlarms(store.alarms.list()).catch((err: Error) => console.error(`[midna] push: alarms: ${err.message}`));
   const alarmViewer = (c: Context<Env>) => (c.get("device").kind === LOCATION_KIND ? null : locationViewer(c));
 
-  app.get("/v1/alarms", (c) => alarmViewer(c) ?? c.json({ alarms: store.alarms.list(), phones: store.alarms.phones() } satisfies AlarmsState));
+  app.get("/v1/alarms", (c) => alarmViewer(c) ?? c.json({ alarms: store.alarms.list(), asOf: Date.now(), phones: store.alarms.phones() } satisfies AlarmsState));
 
   app.post("/v1/alarms", async (c) => {
     const refused = locationViewer(c);

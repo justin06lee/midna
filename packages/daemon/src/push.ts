@@ -121,9 +121,10 @@ const ALARMS_PAYLOAD_MAX = 3_500;
  * looks for `midna: "alarms"`). The list rides in the push, so the phone
  * sets them without fetching; a list too long for a push is fetched.
  */
-export function alarmsPayload(alarms: Alarm[]): Record<string, unknown> {
+export function alarmsPayload(alarms: Alarm[], asOf = Date.now()): Record<string, unknown> {
   const bare = { aps: { "content-available": 1 }, midna: "alarms" };
-  const full = { ...bare, alarms };
+  // `asOf` lets the phone tell a push that arrives late from the list as it stands.
+  const full = { ...bare, alarms, asOf };
   return Buffer.byteLength(JSON.stringify(full)) <= ALARMS_PAYLOAD_MAX ? full : bare;
 }
 

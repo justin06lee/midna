@@ -26,7 +26,8 @@
             }
           }
         },
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAlarmKitUsageDescription": "midna sets the alarms you ask it for. They ring like the Clock app's, even in silent mode or a Focus."
       },
       "entitlements": {
         "com.apple.developer.usernotifications.time-sensitive": true

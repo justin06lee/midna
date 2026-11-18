@@ -19,13 +19,13 @@ Precise logging (Justin's call, 2026-11-16, replacing "significant changes only"
 
 ## The token used while the phone is locked
 
-The pairing's token is readable only while the phone is unlocked (docs/mobile.md), and most fixes arrive while it's locked. So once location is turned on, the phone asks for a second token, `POST /v1/location/token`, that can only call `POST /v1/location`. Every other route answers it 403. The phone keeps it in the Keychain readable after first unlock (`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`), never synced off the phone.
+The pairing's token is readable only while the phone is unlocked (docs/mobile.md), and most fixes arrive while it's locked. So the phone asks for a second token, `POST /v1/location/token`, that can only report where the phone is (`POST /v1/location`) and read and report its alarms (`GET /v1/alarms`, `POST /v1/alarms/report`, docs/alarms.md). Every other route answers it 403. The phone keeps it in the Keychain readable after first unlock (`AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`), never synced off the phone.
 
 - On the host it's a device of kind `location`, named "<phone> · location", whose `parent_id` is the phone's pairing.
 - Its fixes are kept under the phone's own pairing.
 - Minting a new one retires the last.
 - Unpairing the phone, or pairing again with `replaces`, retires it with the pairing.
-- Turning location off in the app deletes it from the phone.
+- Turning location off in the app deletes it from the phone; the alarms make another the next time the app is opened.
 
 ## What midna keeps
 

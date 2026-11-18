@@ -76,6 +76,8 @@ export interface AlarmPhone extends AlarmReport {
 /** GET /v1/alarms: the alarms the phone should hold, and what each phone said it holds. */
 export interface AlarmsState {
   alarms: Alarm[];
+  /** When midna read the list out, ms on its own clock: the phone never puts an older list over a newer one. */
+  asOf: number;
   phones: AlarmPhone[];
 }
 

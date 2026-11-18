@@ -403,8 +403,8 @@ export function createToolServer(ctx: ToolContext): McpServer {
         ...(a.at !== undefined ? { at: at(a.at)! } : { time: time!, ...(a.days ? { days: a.days.map((d) => DAY_NAMES.indexOf(d) + 1) } : {}) }),
       });
       const note = await pushAlarms();
-      // The phone answers the push with what iOS holds now.
-      if (!note) for (const end = Date.now() + FRESH_WAIT_MS; Date.now() < end && !ctx.signal?.aborted && !onPhone(set, store.alarms.phones()); await Bun.sleep(250));
+      // The phone answers the push with what iOS holds now; one that has never said a word of alarms (a build before them) won't.
+      if (!note && store.alarms.phones().length) for (const end = Date.now() + FRESH_WAIT_MS; Date.now() < end && !ctx.signal?.aborted && !onPhone(set, store.alarms.phones()); await Bun.sleep(250));
       return { ...alarmOut(set), ...(note ? { note } : {}) };
     },
   );

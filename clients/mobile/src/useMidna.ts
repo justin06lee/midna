@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import { Directory, File, Paths } from "expo-file-system";
 import * as Network from "expo-network";
 import { MidnaError, type Approval, type ApprovalAnswer, type Attachment, type Status, type StreamEvent, type UploadInfo } from "@midna/protocol";
+import { syncAlarms } from "./alarms";
 import { clientFor, type PhoneConnection } from "./connection";
 import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
 import { start as startLocation } from "./location";
@@ -103,6 +104,14 @@ export function useMidna(connection: PhoneConnection) {
   // Location, once turned on: running for this pairing, with what waits sent and the watched places current — now and on each return.
   useEffect(() => {
     const go = () => void startLocation(client, connection).catch((err: Error) => console.warn(`location: ${err.message}`));
+    go();
+    const fg = AppState.addEventListener("change", (s) => s === "active" && go());
+    return () => fg.remove();
+  }, [client, connection]);
+
+  // Alarms: iOS brought up to midna's list and midna told what it holds, now and on each return; iOS asks to allow them the first time.
+  useEffect(() => {
+    const go = () => void syncAlarms(client, connection, { ask: true }).catch((err: Error) => console.warn(`alarms: ${err.message}`));
     go();
     const fg = AppState.addEventListener("change", (s) => s === "active" && go());
     return () => fg.remove();

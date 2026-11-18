@@ -6,6 +6,8 @@
 #
 #   scripts/testflight.sh            archive and upload build <ios.buildNumber in app.json>
 #   UPLOAD=0 scripts/testflight.sh   archive and export an .ipa only
+#   MIDNA_ALARMS=0 scripts/testflight.sh   a build without the alarms module (modules/midna-alarms),
+#                                    should its Swift ever stop a build: the app runs without it
 #
 # Each upload needs a build number App Store Connect hasn't seen: raise
 # expo.ios.buildNumber in app.json first.
@@ -72,6 +74,14 @@ if [ -n "$lacks" ]; then
   ASC_KEY_ID=$ASC_KEY_ID ASC_ISSUER_ID=$ASC_ISSUER_ID ASC_KEY_PATH=$ASC_KEY_PATH PROFILE=$PROFILE bun scripts/profile.ts
   lacks=$(missing)
   [ -z "$lacks" ] || { echo "the profile \"$PROFILE\" still lacks $lacks: see docs/push.md" >&2; exit 1; }
+fi
+
+# Without the alarms: its module is hidden from autolinking for this build, and put back whatever happens.
+if [ "${MIDNA_ALARMS:-1}" = 0 ]; then
+  alarms=modules/midna-alarms/expo-module.config.json
+  mv "$alarms" "$alarms.off"
+  trap 'mv "$alarms.off" "$alarms"' EXIT
+  echo "building without the alarms module"
 fi
 
 CI=1 bunx expo prebuild -p ios --clean
