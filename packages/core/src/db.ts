@@ -508,6 +508,27 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX location_points_at ON location_points(at);
   CREATE INDEX location_points_received ON location_points(received_at);
   `,
+  // Asks for midna's permission from programs the user runs (ghostly's broker),
+  // and what became of each. An approval "for N minutes" is approved_until.
+  `
+  CREATE TABLE permissions (
+    id TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    kind TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    reason TEXT,
+    data TEXT,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied','expired')),
+    decided_by TEXT CHECK (decided_by IN ('midna','user','grant')),
+    decision_reason TEXT,
+    approved_until INTEGER,
+    requested_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    decided_at INTEGER
+  );
+  CREATE INDEX permissions_grant ON permissions(device_id, scope, approved_until);
+  `,
 ];
 
 export function openDatabase(path: string): Database {

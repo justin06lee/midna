@@ -6,6 +6,7 @@ import { Store } from "@midna/core";
 import { Assistant, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, OPS, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult, type Op } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
+import { PermissionDesk } from "./permissions.ts";
 import { PushSender, loadApns, type ApnsTransport } from "./push.ts";
 import { ensureHome, isWildcard, listenAddresses, loadConfig, midnaHome, saveConfig, writePrivate } from "./config.ts";
 import { HandsHub } from "./hands.ts";
@@ -135,6 +136,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
 
   // A job that ends queues its wakeup; the scheduler runs it now rather than at its next tick.
   let tickSoon = () => {};
+  // Programs the user runs ask midna's permission here; each ask is heard at once.
+  const permissions = new PermissionDesk({ store, approvals: hands.approvals, tickSoon: () => tickSoon() });
   const jobs = new JobRunner({
     store,
     root: join(home, "jobs"),
@@ -164,6 +167,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   const vault = "missing" in found ? null : new Vault(found);
   const app = createApp({
     push,
+    permissions,
     store,
     assistant,
     hands,
@@ -294,6 +298,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
       bridges.stopAll();
       unpush();
       push.close();
+      permissions.close();
       hands.shutdown();
       await vault?.lock();
       await assistant.shutdown();

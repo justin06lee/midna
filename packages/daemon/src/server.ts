@@ -29,6 +29,10 @@ import {
   type Delivery,
   type HandsStreamEvent,
   type Health,
+  MAX_PERMISSION_DATA_BYTES,
+  PERMISSION_TIMEOUT_MAX_MS,
+  PermissionAsk,
+  SERVICE_KIND,
   type LocationReceipt,
   type LocationToken,
   type MessageReceipt,
@@ -38,6 +42,7 @@ import {
 } from "@midna/protocol";
 import { answerIn } from "./approvals.ts";
 import type { HandsHub } from "./hands.ts";
+import { answer as permissionAnswer, type PermissionDesk } from "./permissions.ts";
 import type { PushSender } from "./push.ts";
 import { Vault, VaultError } from "./vault.ts";
 import { VERSION } from "./version.ts";
@@ -61,6 +66,8 @@ export interface ServerDeps {
   workspace: string;
   /** Push notifications to the iPhone app. */
   push?: PushSender;
+  /** Where programs the user runs ask midna's permission. */
+  permissions?: PermissionDesk;
   /** The vault (ghostly's Vaultwarden on this host), or why there is none. */
   vault?: Vault | string;
   /** midna's HTTPS address on the tailnet (`tailscale serve`), which /healthz advertises. */
@@ -68,6 +75,13 @@ export interface ServerDeps {
 }
 
 type Env = { Variables: { device: Device } };
+
+/** All a service's token opens. */
+const SERVICE_ROUTES: Array<[string, RegExp]> = [
+  ["POST", /^\/v1\/inbound$/],
+  ["POST", /^\/v1\/permissions$/],
+  ["GET", /^\/v1\/permissions\/[^/]+$/],
+];
 
 /** The kind of a phone's location-only token (POST /v1/location/token). */
 export const LOCATION_KIND = "location";
@@ -138,7 +152,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     const episodeId = Number(c.req.param("episode"));
     if (!store.log.episodeExists(episodeId)) return c.json({ error: "unknown episode" }, 404);
     const episode = store.db.query("SELECT kind, conversation_id FROM episodes WHERE id = $id").get({ id: episodeId }) as { kind: "chat" | "wakeup"; conversation_id: string | null };
-    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation() } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
+    return handleMcp(c.req.raw, { store, episodeId, episodeKind: episode.kind, conversationId: episode.conversation_id ?? MAIN, hands: deps.hands, ...(deps.jobs ? { jobs: deps.jobs } : {}), ...(deps.push ? { askLocation: () => deps.push!.requestLocation() } : {}), ...(deps.permissions ? { permissions: deps.permissions } : {}), signal: c.req.raw.signal, workspace: deps.workspace });
   });
 
   // ── everything else needs a paired device ────────────────────────────
@@ -147,6 +161,10 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     if (!device) return c.json({ error: "unauthorized — pair this device first" }, 401);
     // A phone's location-only token reports where the phone is, and opens nothing else.
     if (device.kind === LOCATION_KIND && !(c.req.method === "POST" && c.req.path === "/v1/location")) return c.json({ error: "this token only reports the phone's location" }, 403);
+    // A service sends midna events and asks its permission. It can't speak as the user, answer an approval or change anything.
+    if (device.kind === SERVICE_KIND && !SERVICE_ROUTES.some(([method, path]) => c.req.method === method && path.test(c.req.path))) {
+      return c.json({ error: "a service's token sends events (POST /v1/inbound) and asks permission (/v1/permissions), nothing else" }, 403);
+    }
     c.set("device", device);
     await next();
   });
@@ -276,6 +294,29 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       return c.json({ error: `an event's data can be at most ${MAX_EVENT_DATA_BYTES / 1024} KB of JSON` }, 413);
     }
     return c.json(assistant.hear(e.data), 202);
+  });
+
+  // ── permission: a program the user runs asks, midna (or the user) decides, the asker waits ──
+  const waitFor = (c: Context<Env>) => Math.min(PERMISSION_TIMEOUT_MAX_MS, Math.max(0, Number(c.req.query("wait") ?? 0) || 0));
+
+  app.post("/v1/permissions", async (c) => {
+    if (!deps.permissions) return c.json({ error: "this midna takes no asks" }, 404);
+    const ask = PermissionAsk.safeParse(await c.req.json().catch(() => null));
+    if (!ask.success) return c.json({ error: ask.error.issues[0]?.message ?? "an ask needs kind, summary and scope" }, 400);
+    if (ask.data.data !== undefined && new TextEncoder().encode(JSON.stringify(ask.data.data)).byteLength > MAX_PERMISSION_DATA_BYTES) {
+      return c.json({ error: `an ask's data can be at most ${MAX_PERMISSION_DATA_BYTES / 1024} KB of JSON` }, 413);
+    }
+    const kept = deps.permissions.ask(c.get("device"), ask.data);
+    const settled = (await deps.permissions.wait(kept.id, waitFor(c))) ?? kept;
+    return c.json(permissionAnswer(settled), settled.status === "pending" ? 202 : 200);
+  });
+
+  app.get("/v1/permissions/:id", async (c) => {
+    const d = c.get("device");
+    const p = deps.permissions?.get(c.req.param("id"));
+    // An ask is its asker's, and the user's own devices'; to anyone else it doesn't exist.
+    if (!p || (p.deviceId !== d.id && !["desktop", "mobile", "cli", "host"].includes(d.kind))) return c.json({ error: "no such ask" }, 404);
+    return c.json(permissionAnswer((await deps.permissions!.wait(p.id, waitFor(c))) ?? p));
   });
 
   // ── deliveries: what Hermes said on its own, into the conversation and the outbox ──

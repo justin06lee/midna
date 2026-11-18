@@ -9,6 +9,8 @@ import { z } from "zod";
 
 export * from "./hands.ts";
 export * from "./location.ts";
+export * from "./permissions.ts";
+import type { AskedPermission, PermissionAsk } from "./permissions.ts";
 import type { LocationReceipt, LocationReport, LocationState, LocationToken, Place, PlacePatch, PlaceSave } from "./location.ts";
 import type { AnswerApproval, Approval, DeviceCommandRecord, HandsDevice, HandsHello, HandsResult, HandsStateUpdate, HandsWelcome } from "./hands.ts";
 
@@ -306,7 +308,8 @@ export type EventKept =
 export const PairRequest = z.object({
   code: z.string().min(1),
   deviceName: z.string().min(1),
-  kind: z.enum(["desktop", "cli", "bridge", "mobile"]),
+  /** "service" (after 0.13.3): a program that sends midna events and asks its permission, and can do nothing else. */
+  kind: z.enum(["desktop", "cli", "bridge", "mobile", "service"]),
   /**
    * The token this client held before, when it pairs again (a re-install, a
    * rollout re-pairing the CLI): its device is retired once the new one is
@@ -706,6 +709,18 @@ export class MidnaClient {
   /** The latest fix, the saved place it's in, and every saved place. */
   location(signal?: AbortSignal): Promise<LocationState> {
     return this.call("GET", "/v1/location", undefined, signal);
+  }
+  /**
+   * Ask midna's permission for something. With `waitMs` the answer waits for
+   * the decision that long (the daemon holds it at most 5 minutes); else it
+   * comes back "pending" at once, to be read with `permission`.
+   */
+  askPermission(ask: PermissionAsk, waitMs = 0, signal?: AbortSignal): Promise<AskedPermission> {
+    return this.call("POST", `/v1/permissions?wait=${waitMs}`, ask, signal, undefined, waitMs + 10_000);
+  }
+  /** An ask this device made, and what became of it; with `waitMs`, once it's decided or that long has passed. */
+  permission(id: string, waitMs = 0, signal?: AbortSignal): Promise<AskedPermission> {
+    return this.call("GET", `/v1/permissions/${encodeURIComponent(id)}?wait=${waitMs}`, undefined, signal, undefined, waitMs + 10_000);
   }
   /** A token that can only report this phone's location, for the phone to use while it is locked. A new one retires the last. */
   locationToken(): Promise<LocationToken> {
