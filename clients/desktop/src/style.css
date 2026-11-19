@@ -31,7 +31,7 @@
   --primary-ink: #ffffff;
   --focus: rgba(0, 122, 255, 0.32);
   --selection: rgba(0, 122, 255, 0.22);
-  --material: rgba(248, 248, 250, 0.8);
+  --material: #f6f6f8;
   --panel-shadow: none;
   --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.18), 0 24px 60px -20px rgba(0, 0, 0, 0.2);
   color-scheme: light;
@@ -60,7 +60,7 @@
     --bad: #ff453a;
     --focus: rgba(10, 132, 255, 0.42);
     --selection: rgba(10, 132, 255, 0.32);
-    --material: rgba(44, 44, 46, 0.78);
+    --material: #2a2a2c;
     --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
@@ -88,7 +88,7 @@
   --bad: #ff453a;
   --focus: rgba(10, 132, 255, 0.42);
   --selection: rgba(10, 132, 255, 0.32);
-  --material: rgba(44, 44, 46, 0.78);
+  --material: #2a2a2c;
   --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
@@ -169,11 +169,10 @@ html.pill, html.pill body {
   background: var(--fill);
 }
 
-/* What menus, panels over the screen and the viewer's bars sit on. */
+/* What menus and notices sit on: a solid surface with the shadow of something lifted. It was translucent over a
+   blur, but WebKit doesn't always draw the blur, and then what is underneath reads through the words. */
 .material {
   background: var(--material);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  backdrop-filter: blur(28px) saturate(180%);
   box-shadow: var(--pop-shadow);
 }
 
