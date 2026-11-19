@@ -290,8 +290,8 @@ function LineBody({
           <Text onPress={() => void midna.retry(l)} style={[s.meta, { color: t.danger }]}>
             Not Delivered · Tap to retry
           </Text>
-        ) : l.state === "sending" || (l.client && l.client !== "mobile") ? (
-          <Text style={[s.meta, { color: t.dim }]}>{l.state === "sending" ? "Sending…" : `Sent from ${l.client}`}</Text>
+        ) : l.state === "sending" ? (
+          <Text style={[s.meta, { color: t.dim }]}>Sending…</Text>
         ) : null}
       </View>
     );

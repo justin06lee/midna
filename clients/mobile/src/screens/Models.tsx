@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { accountChoices, modelGroups, parseModel, thinkingWith, type Account, type BrainInfo, type BrainModel, type ModelChoice } from "@midna/protocol";
+import { accountChoices, modelGroups, providersInUse, thinkingWith, type Account, type BrainInfo, type BrainModel, type ModelChoice } from "@midna/protocol";
 import { useTheme } from "../theme";
 import { Group, GroupNote, GroupTitle, Problem, Row } from "../ui";
 import type { Midna } from "../useMidna";
@@ -8,36 +8,43 @@ import type { Midna } from "../useMidna";
 export interface Models {
   brains: BrainInfo[];
   catalogues: Record<string, BrainModel[]>;
+  /** The brains that gave no list of their models. */
+  unlisted: Record<string, boolean>;
 }
 
 /**
  * What the host can think with: its installed brains, and each one's own list
- * of models once asked for (`wanted`; a host before 0.13.7 has none to give,
- * and the sheet falls back to the short list it can work out itself). The
- * brain that is set is asked at once, so its model is called by its real name.
+ * of models. The brains the host is set to (the model, a stand-in, the
+ * fallbacks) are asked at once, so what is thinking is called by the name
+ * its brain gives it; the rest once `wanted`. A host before 0.13.7 has no
+ * way to ask, and then only what the host itself names is offered.
  */
 export function useModels(midna: Midna, wanted: boolean): Models {
   const { client, status, link } = midna;
   const [brains, setBrains] = useState<BrainInfo[]>([]);
   const [catalogues, setCatalogues] = useState<Record<string, BrainModel[]>>({});
+  const [unlisted, setUnlisted] = useState<Record<string, boolean>>({});
   const live = link === "live";
   useEffect(() => {
     if (live) void client.brains().then(setBrains, () => {});
   }, [client, live]);
   const account = status?.account;
-  const set = status ? parseModel(status.model, brains.map((b) => b.id)).provider : null;
+  const inUse = status ? providersInUse(status, brains).join(",") : "";
   useEffect(() => {
     const abort = new AbortController();
     for (const b of brains) {
-      if (!b.installed || b.id === "hermes" || !(wanted || b.id === set)) continue;
+      if (!b.installed || b.id === "hermes" || !(wanted || inUse.split(",").includes(b.id))) continue;
       void client.brainModels(b.id, b.id === "claude" ? account : undefined, abort.signal).then(
-        (m) => setCatalogues((c) => ({ ...c, [b.id]: m })),
-        () => {},
+        (m) => {
+          setCatalogues((c) => ({ ...c, [b.id]: m }));
+          setUnlisted((u) => ({ ...u, [b.id]: false }));
+        },
+        () => abort.signal.aborted || setUnlisted((u) => ({ ...u, [b.id]: true })),
       );
     }
     return () => abort.abort();
-  }, [client, brains, account, set, wanted]);
-  return { brains, catalogues };
+  }, [client, brains, account, inUse, wanted]);
+  return { brains, catalogues, unlisted };
 }
 
 /** What is thinking now, for the header and for Settings: "Opus 5.5". */
@@ -82,7 +89,7 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
       key={c.ref}
       testID={`model-${c.ref}`}
       label={c.name}
-      value={c.note && c.note.length <= 14 ? c.note : undefined}
+      value={c.note}
       first={first}
       checked={c.selected}
       busy={saving === c.ref}
@@ -108,8 +115,10 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
                 <GroupTitle>{g.label}</GroupTitle>
                 <Group>
                   {g.choices.map((c, n) => row(c, n === 0))}
-                  {g.more.length > 0 && (more[g.provider] ? g.more.map((c) => row(c, false)) : <Row label={`${g.more.length} more`} tone="tint" onPress={() => setMore((m) => ({ ...m, [g.provider]: true }))} />)}
+                  {g.more.length > 0 && (more[g.provider] ? g.more.map((c) => row(c, false)) : <Row label={`${g.more.length} more`} tone="tint" first={g.choices.length === 0} onPress={() => setMore((m) => ({ ...m, [g.provider]: true }))} />)}
                 </Group>
+                {/* No list from this brain: say so rather than offer names of our own. */}
+                {!g.listed ? <GroupNote>{models.unlisted[g.provider] ? `midna on ${status.host.name} can't list ${g.label}'s models yet. Update it to choose one here.` : "Asking for its models…"}</GroupNote> : null}
               </View>
             ))}
           {status && accountChoices(status).length > 0 && (

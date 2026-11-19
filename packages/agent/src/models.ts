@@ -17,7 +17,7 @@ const ask: Lister = async (id, account) => {
   return models
     // yagami's "default" row is its own alias for Sonnet, not a model of Claude's.
     .filter((m) => !(id === "claude" && m.id === "default"))
-    .map((m) => ({ id: m.id, name: m.display_name, ...(m.description ? { description: m.description } : {}), ...(m.is_default ? { default: true } : {}) }));
+    .map((m) => ({ id: m.id, name: m.display_name, ...(m.description ? { description: m.description } : {}), ...(m.resolved_model ? { resolved: m.resolved_model } : {}), ...(m.is_default ? { default: true } : {}) }));
 };
 
 const kept = new Map<string, { at: number; models: Promise<BrainModel[]> }>();

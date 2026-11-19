@@ -377,7 +377,15 @@ export interface Overview {
 /** An agent CLI on the host that could be midna's brain. */
 export interface BrainInfo { id: string; label: string; installed: boolean; loginCommand: string; installHint: string }
 /** One model a brain offers, as it lists it itself. `id` is what follows the provider in a model ref: "claude:<id>". After 0.13.6. */
-export interface BrainModel { id: string; name: string; description?: string; default?: boolean }
+export interface BrainModel {
+  id: string;
+  /** What the brain calls it. */
+  name: string;
+  description?: string;
+  /** The model an alias stands for, when the brain says: "opus" is "claude-opus-5-5". */
+  resolved?: string;
+  default?: boolean;
+}
 
 /** A bridge to somewhere else (Telegram today). */
 export interface BridgeInfo { name: string; enabled: boolean }

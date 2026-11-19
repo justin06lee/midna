@@ -442,13 +442,11 @@ function LineView({
           </div>
         )}
         {l.text && (
-          <div title={time(l.at)} className={`selectable max-w-[78%] rounded-[18px] bg-primary px-3 py-1.5 text-[13.5px] leading-[1.45] whitespace-pre-wrap text-primary-ink transition-opacity ${l.pending ? "opacity-60" : ""}`}>
+          <div title={`${time(l.at)}${l.client && l.client !== "desktop" ? ` · sent from ${l.client}` : ""}`} className={`selectable max-w-[78%] rounded-[18px] bg-primary px-3 py-1.5 text-[13.5px] leading-[1.45] whitespace-pre-wrap text-primary-ink transition-opacity ${l.pending ? "opacity-60" : ""}`}>
             {l.text}
           </div>
         )}
-        {(l.pending || (l.client && l.client !== "desktop")) && (
-          <span className="px-1 text-[10.5px] text-dimmer">{l.pending ? "Sending…" : `Sent from ${l.client}`}</span>
-        )}
+        {l.pending && <span className="px-1 text-[10.5px] text-dimmer">Sending…</span>}
       </div>
     );
   }

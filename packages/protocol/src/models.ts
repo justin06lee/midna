@@ -3,16 +3,18 @@ import type { Account, BrainInfo, BrainModel, Status } from "./index.ts";
 /**
  * What a model picker shows, worked out the same way in every app from what
  * the host says: its setting (Status), the brains installed on it, and each
- * brain's own list of models when the host can give one (0.13.7 on). A model
+ * brain's own list of models (GET /v1/brains/:id/models, 0.13.7 on). A model
  * is named to the host by its ref: "claude:opus", "codex",
  * "opencode:opencode/deepseek-v4.1-flash-free".
+ *
+ * A model's name, and which model an alias stands for, come only from the
+ * brain's own list. Nothing here knows a model: with no list (an older
+ * host, or a brain that didn't answer) a model is shown by its id as it is
+ * written, and only what the host itself names is offered.
  */
 
 /** A provider's name as a person says it. */
 const SHORT: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", gemini: "Gemini", hermes: "Hermes", copilot: "Copilot", cursor: "Cursor", qwen: "Qwen", goose: "Goose", kimi: "Kimi", kilo: "Kilo", cline: "Cline", auggie: "Auggie", amp: "Amp", grok: "Grok", droid: "Droid" };
-
-/** Claude's aliases, which every Claude Code knows; listed even when the host can't say what it offers. */
-const CLAUDE_ALIASES = ["opus", "fable", "sonnet", "haiku"];
 
 /** How many of a provider's models show before "More". */
 const SHOWN = 5;
@@ -39,21 +41,25 @@ export function providerName(id: string, brains: readonly BrainInfo[] = []): str
   return SHORT[id] ?? brains.find((b) => b.id === id)?.label ?? id;
 }
 
-const capital = (w: string) => (/^[a-z]/.test(w) ? w[0]!.toUpperCase() + w.slice(1) : w);
+export type Catalogues = Readonly<Record<string, readonly BrainModel[] | undefined>>;
 
-/** A model's id as words, for when the host hasn't named it: "claude-fable-5-2" → "Fable 5.2", "opencode/deepseek-v4.1-flash-free" → "Deepseek V4.1 Flash Free". */
-function fromId(provider: string, id: string): string {
-  const claude = provider === "claude" ? /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{6,})?$/.exec(id) : null;
-  if (claude) return `${capital(claude[1]!)} ${claude[2]}${claude[3] ? `.${claude[3]}` : ""}`;
-  return id.slice(id.lastIndexOf("/") + 1).split(/[-_]/).filter(Boolean).map(capital).join(" ");
+/** The brain's entry for a model: by its id, or the first whose alias stands for it ("claude-opus-5-5" finds "opus"). */
+function entry(r: ModelRef, catalogue: readonly BrainModel[] | undefined): BrainModel | undefined {
+  if (!r.model || !catalogue) return undefined;
+  return catalogue.find((m) => m.id === r.model) ?? catalogue.find((m) => m.resolved === r.model);
 }
 
-/** A model's name: the host's when it gave one (without the vendor it leads with: "opencode/DeepSeek V4.1" → "DeepSeek V4.1"), else its id as words. */
+/** What two refs are compared by: the model an alias stands for, when the brain says, so "opus" and "claude-opus-5-5" are one. */
+function sameAs(r: ModelRef, catalogue: readonly BrainModel[] | undefined): string {
+  const e = entry(r, catalogue);
+  return e ? `${r.provider}:${e.resolved ?? e.id}` : modelRef(r);
+}
+
+/** A model's name: the brain's own (without the vendor it leads with: "opencode/DeepSeek V4.1" → "DeepSeek V4.1"); with no list, its id as written, less the vendor. */
 function nameOf(r: ModelRef, catalogue: readonly BrainModel[] | undefined, brains: readonly BrainInfo[]): string {
   if (!r.model) return providerName(r.provider, brains);
-  const listed = catalogue?.find((m) => m.id === r.model)?.name;
-  if (listed) return listed.slice(listed.lastIndexOf("/") + 1);
-  return fromId(r.provider, r.model);
+  const listed = entry(r, catalogue)?.name ?? r.model;
+  return listed.slice(listed.lastIndexOf("/") + 1);
 }
 
 /** Where a model comes from inside a provider that carries several vendors' ("opencode/…" is OpenCode Zen, "ollama/…" Ollama); nothing for a provider's own. */
@@ -61,10 +67,40 @@ function vendorOf(r: ModelRef): string | undefined {
   const i = r.model?.indexOf("/") ?? -1;
   if (i <= 0) return undefined;
   const v = r.model!.slice(0, i);
-  return v === "opencode" ? "Zen" : capital(v);
+  return v === "opencode" ? "Zen" : v[0]!.toUpperCase() + v.slice(1);
 }
 
-export type Catalogues = Readonly<Record<string, readonly BrainModel[] | undefined>>;
+/**
+ * The line of models an entry belongs to, read from the id the brain gives
+ * it ("claude-fable-5-2" → "claude-fable"): what is left when the version
+ * goes. Entries whose id has no version are each their own.
+ */
+function familyOf(m: BrainModel): string {
+  const id = m.resolved ?? m.id;
+  const cut = id.search(/[-_.:@]v?\d/);
+  return cut > 0 ? id.slice(0, cut) : id;
+}
+
+/**
+ * The entries a brain's list leads with: in its own order, up to where a
+ * line of models comes round a second time. Claude Code lists its current
+ * models first and older ones after, so this is "Opus 5.5, Fable 5.2,
+ * Sonnet 5.5, Haiku 5.5" without anything here knowing those names. A list
+ * with no such turn in its first few entries (a catalogue in some other
+ * order) leads with nothing.
+ */
+function leading(catalogue: readonly BrainModel[]): BrainModel[] {
+  const seen = new Set<string>();
+  const out: BrainModel[] = [];
+  for (const m of catalogue) {
+    const f = familyOf(m);
+    if (seen.has(f)) return out.length >= 2 ? out : [];
+    if (out.length === SHOWN) break;
+    seen.add(f);
+    out.push(m);
+  }
+  return [];
+}
 
 /** A model's name for a button or a status line: "Opus 5.5", "DeepSeek V4.1 Flash Free", "Codex". */
 export function modelName(ref: string, brains: readonly BrainInfo[] = [], catalogues: Catalogues = {}): string {
@@ -76,8 +112,10 @@ export interface ModelChoice {
   /** What to send as the `model` setting. */
   ref: string;
   name: string;
-  /** A few words under or beside the name: the vendor, or the host's description. */
+  /** A word beside the name: the vendor inside a provider that carries several. */
   note?: string;
+  /** What the brain says of it, and the model an alias stands for: for a tooltip. */
+  detail?: string;
   /** The model setting is this one. */
   selected: boolean;
 }
@@ -89,42 +127,54 @@ export interface ModelGroup {
   choices: ModelChoice[];
   /** The rest of what the provider offers, behind "More". */
   more: ModelChoice[];
+  /** False when the brain's own list isn't known: only what the host names is offered. */
+  listed: boolean;
 }
 
 /**
- * Every installed brain and its models, the setting's marked. Each provider
- * leads with what the user is likely after: Claude's four aliases; elsewhere
- * the model set now, the fallbacks, then the provider's default. The rest of
- * what the host lists waits behind "More". Works with no catalogue at all.
+ * Every installed brain and its models, the setting's marked. A provider
+ * leads with what the user is likely after: the model set now and the
+ * fallbacks, then the start of the brain's own list (Claude's current
+ * models), then the provider's default where it has one to offer. The rest
+ * of the list waits behind "More". With no list, a provider offers what the
+ * host names and its default, and no more.
  */
 export function modelGroups(status: Pick<Status, "model" | "fallback">, brains: readonly BrainInfo[], catalogues: Catalogues = {}): ModelGroup[] {
   const ids = brains.map((b) => b.id);
-  const current = modelRef(parseModel(status.model, ids));
+  const set = parseModel(status.model, ids);
   const wanted = [status.model, ...(status.fallback ?? [])].map((m) => parseModel(m, ids));
   return brains
-    .filter((b) => b.installed || parseModel(current, ids).provider === b.id)
+    .filter((b) => b.installed || set.provider === b.id)
     .map((b) => {
       const catalogue = catalogues[b.id];
+      const current = set.provider === b.id ? sameAs(set, catalogue) : null;
       const choice = (r: ModelRef): ModelChoice => {
-        const ref = modelRef(r);
-        const note = r.model ? vendorOf(r) ?? catalogue?.find((m) => m.id === r.model)?.description : undefined;
-        return { ref, name: r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : "Default", ...(note ? { note } : {}), selected: ref === current };
+        const e = entry(r, catalogue);
+        const note = vendorOf(r);
+        const detail = e ? [e.description, e.resolved && e.resolved !== e.id ? `${e.id} is ${e.resolved}` : e.id].filter(Boolean).join(" · ") : undefined;
+        return { ref: modelRef(r), name: r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : "Default", ...(note ? { note } : {}), ...(detail ? { detail } : {}), selected: sameAs(r, catalogue) === current };
       };
       const listed = (catalogue ?? []).map((m) => ({ provider: b.id, model: m.id }));
       const mine = wanted.filter((r) => r.provider === b.id);
-      const lead: ModelRef[] =
-        b.id === "claude"
-          ? [...CLAUDE_ALIASES.filter((a) => !catalogue || catalogue.some((m) => m.id === a)).map((a) => ({ provider: b.id, model: a })), ...mine]
-          : [...mine, { provider: b.id, model: null }];
+      const lead = catalogue ? leading(catalogue).map((m) => ({ provider: b.id, model: m.id })) : [];
+      // Claude Code has no "default" of its own to offer: yagami's is an alias for one of the listed models.
+      const fallback = b.id === "claude" ? [] : [{ provider: b.id, model: null }];
       const seen = new Set<string>();
-      const once = (rs: ModelRef[]) => rs.filter((r) => !seen.has(modelRef(r)) && seen.add(modelRef(r)));
-      const first = once(lead);
+      const once = (rs: ModelRef[]) => rs.filter((r) => !seen.has(sameAs(r, catalogue)) && seen.add(sameAs(r, catalogue)));
+      // The brain's leading entries keep their place; what is set or a fallback joins them when it isn't one of them.
+      const first = once([...lead, ...mine, ...fallback]);
       const rest = once(listed);
       // A short list shows whole: "More" is for a provider with dozens.
       const room = Math.max(0, SHOWN - first.length);
       const shown = rest.length <= room ? rest : [];
-      return { provider: b.id, label: providerName(b.id, brains), choices: [...first, ...shown].map(choice), more: rest.slice(shown.length).map(choice) };
+      return { provider: b.id, label: providerName(b.id, brains), choices: [...first, ...shown].map(choice), more: rest.slice(shown.length).map(choice), listed: catalogue !== undefined || b.id === "hermes" };
     });
+}
+
+/** The providers whose lists are needed to name what the host is set to: the model, what is thinking now, and each fallback. */
+export function providersInUse(status: Pick<Status, "model" | "activeModel" | "fallback">, brains: readonly BrainInfo[]): string[] {
+  const ids = brains.map((b) => b.id);
+  return [...new Set([status.model, status.activeModel ?? status.model, ...(status.fallback ?? [])].map((m) => parseModel(m, ids).provider))];
 }
 
 /** When a cap ends, as a status line says it: "4:00 PM" today, "Sat 1:00 AM" another day. */
@@ -154,7 +204,7 @@ export function accountChoices(status: Pick<Status, "account" | "accounts" | "ca
     const capped = until !== undefined && until > now;
     return {
       account,
-      name: capital(account),
+      name: account[0]!.toUpperCase() + account.slice(1),
       note: capped ? `Out of usage until ${capTime(until, now)}` : email ?? "Not signed in",
       selected: (status.account ?? "work") === account,
       ...(capped ? { cappedUntil: until } : {}),

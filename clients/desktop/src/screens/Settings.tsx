@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { accountChoices, modelName, type BrainInfo, type BridgeInfo, type BridgeSetupResult, type Connection, type DeviceInfo, type MidnaClient, type Status } from "@midna/protocol";
+import { accountChoices, modelName, thinkingWith, type BridgeInfo, type BridgeSetupResult, type Connection, type DeviceInfo, type MidnaClient, type Status } from "@midna/protocol";
 import { loadAppearance, setAppearance, type Appearance } from "../appearance";
 import { draftKey, useDraft, useSecretDraft } from "../drafts";
 import { copy, enableNotifications, inApp, launchAtLogin, openUrl, testNotification } from "../host";
-import { ModelMenu } from "../ModelMenu";
+import { ModelMenu, useModels } from "../ModelMenu";
 import { Button, Group, Icon, Row, Section, Segmented, StateMark, Switch } from "../ui";
 import { useNotifications } from "../useNotifications";
 
@@ -33,7 +33,8 @@ export function Settings({
   onSignIn: () => void;
   onDisconnect: () => void;
 }) {
-  const [brains, setBrains] = useState<BrainInfo[]>([]);
+  // The brains' own lists, so a stand-in and the fallbacks are called what their brains call them.
+  const { brains, catalogues } = useModels(client, status, false);
   const [bridges, setBridges] = useState<BridgeInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const drafts = draftKey(connection);
@@ -47,7 +48,6 @@ export function Settings({
   const [appearance, setAppearanceState] = useState<Appearance>(loadAppearance);
 
   useEffect(() => {
-    void client.brains().then(setBrains, () => {});
     void client.bridges().then(setBridges, () => {});
     void client.devices().then(setDevices, () => {});
     void launchAtLogin().then(setAtLogin, () => setAtLogin(null));
@@ -72,7 +72,8 @@ export function Settings({
   const host = status?.host.name ?? connection.host;
   const accounts = status ? accountChoices(status) : [];
   const account = accounts.find((a) => a.selected);
-  const standIn = status?.activeModel && status.activeModel !== status.model ? modelName(status.activeModel, brains) : null;
+  const now = status ? thinkingWith(status, brains, catalogues) : null;
+  const fallbacks = (status?.fallback ?? []).map((m) => modelName(m, brains, catalogues));
 
   return (
     <div className="mx-auto w-full max-w-[620px] space-y-7 px-8 pt-2 pb-12">
@@ -85,7 +86,7 @@ export function Settings({
 
       <Section title="Model">
         <Group>
-          <Row label="Thinks with" note={standIn ? `Out of usage for now, so ${standIn} is thinking meanwhile.` : "A change holds from midna's next turn, on every device."}>
+          <Row label="Thinks with" note={now?.standIn ? `${now.standIn}, so ${now.name} is thinking meanwhile.` : "A change holds from midna's next turn, on every device."}>
             <ModelMenu client={client} status={status} onStatus={onStatus} look="button" drop="down" />
           </Row>
           {account && (
@@ -94,7 +95,7 @@ export function Settings({
             </Row>
           )}
           {status?.fallback && (
-            <Row label="When it runs out of usage" note="Think with these meanwhile, in order, as provider:model. Empty, midna waits for the reset.">
+            <Row label="When it runs out of usage" note={`${fallbacks.length ? `Now ${fallbacks.join(", then ")}. ` : ""}Think with these meanwhile, in order, as provider:model. Empty, midna waits for the reset.`}>
               <input className="field h-7 w-52 px-2 font-mono text-[12px]" value={fallback.value} onChange={(e) => fallback.set(e.target.value)} placeholder="none" spellCheck={false} />
               {models(fallback.value).join(",") !== status.fallback.join(",") && (
                 <Button onClick={async () => (await save("fallback", { fallback: models(fallback.value) })) && fallback.clear()} busy={saving === "fallback"}>

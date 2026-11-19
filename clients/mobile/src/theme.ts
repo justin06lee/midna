@@ -1,4 +1,4 @@
-import { useColorScheme } from "react-native";
+import { Platform, useColorScheme } from "react-native";
 
 /**
  * iOS's own system colours, as UIKit gives them in light and dark: the plain
@@ -56,5 +56,8 @@ export function useTheme(): Theme {
   return useColorScheme() === "dark" ? dark : light;
 }
 
-/** SF Mono through the system's monospaced face (Menlo on anything older). Every other face is the system font: no fontFamily anywhere. */
-export const mono = "ui-monospace";
+/**
+ * SF Mono, through the system's monospaced face: iOS takes the "ui-monospace" family itself. The browser
+ * preview is given the faces by name as well, since not every browser knows that word and would fall back to a serif.
+ */
+export const mono = Platform.select({ web: 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace', default: "ui-monospace" });
