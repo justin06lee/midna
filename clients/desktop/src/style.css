@@ -227,6 +227,13 @@ button:focus-visible, a:focus-visible, [role="menuitemradio"]:focus-visible {
 /* Nothing midna writes makes the chat scroll sideways: a long path or link wraps, and code blocks and tables scroll inside themselves. */
 .prose-midna { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .prose-midna pre, .prose-midna .md-table { max-width: 100%; }
+/* Copy sits in the block's corner and shows while the pointer is over it, or it has the keyboard. */
+.prose-midna .md-code { position: relative; }
+.prose-midna .md-code > button { position: absolute; top: 5px; right: 6px; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; color: var(--dim); background: var(--sunken); opacity: 0; transition: opacity 0.15s, color 0.15s; cursor: default; user-select: none; }
+.prose-midna .md-code:hover > button, .prose-midna .md-code > button:focus-visible { opacity: 1; }
+.prose-midna .md-code > button:hover { color: var(--ink); }
+.prose-midna em { font-style: italic; }
+.prose-midna s { text-decoration: line-through; color: var(--dim); }
 .prose-midna ul, .prose-midna ol { margin: 0.2em 0 0.55em; padding-left: 1.25em; }
 .prose-midna ul { list-style: disc; }
 .prose-midna ol { list-style: decimal; }

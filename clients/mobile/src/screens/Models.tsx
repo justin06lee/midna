@@ -118,7 +118,7 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
                   {g.more.length > 0 && (more[g.provider] ? g.more.map((c) => row(c, false)) : <Row label={`${g.more.length} more`} tone="tint" first={g.choices.length === 0} onPress={() => setMore((m) => ({ ...m, [g.provider]: true }))} />)}
                 </Group>
                 {/* No list from this brain: say so rather than offer names of our own. */}
-                {!g.listed ? <GroupNote>{models.unlisted[g.provider] ? `midna on ${status.host.name} can't list ${g.label}'s models yet. Update it to choose one here.` : "Asking for its models…"}</GroupNote> : null}
+                {!g.listed ? <GroupNote>{models.unlisted[g.provider] ? `Couldn't list ${g.label}'s models.` : "Asking for its models…"}</GroupNote> : null}
               </View>
             ))}
           {status && accountChoices(status).length > 0 && (

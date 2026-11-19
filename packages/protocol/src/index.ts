@@ -623,9 +623,12 @@ export class MidnaClient {
   brains(): Promise<BrainInfo[]> {
     return this.call("GET", "/v1/brains");
   }
-  /** The models one brain offers; Claude's are an account's (the setting's when left out). After 0.13.6: an older host answers 404. */
+  /**
+   * The models one brain offers; Claude's are an account's (the setting's when left out). After 0.13.6: an older host answers 404.
+   * The brain is started to ask it, so this gives up after 20 s rather than leave a picker waiting.
+   */
   brainModels(id: string, account?: Account, signal?: AbortSignal): Promise<BrainModel[]> {
-    return this.call("GET", `/v1/brains/${encodeURIComponent(id)}/models${account ? `?account=${account}` : ""}`, undefined, signal);
+    return this.call("GET", `/v1/brains/${encodeURIComponent(id)}/models${account ? `?account=${account}` : ""}`, undefined, signal, undefined, 20_000);
   }
   /** Try the brain now (a tiny real turn); work that was waiting on it runs if it answers. */
   checkBrain(): Promise<BrainHealth> {

@@ -57,9 +57,18 @@ function sameAs(r: ModelRef, catalogue: readonly BrainModel[] | undefined): stri
 
 /** A model's name: the brain's own (without the vendor it leads with: "opencode/DeepSeek V4.1" → "DeepSeek V4.1"); with no list, its id as written, less the vendor. */
 function nameOf(r: ModelRef, catalogue: readonly BrainModel[] | undefined, brains: readonly BrainInfo[]): string {
-  if (!r.model) return providerName(r.provider, brains);
-  const listed = entry(r, catalogue)?.name ?? r.model;
-  return listed.slice(listed.lastIndexOf("/") + 1);
+  // A provider with no model named runs its own default: that model's name, when the brain says which it is.
+  if (!r.model) return defaultOf(catalogue) ?? providerName(r.provider, brains);
+  return bare(entry(r, catalogue)?.name ?? r.model);
+}
+
+/** A name without the vendor it leads with. */
+const bare = (name: string) => name.slice(name.lastIndexOf("/") + 1);
+
+/** The model a brain runs when none is named, by the name it gives it; nothing when its list doesn't say. */
+function defaultOf(catalogue: readonly BrainModel[] | undefined): string | undefined {
+  const d = catalogue?.find((m) => m.default);
+  return d ? bare(d.name) : undefined;
 }
 
 /** Where a model comes from inside a provider that carries several vendors' ("opencode/…" is OpenCode Zen, "ollama/…" Ollama); nothing for a provider's own. */
@@ -152,7 +161,11 @@ export function modelGroups(status: Pick<Status, "model" | "fallback">, brains: 
         const e = entry(r, catalogue);
         const note = vendorOf(r);
         const detail = e ? [e.description, e.resolved && e.resolved !== e.id ? `${e.id} is ${e.resolved}` : e.id].filter(Boolean).join(" · ") : undefined;
-        return { ref: modelRef(r), name: r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : "Default", ...(note ? { note } : {}), ...(detail ? { detail } : {}), selected: sameAs(r, catalogue) === current };
+        // The provider's own default says which model that is, when the brain's list marks one.
+        const byDefault = defaultOf(catalogue);
+        const name = r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : byDefault ? `Default (${byDefault})` : "Default";
+        const what = r.model || b.id === "hermes" ? detail : `Whatever ${providerName(b.id, brains)} is set to use on the host${byDefault ? `: ${byDefault} now` : ""}`;
+        return { ref: modelRef(r), name, ...(note ? { note } : {}), ...(what ? { detail: what } : {}), selected: sameAs(r, catalogue) === current };
       };
       const listed = (catalogue ?? []).map((m) => ({ provider: b.id, model: m.id }));
       const mine = wanted.filter((r) => r.provider === b.id);

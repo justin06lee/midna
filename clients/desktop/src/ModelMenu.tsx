@@ -140,7 +140,7 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
                 ))}
               {/* No list from this brain: say so rather than offer names of our own. */}
               {!g.listed && (
-                <p className="py-1 pr-2.5 pl-[30px] text-[11.5px] leading-[1.4] text-dim">{unlisted[g.provider] ? `midna on ${status.host.name} can't list ${g.label}'s models. Update it, or name one in Settings.` : "Asking for its models…"}</p>
+                <p className="py-1 pr-2.5 pl-[30px] text-[11.5px] leading-[1.4] text-dim">{unlisted[g.provider] ? `Couldn't list ${g.label}'s models.` : "Asking for its models…"}</p>
               )}
             </div>
           ))}

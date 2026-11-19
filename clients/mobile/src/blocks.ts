@@ -143,3 +143,16 @@ export function columnWidths(head: string[], rows: string[][], fontSize: number,
     return Math.round(Math.min(max, Math.max(min, longest * fontSize * 0.54 + pad * 2 + 2)));
   });
 }
+
+/**
+ * The columns as they are drawn in a space `room` wide. The widths above are
+ * a guess on the generous side, so a table that only just overflows is drawn
+ * to fit (each column a little narrower, none under `min`) instead of being
+ * cut at its edge; one a good deal wider keeps its widths and scrolls.
+ */
+export function fitColumns(widths: number[], room: number, slack = 1.25, min = 44): number[] {
+  const total = widths.reduce((a, b) => a + b, 0);
+  if (room <= 0 || total <= room || total > room * slack) return widths;
+  const fitted = widths.map((w) => Math.max(min, Math.floor((w * room) / total)));
+  return fitted.reduce((a, b) => a + b, 0) <= room ? fitted : widths;
+}

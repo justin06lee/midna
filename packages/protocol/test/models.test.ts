@@ -71,7 +71,10 @@ describe("what a picker lists", () => {
 
   test("a list in no such order leads with nothing: what is set or a fallback, the default, and the rest behind More", () => {
     const groups = modelGroups(status, BRAINS, { claude: CLAUDE, opencode: ZEN });
-    expect(groups[2]!.choices.map((c) => [c.name, c.note])).toEqual([["DeepSeek V4.1 Flash Free", "Zen"], ["Default", undefined]]);
+    // "Default" says which model the brain runs when none is named, when its list marks one.
+    expect(groups[2]!.choices.map((c) => [c.name, c.note])).toEqual([["DeepSeek V4.1 Flash Free", "Zen"], ["Default (Tidepool Alpha Free)", undefined]]);
+    expect(groups[2]!.choices[1]!.detail).toBe("Whatever OpenCode is set to use on the host: Tidepool Alpha Free now");
+    expect(modelName("opencode", BRAINS, { opencode: ZEN })).toBe("Tidepool Alpha Free");
     expect(groups[2]!.more.map((c) => [c.name, c.note])).toContainEqual(["bonsai-2:27b", "Ollama"]);
     expect(groups[2]!.more).toHaveLength(6);
   });

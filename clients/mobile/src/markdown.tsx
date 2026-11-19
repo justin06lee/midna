@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import { columnWidths, parse, type Block } from "./blocks";
+import { columnWidths, fitColumns, parse, type Block } from "./blocks";
 import { mono, useTheme, type Theme } from "./theme";
 
 /**
@@ -95,14 +95,16 @@ function Code({ text, lang }: { text: string; lang: string }) {
   );
 }
 
-/** A table in a box like code's, its columns lined up; wider than the message, it scrolls sideways. */
+/** A table in a box like code's, as wide as its columns; one wider than the message scrolls sideways inside the message's width. */
 function Table({ b, size }: { b: Extract<Block, { t: "table" }>; size: number }) {
   const t = useTheme();
   const fontSize = size - 1;
-  const widths = useMemo(() => columnWidths(b.head, b.rows, fontSize, CELL_PAD), [b, fontSize]);
+  // The message's width, known once it is laid out: a table that only just overflows is drawn to fit it (less its own hairline border).
+  const [room, setRoom] = useState(0);
+  const widths = useMemo(() => fitColumns(columnWidths(b.head, b.rows, fontSize, CELL_PAD), room - 2), [b, fontSize, room]);
   const cell = { fontSize, lineHeight: Math.round(fontSize * 1.4), color: t.ink };
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tableScroll}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tableScroll} onLayout={(e) => setRoom(Math.floor(e.nativeEvent.layout.width))}>
       <View style={[s.table, { backgroundColor: t.sunken, borderColor: t.line }]}>
         {[b.head, ...b.rows].map((row, r) => (
           <View key={r} style={[s.tableRow, r > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line2 }]}>
