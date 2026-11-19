@@ -70,6 +70,9 @@ const KEY = "midna.connection";
 
 export async function loadConnection(): Promise<Connection | null> {
   if (inApp) return (await (await import("@tauri-apps/api/core")).invoke<Connection | null>("connection_load")) ?? null;
+  // The preview can be handed a connection in its address (`bun run preview` prints such a link).
+  const handed = new URLSearchParams(location.search).get("connect");
+  if (handed) localStorage.setItem(KEY, atob(handed));
   const s = localStorage.getItem(KEY);
   return s ? (JSON.parse(s) as Connection) : null;
 }

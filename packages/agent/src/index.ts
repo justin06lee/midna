@@ -1,6 +1,7 @@
 export { Assistant, QUEUE_PREFIX, type AssistantOptions, type BrainChoice } from "./assistant.ts";
 export { ACCOUNTS, accountEmails, capKey, claudeConfigDir, otherAccount, usableAccount } from "./accounts.ts";
 export { yagamiBrain, resolveModel, checkModel, installedBrains, BrainError, type Brain, type BrainRun, type BrainResult, type TurnUsage } from "./brain.ts";
+export { brainModels } from "./models.ts";
 export { handleMcp } from "./mcp.ts";
 export { handleVaultMcp, createVaultServer, type VaultLookup } from "./vaultTools.ts";
 export { createToolServer, type ToolContext } from "./tools.ts";

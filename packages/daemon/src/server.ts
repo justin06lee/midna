@@ -4,8 +4,9 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, accountEmails, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
+import { QUEUE_PREFIX, accountEmails, brainModels, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
+  Account,
   AlarmReport,
   AlarmSet,
   AnswerApproval,
@@ -246,6 +247,15 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.get("/v1/devices/:id/commands", (c) => c.json(store.hands.commands(c.req.param("id"), Math.min(500, Number(c.req.query("limit") ?? 200) || 200))));
 
   app.get("/v1/brains", (c) => c.json(installedBrains()));
+  // What a model picker lists: the harness is asked itself (no tokens), so this can take a few seconds the first time.
+  app.get("/v1/brains/:id/models", async (c) => {
+    const account = Account.safeParse(c.req.query("account"));
+    try {
+      return c.json(await brainModels(c.req.param("id"), account.success ? account.data : store.settings().account));
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 502);
+    }
+  });
   app.post("/v1/brains/check", async (c) => c.json(await assistant.checkBrain()));
 
   app.get("/v1/history", (c) =>
