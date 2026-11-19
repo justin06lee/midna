@@ -15,6 +15,7 @@
     "build": "bun scripts/build.ts",
     "smoke": "bun scripts/smoke.ts",
     "preview": "bun scripts/preview.ts",
+    "preview:phone": "cd clients/mobile/preview && bun install && bunx vite",
     "build:all": "bun scripts/build.ts --all",
     "signing": "bun run --cwd clients/desktop signing",
     "app:build": "bun run --cwd clients/desktop app:build"

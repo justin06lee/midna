@@ -183,7 +183,11 @@ export function useMidna(connection: Connection) {
         if (e.replyTo) setLines((cur) => cur.map((l) => (l.outboxId === e.replyTo ? { ...l, answered: true } : l)));
       } else if (e.type === "status") {
         setThinking(e.state === "thinking" ? { tool: null } : null);
-        if (e.state === "idle") setChanged((n) => n + 1);
+        if (e.state === "idle") {
+          setChanged((n) => n + 1);
+          // What thinks may have changed (set from another device, or a fallback took over), and nothing on the stream says so.
+          void client.status().then(setStatus, () => {});
+        }
       } else if (e.type === "activity") {
         setThinking({ tool: e.tool });
       } else if (e.type === "approval") {

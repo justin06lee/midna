@@ -1,0 +1,10 @@
+export type LocationSetup = "always" | "while-using" | "denied" | "off";
+export const locationSetup = async (): Promise<LocationSetup> => "always";
+export const lastSent = (): number | null => Date.now() - 4 * 60_000;
+export const watch = async () => {};
+export const turnOn = async (): Promise<LocationSetup> => "always";
+export const turnOff = async () => {};
+export const forgetLocation = async () => {};
+export const start = async () => {};
+export const preciseAccuracy = () => true;
+export const here = async () => { throw new Error("no location in the preview"); };

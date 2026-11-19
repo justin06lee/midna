@@ -57,6 +57,11 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
   const [saving, setSaving] = useState<string | null>(null);
   const [problem, setProblem] = useState("");
   const status = midna.status;
+  // Opened: what is set may have changed on another device since this phone last asked.
+  const { client, setStatus } = midna;
+  useEffect(() => {
+    if (open) void client.status().then(setStatus, () => {});
+  }, [open, client, setStatus]);
 
   const save = async (what: string, patch: { model?: string; account?: Account }) => {
     setSaving(what);

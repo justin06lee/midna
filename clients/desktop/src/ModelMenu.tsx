@@ -45,6 +45,12 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
 
+  // Opened: what is set may have changed on another device since this window last asked.
+  useEffect(() => {
+    if (open) void client.status().then(onStatus, () => {});
+    // Only when it opens: onStatus is a new function every render.
+  }, [open, client]);
+
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
