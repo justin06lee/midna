@@ -12,7 +12,13 @@ midna model --fallback none                # no fallback: wait for the reset
 midna status                               # the model, its fallbacks, which is thinking now, and any caps
 ```
 
-The desktop app's Settings has a fallback field under the model, and `PATCH /v1/settings` takes `{ "fallback": ["codex"] }`. midna checks each fallback is installed on the host, as it does the model.
+`PATCH /v1/settings` takes `{ "model": "claude:fable" }` and `{ "fallback": ["codex"] }`. midna checks each is installed on the host.
+
+## Switching from the apps
+
+Both apps have a model picker: the pop-up button in the Mac app's composer, the model's name in the phone's chat header, and a row in each one's Settings. It lists every installed brain's models and the two Claude accounts ([accounts.md](accounts.md)), marks what is set, and says when a stand-in is thinking because the set one is out of usage. A choice is the host's setting, so every device shows it, and it holds from the next turn.
+
+The list is built the same way in both apps (`packages/protocol/src/models.ts`) from `/v1/status`, `/v1/brains` and, from 0.13.7, `GET /v1/brains/:id/models`: the brain's own list, asked through yagami with no tokens spent and kept for ten minutes (Claude's is per account: `?account=personal`). A host without that route still gets Claude's four aliases, each other brain's default, and whatever is set or a fallback. The Mac app's Settings also has the fallback list and a field for a model the menu doesn't list.
 
 ## What happens at a cap
 
@@ -47,4 +53,4 @@ midna takes yagami from the sibling checkout (`file:../../../yagami`). The relea
 - No live Codex turn through midna: Codex isn't signed in where midna runs, and the Mac's Codex wasn't used, so as not to spend Justin's ChatGPT plan.
 - No real capped stream from either provider has been seen. The tests feed midna made-up caps. Claude's `resetsAt` is taken to be in seconds; midna also reads milliseconds.
 - On Codex, ask mode is stricter than on Claude, because Codex labels shell reads such as `cat` as commands. Pictures the user sends rely on Codex's own image viewer. Neither has been tried.
-- The desktop app's fallback field hasn't been looked at in a running app.
+- The model picker has been driven against a throwaway midna with a stand-in brain (the setting changes and the next turn runs as the new model), not against the Jetson, and the phone's only as a web render.
