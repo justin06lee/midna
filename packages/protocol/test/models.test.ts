@@ -69,14 +69,56 @@ describe("what a picker lists", () => {
     expect(groups[0]!.more[0]!.detail).toBe("fable is claude-fable-5-1");
   });
 
-  test("a list in no such order leads with nothing: what is set or a fallback, the default, and the rest behind More", () => {
+  test("a list in no such order: what is set or a fallback, the default's own row when it isn't showing, then the list up to four rows", () => {
     const groups = modelGroups(status, BRAINS, { claude: CLAUDE, opencode: ZEN });
     // "Default" says which model the brain runs when none is named, when its list marks one.
-    expect(groups[2]!.choices.map((c) => [c.name, c.note])).toEqual([["DeepSeek V4.1 Flash Free", "Zen"], ["Default (Tidepool Alpha Free)", undefined]]);
+    expect(groups[2]!.choices.map((c) => [c.name, c.note])).toEqual([
+      ["DeepSeek V4.1 Flash Free", "Zen"],
+      ["Default (Tidepool Alpha Free)", undefined],
+      ["bonsai-2:27b", "Ollama"],
+      ["bonsai-2:latest", "Ollama"],
+    ]);
     expect(groups[2]!.choices[1]!.detail).toBe("Whatever OpenCode is set to use on the host: Tidepool Alpha Free now");
     expect(modelName("opencode", BRAINS, { opencode: ZEN })).toBe("Tidepool Alpha Free");
-    expect(groups[2]!.more.map((c) => [c.name, c.note])).toContainEqual(["bonsai-2:27b", "Ollama"]);
-    expect(groups[2]!.more).toHaveLength(6);
+    // The default has its row above, so it isn't said again behind "more".
+    expect(groups[2]!.more.map((c) => c.name)).toEqual(["Big Pickle", "Iceman Free", "Beam Free"]);
+  });
+
+  test("a default that is already one of the rows wears a tag there instead of a row of its own", () => {
+    const GROK: BrainModel[] = [
+      { id: "grok-4.7", name: "Grok 4.7", default: true },
+      { id: "grok-4.7-fast", name: "Grok 4.7 Fast" },
+      { id: "grok-4.6", name: "Grok 4.6" },
+      { id: "grok-4.5", name: "Grok 4.5" },
+    ];
+    const brains = [...BRAINS, brain("grok")];
+    const grok = (model: string) => modelGroups({ model, fallback: [] }, brains, { grok: GROK }).find((g) => g.provider === "grok")!;
+    expect(grok("claude:opus").choices.map((c) => [c.ref, c.name, c.note])).toEqual([
+      ["grok:grok-4.7", "Grok 4.7", "Default"],
+      ["grok:grok-4.7-fast", "Grok 4.7 Fast", undefined],
+      ["grok:grok-4.6", "Grok 4.6", undefined],
+      ["grok:grok-4.5", "Grok 4.5", undefined],
+    ]);
+    expect(grok("claude:opus").more).toEqual([]);
+    // Set to the brain with no model named, or to that model by name: the tagged row is the one ticked.
+    expect(grok("grok").choices.map((c) => c.selected)).toEqual([true, false, false, false]);
+    expect(grok("grok:grok-4.7").choices.map((c) => c.selected)).toEqual([true, false, false, false]);
+    // A vendor's tag and the default's sit together.
+    const zen = modelGroups({ model: "claude:opus", fallback: ["opencode:opencode/tidepool-alpha-free"] }, BRAINS, { opencode: ZEN })[2]!;
+    expect(zen.choices.map((c) => [c.name, c.note])[0]).toEqual(["Tidepool Alpha Free", "Zen · Default"]);
+    expect(zen.choices.map((c) => c.name)).not.toContain("Default (Tidepool Alpha Free)");
+  });
+
+  test("every brain shows four rows and keeps the rest behind more, which never stands for one model alone", () => {
+    const five: BrainModel[] = ["a", "b", "c", "d", "e"].map((id) => ({ id, name: id.toUpperCase(), ...(id === "a" ? { default: true } : {}) }));
+    const six = [...five, { id: "f", name: "F" }];
+    const of = (list: BrainModel[]) => modelGroups({ model: "claude:opus", fallback: [] }, BRAINS, { claude: CLAUDE, codex: list });
+    expect(of(five)[1]!.choices.map((c) => c.name)).toEqual(["A", "B", "C", "D", "E"]);
+    expect(of(five)[1]!.more).toEqual([]);
+    expect(of(six)[1]!.choices.map((c) => c.name)).toEqual(["A", "B", "C", "D"]);
+    expect(of(six)[1]!.more.map((c) => c.name)).toEqual(["E", "F"]);
+    expect(of(six)[0]!.choices).toHaveLength(4);
+    expect(of(six)[0]!.more).toHaveLength(3);
   });
 
   test("what is set joins the leading entries when it isn't one, and a full id marks the alias that stands for it", () => {
@@ -102,9 +144,13 @@ describe("what a picker lists", () => {
     expect(modelGroups({ model: "codex", fallback: [] }, BRAINS)[0]!.choices).toEqual([]);
   });
 
-  test("a short list shows whole", () => {
+  test("a short list shows whole, its default tagged", () => {
     const groups = modelGroups({ model: "claude:opus", fallback: [] }, BRAINS, { opencode: ZEN.slice(2, 5) });
-    expect(groups[2]!.choices.map((c) => c.ref)).toEqual(["opencode", "opencode:opencode/big-pickle", "opencode:opencode/deepseek-v4.1-flash-free", "opencode:opencode/tidepool-alpha-free"]);
+    expect(groups[2]!.choices.map((c) => [c.ref, c.note])).toEqual([
+      ["opencode:opencode/big-pickle", "Zen"],
+      ["opencode:opencode/deepseek-v4.1-flash-free", "Zen"],
+      ["opencode:opencode/tidepool-alpha-free", "Zen · Default"],
+    ]);
     expect(groups[2]!.more).toEqual([]);
   });
 

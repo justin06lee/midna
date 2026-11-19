@@ -2,6 +2,22 @@
 
 A rough pass, for review before it goes further. Not pushed, no app built, nothing on the host.
 
+## Round 4 (after the third review)
+
+| What was wrong | Before | After |
+| --- | --- | --- |
+| "Default (Grok 4.7)" sat right above "Grok 4.7"; Grok showed five rows where the others showed four | `mac-menu-rows-before.png`, `phone-sheet-rows-before.png` | `mac-menu-rows-after.png`, `phone-sheet-rows-after.png` |
+
+- **Default.** When the model a brain runs by default is already one of the rows showing, there is no Default row: that row carries a quiet grey "Default" tag, where "Zen" sits, and it is the row ticked when the brain is set with no model named. When the default isn't one of the rows (OpenCode's Tidepool), it keeps its own row, "Default (Tidepool Alpha Free)", and isn't said again behind "more".
+- **One rule for every brain.** Each shows four rows, then "N more": the start of the brain's own list where it leads with its current models (Claude), what is set and the fallbacks, the default's row when it needs one, then the list in its own order. What is set always shows, and "more" never stands for a single model. So OpenCode now fills its four rows from its list, and Grok's four models are its four rows.
+- **The real window.** The preview build is back in `clients/desktop/src-tauri/target/release/bundle/macos/midna-preview.app`, built from this round. One command photographs it once charizard is unlocked (it says so and stops while the screen is locked):
+
+  ```sh
+  cd clients/desktop && bun scripts/built-shot.ts      # saves docs/apple-pass/built-chat.png; --keep leaves it open, --build rebuilds first
+  ```
+
+  It starts its own throwaway midna and hands the app that connection each time, since a throwaway midna's address and token only last as long as it runs.
+
 ## Round 3 (after the second review)
 
 | What was wrong | Before | After |
@@ -21,14 +37,7 @@ A rough pass, for review before it goes further. Not pushed, no app built, nothi
 
 The Mac app was built on charizard from this branch (release, under a bundle id and name of its own, `sh.midna.desktop.preview` / `midna-preview`, so the installed midna.app and its permissions were not touched; not installed, not notarized). Opened against the throwaway midna it starts, loads its page and connects: its WebKit process held the event stream, and the daemon logged its hands saying hello as app 0.13.6.
 
-It could not be photographed. charizard's screen is locked (nobody has touched it for nine hours), and behind a lock screen WebKit paints nothing: the window is there, empty. So the Mac pictures in this round are the next closest thing: **the production page the app carries, drawn by WebKit itself off screen** (`clients/desktop/scripts/websnap.swift`), at the app's window size. They show the real engine, type and colours. They do not show the title bar and traffic lights, or the screens that only exist in the app (This Computer, the panel, the pill). To photograph the real window once the Mac is unlocked:
-
-```sh
-cd clients/desktop && bun scripts/sidecar.ts
-bun run tauri build --bundles app --config '{"identifier":"sh.midna.desktop.preview","productName":"midna-preview","mainBinaryName":"midna-preview"}'
-# put the throwaway midna's connection.json (bun run preview prints its home) in ~/Library/Application Support/sh.midna.desktop.preview/
-open -g src-tauri/target/release/bundle/macos/midna-preview.app
-```
+It could not be photographed. charizard's screen is locked (nobody has touched it for nine hours), and behind a lock screen WebKit paints nothing: the window is there, empty. So the Mac pictures in this round are the next closest thing: **the production page the app carries, drawn by WebKit itself off screen** (`clients/desktop/scripts/websnap.swift`), at the app's window size. They show the real engine, type and colours. They do not show the title bar and traffic lights, or the screens that only exist in the app (This Computer, the panel, the pill). To photograph the real window once the Mac is unlocked: `bun scripts/built-shot.ts`, as round 4 has it.
 
 ## Round 2 (after the first review)
 

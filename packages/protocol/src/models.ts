@@ -16,8 +16,12 @@ import type { Account, BrainInfo, BrainModel, Status } from "./index.ts";
 /** A provider's name as a person says it. */
 const SHORT: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", gemini: "Gemini", hermes: "Hermes", copilot: "Copilot", cursor: "Cursor", qwen: "Qwen", goose: "Goose", kimi: "Kimi", kilo: "Kilo", cline: "Cline", auggie: "Auggie", amp: "Amp", grok: "Grok", droid: "Droid" };
 
-/** How many of a provider's models show before "More". */
-const SHOWN = 5;
+/**
+ * How many rows a provider shows before the rest go behind "N more": the same for every brain. What is set or a
+ * fallback always shows, so a group can run past it; and "more" never stands for a single model, which would take
+ * the row it saves.
+ */
+const SHOWN = 4;
 
 export interface ModelRef {
   provider: string;
@@ -121,7 +125,7 @@ export interface ModelChoice {
   /** What to send as the `model` setting. */
   ref: string;
   name: string;
-  /** A word beside the name: the vendor inside a provider that carries several. */
+  /** A word beside the name: the vendor inside a provider that carries several, and "Default" on the model the brain runs when none is named. */
   note?: string;
   /** What the brain says of it, and the model an alias stands for: for a tooltip. */
   detail?: string;
@@ -141,12 +145,14 @@ export interface ModelGroup {
 }
 
 /**
- * Every installed brain and its models, the setting's marked. A provider
- * leads with what the user is likely after: the model set now and the
- * fallbacks, then the start of the brain's own list (Claude's current
- * models), then the provider's default where it has one to offer. The rest
- * of the list waits behind "More". With no list, a provider offers what the
- * host names and its default, and no more.
+ * Every installed brain and its models, the setting's marked. Each provider
+ * shows SHOWN rows and keeps the rest behind "More": first the start of the
+ * brain's own list where it leads with its current models (Claude), then
+ * what is set and the fallbacks, then the list in its own order. The model a
+ * brain runs when none is named carries a "Default" tag when it is one of
+ * the rows showing; when it isn't, it has a row of its own, "Default (its
+ * name)". With no list, a provider offers what the host names and a plain
+ * "Default", and no more.
  */
 export function modelGroups(status: Pick<Status, "model" | "fallback">, brains: readonly BrainInfo[], catalogues: Catalogues = {}): ModelGroup[] {
   const ids = brains.map((b) => b.id);
@@ -156,31 +162,41 @@ export function modelGroups(status: Pick<Status, "model" | "fallback">, brains: 
     .filter((b) => b.installed || set.provider === b.id)
     .map((b) => {
       const catalogue = catalogues[b.id];
-      const current = set.provider === b.id ? sameAs(set, catalogue) : null;
+      const key = (r: ModelRef) => sameAs(r, catalogue);
+      // The model this brain runs when none is named, when its list marks one. Claude Code has no such default to offer: yagami's is an alias for a listed model.
+      const marked = b.id === "claude" ? undefined : catalogue?.find((m) => m.default);
+      const byDefault: ModelRef | null = marked ? { provider: b.id, model: marked.id } : null;
+      const current = set.provider !== b.id ? null : !set.model && byDefault ? key(byDefault) : key(set);
       const choice = (r: ModelRef): ModelChoice => {
         const e = entry(r, catalogue);
-        const note = vendorOf(r);
-        const detail = e ? [e.description, e.resolved && e.resolved !== e.id ? `${e.id} is ${e.resolved}` : e.id].filter(Boolean).join(" · ") : undefined;
-        // The provider's own default says which model that is, when the brain's list marks one.
-        const byDefault = defaultOf(catalogue);
-        const name = r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : byDefault ? `Default (${byDefault})` : "Default";
-        const what = r.model || b.id === "hermes" ? detail : `Whatever ${providerName(b.id, brains)} is set to use on the host${byDefault ? `: ${byDefault} now` : ""}`;
-        return { ref: modelRef(r), name, ...(note ? { note } : {}), ...(what ? { detail: what } : {}), selected: sameAs(r, catalogue) === current };
+        const isDefault = byDefault !== null && r.model !== null && key(r) === key(byDefault);
+        const note = [vendorOf(r), isDefault ? "Default" : undefined].filter(Boolean).join(" · ");
+        const name = r.model ? nameOf(r, catalogue, brains) : b.id === "hermes" ? "Hermes" : marked ? `Default (${bare(marked.name)})` : "Default";
+        const detail = !r.model
+          ? b.id === "hermes"
+            ? undefined
+            : `Whatever ${providerName(b.id, brains)} is set to use on the host${marked ? `: ${bare(marked.name)} now` : ""}`
+          : e
+            ? [e.description, e.resolved && e.resolved !== e.id ? `${e.id} is ${e.resolved}` : e.id].filter(Boolean).join(" · ")
+            : undefined;
+        return { ref: modelRef(r), name, ...(note ? { note } : {}), ...(detail ? { detail } : {}), selected: (r.model ? key(r) : byDefault ? key(byDefault) : modelRef(r)) === current };
       };
-      const listed = (catalogue ?? []).map((m) => ({ provider: b.id, model: m.id }));
-      const mine = wanted.filter((r) => r.provider === b.id);
-      const lead = catalogue ? leading(catalogue).map((m) => ({ provider: b.id, model: m.id })) : [];
-      // Claude Code has no "default" of its own to offer: yagami's is an alias for one of the listed models.
-      const fallback = b.id === "claude" ? [] : [{ provider: b.id, model: null }];
       const seen = new Set<string>();
-      const once = (rs: ModelRef[]) => rs.filter((r) => !seen.has(sameAs(r, catalogue)) && seen.add(sameAs(r, catalogue)));
-      // The brain's leading entries keep their place; what is set or a fallback joins them when it isn't one of them.
-      const first = once([...lead, ...mine, ...fallback]);
-      const rest = once(listed);
-      // A short list shows whole: "More" is for a provider with dozens.
-      const room = Math.max(0, SHOWN - first.length);
-      const shown = rest.length <= room ? rest : [];
-      return { provider: b.id, label: providerName(b.id, brains), choices: [...first, ...shown].map(choice), more: rest.slice(shown.length).map(choice), listed: catalogue !== undefined || b.id === "hermes" };
+      const once = (rs: ModelRef[]) => rs.filter((r) => !seen.has(key(r)) && seen.add(key(r)));
+      const lead = catalogue ? leading(catalogue).map((m) => ({ provider: b.id, model: m.id })) : [];
+      // What is set or a fallback, by model: the bare provider is the default's row, below.
+      const pinned = once([...lead, ...wanted.filter((r) => r.provider === b.id && r.model)]);
+      const rest = once((catalogue ?? []).map((m) => ({ provider: b.id, model: m.id })));
+      const fill = (n: number) => rest.slice(0, Math.max(0, n));
+      // The default is one of the rows showing: it wears the tag there. Otherwise, a brain that has one gets a row for it.
+      const plain = [...pinned, ...fill(SHOWN - pinned.length)];
+      const tagged = byDefault !== null && plain.some((r) => key(r) === key(byDefault));
+      const own: ModelRef[] = tagged || b.id === "claude" ? [] : [{ provider: b.id, model: null }];
+      let shown = tagged ? plain : [...pinned, ...own, ...fill(SHOWN - pinned.length - own.length)];
+      // Behind "more": what isn't showing, less the default when it has its own row above.
+      let more = rest.filter((r) => !shown.includes(r) && !(own.length && byDefault && key(r) === key(byDefault)));
+      if (more.length === 1) [shown, more] = [[...shown, ...more], []];
+      return { provider: b.id, label: providerName(b.id, brains), choices: shown.map(choice), more: more.map(choice), listed: catalogue !== undefined || b.id === "hermes" };
     });
 }
 
