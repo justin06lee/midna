@@ -319,7 +319,7 @@ export function useMidna(connection: PhoneConnection) {
     [attachmentSource, auth],
   );
 
-  return { client, status, push, lines, link, thinking, send, retry, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
+  return { client, status, setStatus, push, lines, link, thinking, send, retry, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
 }
 
 export type Midna = ReturnType<typeof useMidna>;

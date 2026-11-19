@@ -110,8 +110,8 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
               <Field label="Why" value={reason} onChangeText={setReason} placeholder="Replying to Sam's DM" hint="midna keeps this, with how long, for your reviews." />
               <View style={s.chips}>
                 {LIFTS.map((m) => (
-                  <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: lift === m }} onPress={() => setLift(m)} style={[s.chip, { borderColor: t.line, backgroundColor: lift === m ? t.ink : "transparent" }]}>
-                    <Text style={[s.chipText, { color: lift === m ? t.bg : t.ink }]}>{m} min</Text>
+                  <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: lift === m }} onPress={() => setLift(m)} style={[s.chip, { backgroundColor: lift === m ? t.primary : t.fill }]}>
+                    <Text style={[s.chipText, { color: lift === m ? t.primaryInk : t.ink }]}>{m} min</Text>
                   </Pressable>
                 ))}
               </View>
@@ -153,15 +153,15 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
 
 const s = StyleSheet.create({
   body: { padding: 16, gap: 14 },
-  title: { fontSize: 24, fontWeight: "700" },
+  title: { fontSize: 28, fontWeight: "700" },
   heading: { fontSize: 17, fontWeight: "600" },
   para: { fontSize: 15, lineHeight: 21 },
   card: { paddingVertical: 4, gap: 0 },
   kv: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, gap: 16 },
-  key: { fontSize: 15 },
-  value: { fontSize: 15, flexShrink: 1, textAlign: "right" },
+  key: { fontSize: 17 },
+  value: { fontSize: 17, flexShrink: 1, textAlign: "right" },
   group: { gap: 8 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { height: 32, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 13, justifyContent: "center" },
-  chipText: { fontSize: 14, fontWeight: "500" },
+  chip: { height: 34, borderRadius: 17, paddingHorizontal: 14, justifyContent: "center" },
+  chipText: { fontSize: 15, fontWeight: "500" },
 });

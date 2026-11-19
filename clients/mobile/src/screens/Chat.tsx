@@ -11,7 +11,7 @@ import { faceId } from "../faceid";
 import { Markdown } from "../markdown";
 import { approvalOutcome, asksApproval, size, type Line } from "../lines";
 import { useTheme } from "../theme";
-import { Problem, time } from "../ui";
+import { Problem } from "../ui";
 import type { Midna } from "../useMidna";
 
 /** A file on its way to the host, before it is an attachment. */
@@ -161,10 +161,12 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
         onEndReached={() => void midna.loadOlder().catch(() => {})}
         onEndReachedThreshold={0.4}
         // Inverted, so the header sits at the bottom, under the newest line: a quiet word while the app isn't live.
-        ListHeaderComponent={midna.link === "connecting" || midna.link === "lost" ? <Text style={[s.connecting, { color: t.dimmer }]}>connecting…</Text> : undefined}
-        renderItem={({ item }) => (
+        ListHeaderComponent={midna.link === "connecting" || midna.link === "lost" ? <Text style={[s.connecting, { color: t.dim }]}>Connecting…</Text> : undefined}
+        renderItem={({ item, index }) => (
           <LineView
             line={item}
+            // Inverted: the line before this one in time is the next in the list.
+            stamp={stampFor(item.at, data[index + 1]?.at)}
             midna={midna}
             canSend={canSend}
             approval={item.outboxId === undefined ? undefined : byOutbox.get(item.outboxId)}
@@ -182,12 +184,12 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
           )
         }
       />
-      <View style={[s.composer, { borderTopColor: t.line, backgroundColor: t.bg }]}>
+      <View style={[s.composer, { backgroundColor: t.bg }]}>
         <Problem text={problem} />
         {(files.length > 0 || uploading.length > 0) && (
           <View style={s.staged}>
             {files.map((a) => (
-              <View key={a.id} style={[s.chip, { backgroundColor: t.panel, borderColor: t.line2 }]}>
+              <View key={a.id} style={[s.chip, { backgroundColor: t.fill }]}>
                 {a.kind === "image" ? <Thumb a={a} source={midna.attachmentSource} width={22} height={22} radius={6} /> : null}
                 <Text numberOfLines={1} style={[s.chipText, { color: t.ink }]}>
                   {a.name}
@@ -199,7 +201,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
               </View>
             ))}
             {uploading.map((u) => (
-              <View key={u.key} style={[s.chip, { backgroundColor: t.panel, borderColor: t.line2 }]}>
+              <View key={u.key} style={[s.chip, { backgroundColor: t.fill }]}>
                 <ActivityIndicator size="small" color={t.dim} />
                 <Text numberOfLines={1} style={[s.chipText, { color: t.dim }]}>
                   {u.name}
@@ -209,8 +211,8 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
           </View>
         )}
         <View style={s.row}>
-          <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.6 : 1 }]}>
-            <Text style={[s.plus, { color: t.ink }]}>+</Text>
+          <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.fill, opacity: pressed ? 0.6 : 1 }]}>
+            <Text style={[s.plus, { color: t.dim }]}>+</Text>
           </Pressable>
           <TextInput
             testID="chat-input"
@@ -219,7 +221,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
             placeholder={midna.link === "live" ? "Message midna" : "Message midna (sends once it's back)"}
             placeholderTextColor={t.dimmer}
             multiline
-            style={[s.input, { color: t.ink, backgroundColor: t.panel, borderColor: t.line2 }]}
+            style={[s.input, { color: t.ink, borderColor: t.line }]}
           />
           <Pressable
             testID="chat-send"
@@ -227,7 +229,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
             accessibilityLabel="Send"
             onPress={() => void submit()}
             disabled={!canSend || uploading.length > 0 || (!text.value.trim() && !files.length)}
-            style={({ pressed }) => [s.round, s.send, { backgroundColor: t.primary, opacity: !canSend || (!text.value.trim() && !files.length) || uploading.length ? 0.35 : pressed ? 0.7 : 1 }]}
+            style={({ pressed }) => [s.round, { backgroundColor: t.primary, opacity: !canSend || (!text.value.trim() && !files.length) || uploading.length ? 0.35 : pressed ? 0.7 : 1 }]}
           >
             <Text style={[s.arrow, { color: t.primaryInk }]}>↑</Text>
           </Pressable>
@@ -237,7 +239,27 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
   );
 }
 
-function LineView({
+/** The day and time a stretch of the conversation began, as Messages heads one; nothing unless a day turned or half an hour passed since the line before. */
+function stampFor(at: number, before: number | undefined): string | null {
+  if (before !== undefined && new Date(before).toDateString() === new Date(at).toDateString() && at - before < 30 * 60_000) return null;
+  const d = new Date(at);
+  const clock = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((new Date(new Date().toDateString()).getTime() - new Date(d.toDateString()).getTime()) / 86_400_000);
+  return `${days === 0 ? "Today" : days === 1 ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${clock}`;
+}
+
+function LineView(props: Parameters<typeof LineBody>[0] & { stamp: string | null }) {
+  const t = useTheme();
+  if (!props.stamp) return <LineBody {...props} />;
+  return (
+    <View style={s.stamped}>
+      <Text style={[s.stamp, { color: t.dim }]}>{props.stamp}</Text>
+      <LineBody {...props} />
+    </View>
+  );
+}
+
+function LineBody({
   line: l,
   midna,
   canSend,
@@ -266,14 +288,11 @@ function LineView({
         ) : null}
         {l.state === "failed" ? (
           <Text onPress={() => void midna.retry(l)} style={[s.meta, { color: t.danger }]}>
-            Not sent · Tap to retry
+            Not Delivered · Tap to retry
           </Text>
-        ) : (
-          <Text style={[s.meta, { color: t.dimmer }]}>
-            {l.state === "sending" ? "sending…" : `${time(l.at)}${l.state === "sent" ? " ✓" : ""}`}
-            {l.client && l.client !== "mobile" ? ` · via ${l.client}` : ""}
-          </Text>
-        )}
+        ) : l.state === "sending" || (l.client && l.client !== "mobile") ? (
+          <Text style={[s.meta, { color: t.dim }]}>{l.state === "sending" ? "Sending…" : `Sent from ${l.client}`}</Text>
+        ) : null}
       </View>
     );
   }
@@ -291,7 +310,7 @@ function LineView({
           <Text style={[s.outcome, { color: t.dim }]}>Over</Text>
         ) : (
           <Pressable accessibilityRole="button" onPress={onOpenApprovals}>
-            <Text style={[s.outcome, { color: t.ink, textDecorationLine: "underline" }]}>Answer it in Approvals</Text>
+            <Text style={[s.outcome, { color: t.primary }]}>Answer in Approvals</Text>
           </Pressable>
         )
       ) : l.kind === "question" && l.options && l.options.length > 0 ? (
@@ -302,14 +321,13 @@ function LineView({
               accessibilityRole="button"
               disabled={l.answered || !canSend}
               onPress={() => onAnswer(o)}
-              style={({ pressed }) => [s.option, { backgroundColor: t.panel, borderColor: t.line2, opacity: l.answered || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
+              style={({ pressed }) => [s.option, { backgroundColor: t.fill, opacity: l.answered || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
             >
-              <Text style={[s.optionText, { color: t.ink }]}>{plainText(o)}</Text>
+              <Text style={[s.optionText, { color: l.answered ? t.dim : t.primary }]}>{plainText(o)}</Text>
             </Pressable>
           ))}
         </View>
       ) : null}
-      <Text style={[s.meta, { color: t.dimmer }]}>{time(l.at)}</Text>
     </View>
   );
 }
@@ -343,12 +361,12 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
             accessibilityRole="button"
             disabled={!!busy || !canSend}
             onPress={() => void answer(o.label, o.answer)}
-            style={({ pressed }) => [s.option, { backgroundColor: o.answer === "deny" ? t.panel : t.primary, borderColor: o.answer === "deny" ? t.line2 : t.primary, opacity: busy || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [s.option, { backgroundColor: o.answer === "allow" ? t.primary : t.fill, opacity: busy || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
           >
             {busy === o.answer ? (
-              <ActivityIndicator size="small" color={o.answer === "deny" ? t.ink : t.primaryInk} />
+              <ActivityIndicator size="small" color={o.answer === "allow" ? t.primaryInk : t.dim} />
             ) : (
-              <Text style={[s.optionText, { color: o.answer === "deny" ? t.ink : t.primaryInk }]}>{o.label}</Text>
+              <Text style={[s.optionText, { color: o.answer === "allow" ? t.primaryInk : o.answer === "deny" ? t.danger : t.primary }]}>{o.label}</Text>
             )}
           </Pressable>
         ))}
@@ -360,29 +378,30 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  lines: { paddingHorizontal: 14, paddingVertical: 12, gap: 14 },
-  empty: { textAlign: "center", fontSize: 15, marginTop: 40, transform: [{ scaleY: -1 }] },
+  lines: { paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
+  empty: { textAlign: "center", fontSize: 17, marginTop: 40, transform: [{ scaleY: -1 }] },
+  stamped: { gap: 12 },
+  stamp: { textAlign: "center", fontSize: 12, fontWeight: "500", marginTop: 8 },
   user: { alignItems: "flex-end", gap: 4 },
-  bubble: { maxWidth: "82%", borderRadius: 18, borderBottomRightRadius: 6, paddingHorizontal: 14, paddingVertical: 9 },
-  userText: { fontSize: 16, lineHeight: 22 },
+  bubble: { maxWidth: "80%", borderRadius: 19, paddingHorizontal: 14, paddingVertical: 8 },
+  userText: { fontSize: 17, lineHeight: 22 },
   midna: { alignItems: "flex-start", gap: 6, width: "92%" },
-  meta: { fontSize: 11.5 },
-  connecting: { textAlign: "center", fontSize: 12.5, paddingVertical: 6 },
+  meta: { fontSize: 12 },
+  connecting: { textAlign: "center", fontSize: 13, paddingVertical: 6 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  option: { minHeight: 34, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, justifyContent: "center" },
-  optionText: { fontSize: 14.5, fontWeight: "500" },
+  option: { minHeight: 36, borderRadius: 18, paddingHorizontal: 15, justifyContent: "center" },
+  optionText: { fontSize: 15, fontWeight: "500" },
   approval: { gap: 6 },
-  outcome: { fontSize: 13.5 },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 8, gap: 8 },
+  outcome: { fontSize: 14 },
+  composer: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8, gap: 8 },
   staged: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 10, height: 30, maxWidth: 220 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 15, paddingHorizontal: 10, height: 30, maxWidth: 220 },
   chipText: { fontSize: 13, flexShrink: 1 },
   chipMeta: { fontSize: 12 },
   chipX: { fontSize: 18, lineHeight: 20 },
   row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  round: { width: 38, height: 38, borderRadius: 19, borderWidth: StyleSheet.hairlineWidth, alignItems: "center", justifyContent: "center" },
-  send: { borderWidth: 0 },
-  plus: { fontSize: 24, lineHeight: 26, fontWeight: "300" },
+  round: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  plus: { fontSize: 24, lineHeight: 26, fontWeight: "400" },
   arrow: { fontSize: 20, fontWeight: "700" },
-  input: { flex: 1, minHeight: 38, maxHeight: 140, borderRadius: 19, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingTop: 9, paddingBottom: 9, fontSize: 16 },
+  input: { flex: 1, minHeight: 36, maxHeight: 140, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 8, fontSize: 17 },
 });

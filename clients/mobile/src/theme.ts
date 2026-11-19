@@ -1,40 +1,53 @@
 import { useColorScheme } from "react-native";
 
-/** The desktop's colours (style.css there), so midna looks like itself on every screen. */
+/**
+ * iOS's own system colours, as UIKit gives them in light and dark: the plain
+ * and the grouped backgrounds, the label greys, the separator, the fills
+ * and the tints. Written out rather than taken from PlatformColor so every
+ * one can be used in an opacity or a border all the same.
+ */
 const light = {
-  bg: "#f3f3f4",
+  /** A plain screen: the conversation. */
+  bg: "#ffffff",
+  /** A screen of grouped rows: Settings, the vault. */
+  grouped: "#f2f2f7",
+  /** A group of rows, or a field, on a grouped screen. */
   panel: "#ffffff",
-  sunken: "#f6f6f7",
-  active: "rgba(12, 12, 14, 0.075)",
-  ink: "#0c0c0e",
-  ink2: "#3a3a40",
-  dim: "#6f6f78",
-  dimmer: "#a3a3ab",
-  line: "rgba(12, 12, 14, 0.075)",
-  line2: "rgba(12, 12, 14, 0.13)",
-  primary: "#0c0c0e",
+  sunken: "#f2f2f7",
+  /** What a quiet control is filled with: a chip, a secondary button. */
+  fill: "rgba(118, 118, 128, 0.12)",
+  active: "rgba(118, 118, 128, 0.2)",
+  ink: "#000000",
+  ink2: "#3a3a3c",
+  dim: "rgba(60, 60, 67, 0.6)",
+  dimmer: "rgba(60, 60, 67, 0.3)",
+  line: "rgba(60, 60, 67, 0.29)",
+  line2: "rgba(60, 60, 67, 0.29)",
+  primary: "#007aff",
   primaryInk: "#ffffff",
-  danger: "#c4302b",
-  ok: "#2f8f4e",
-  warn: "#b7791f",
+  danger: "#ff3b30",
+  ok: "#34c759",
+  warn: "#ff9500",
 };
 
 const dark: typeof light = {
-  bg: "#0b0b0c",
-  panel: "#141416",
-  sunken: "#1a1a1d",
-  active: "rgba(255, 255, 255, 0.08)",
-  ink: "#ededf0",
-  ink2: "#c6c6cc",
-  dim: "#8b8b94",
-  dimmer: "#5d5d66",
-  line: "rgba(255, 255, 255, 0.07)",
-  line2: "rgba(255, 255, 255, 0.12)",
-  primary: "#ededf0",
-  primaryInk: "#0b0b0c",
-  danger: "#ff6b63",
-  ok: "#5fcf80",
-  warn: "#e8b04a",
+  bg: "#000000",
+  grouped: "#000000",
+  panel: "#1c1c1e",
+  sunken: "#1c1c1e",
+  fill: "rgba(118, 118, 128, 0.24)",
+  active: "rgba(118, 118, 128, 0.36)",
+  ink: "#ffffff",
+  ink2: "#d1d1d6",
+  dim: "rgba(235, 235, 245, 0.6)",
+  dimmer: "rgba(235, 235, 245, 0.3)",
+  line: "rgba(84, 84, 88, 0.6)",
+  line2: "rgba(84, 84, 88, 0.6)",
+  primary: "#0a84ff",
+  primaryInk: "#ffffff",
+  danger: "#ff453a",
+  ok: "#30d158",
+  warn: "#ff9f0a",
 };
 
 export type Theme = typeof light;
