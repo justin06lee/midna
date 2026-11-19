@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Storage from "expo-sqlite/kv-store";
 import { accountChoices, modelGroups, providersInUse, thinkingWith, type Account, type BrainInfo, type BrainModel, type ModelChoice } from "@midna/protocol";
 import { useTheme } from "../theme";
 import { Group, GroupNote, GroupTitle, Problem, Row } from "../ui";
@@ -12,6 +13,16 @@ export interface Models {
   unlisted: Record<string, boolean>;
 }
 
+/** Where the brains' lists are kept between launches: names a brain gave, never ones made up here. */
+const REMEMBERED = "midna.models";
+function remembered(): Record<string, BrainModel[]> {
+  try {
+    return (JSON.parse(Storage.getItemSync(REMEMBERED) ?? "{}") as Record<string, BrainModel[]>) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * What the host can think with: its installed brains, and each one's own list
  * of models. The brains the host is set to (the model, a stand-in, the
@@ -22,7 +33,9 @@ export interface Models {
 export function useModels(midna: Midna, wanted: boolean): Models {
   const { client, status, link } = midna;
   const [brains, setBrains] = useState<BrainInfo[]>([]);
-  const [catalogues, setCatalogues] = useState<Record<string, BrainModel[]>>({});
+  // Started from the lists as last heard, so what is thinking has its name before the brain answers again.
+  const [catalogues, setCatalogues] = useState<Record<string, BrainModel[]>>(remembered);
+  useEffect(() => Storage.setItemSync(REMEMBERED, JSON.stringify(catalogues)), [catalogues]);
   const [unlisted, setUnlisted] = useState<Record<string, boolean>>({});
   const live = link === "live";
   useEffect(() => {

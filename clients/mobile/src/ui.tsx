@@ -129,7 +129,7 @@ export function Row({
   const t = useTheme();
   const body = (
     <View style={[s.rowBody, !first && { borderTopColor: t.line, borderTopWidth: StyleSheet.hairlineWidth }]}>
-      <View style={s.rowText}>
+      <View style={[s.rowText, !value && s.rowTextAlone]}>
         <Text numberOfLines={1} style={[s.rowLabel, { color: tone === "tint" ? t.primary : tone === "danger" ? t.danger : t.ink }]}>
           {label}
         </Text>
@@ -167,6 +167,8 @@ const s = StyleSheet.create({
   row: { paddingLeft: 16 },
   rowBody: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10, paddingRight: 16, paddingVertical: 11 },
   rowText: { flexShrink: 0, maxWidth: "70%" },
+  // With no value beside it, the label has the row.
+  rowTextAlone: { flex: 1, maxWidth: "100%" },
   rowLabel: { fontSize: 17 },
   rowNote: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   rowValue: { flex: 1, fontSize: 17, textAlign: "right" },

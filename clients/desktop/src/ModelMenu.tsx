@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { accountChoices, modelGroups, providersInUse, thinkingWith, type Account, type BrainInfo, type BrainModel, type MidnaClient, type ModelChoice, type Status } from "@midna/protocol";
 import { Icon, Spinner } from "./ui";
 
+/** Where the brains' lists are kept between launches: names a brain gave, never ones made up here. */
+const REMEMBERED = "midna.models";
+function remembered(): Record<string, BrainModel[]> {
+  try {
+    return (JSON.parse(localStorage.getItem(REMEMBERED) ?? "{}") as Record<string, BrainModel[]>) ?? {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * What the host can think with: its installed brains, and each one's own list
  * of models. The brains the host is set to (the model, a stand-in, the
@@ -12,7 +22,9 @@ import { Icon, Spinner } from "./ui";
  */
 export function useModels(client: MidnaClient, status: Status | null, wanted: boolean) {
   const [brains, setBrains] = useState<BrainInfo[]>([]);
-  const [catalogues, setCatalogues] = useState<Record<string, BrainModel[]>>({});
+  // Started from the lists as last heard, so what is thinking has its name before the brain answers again.
+  const [catalogues, setCatalogues] = useState<Record<string, BrainModel[]>>(remembered);
+  useEffect(() => localStorage.setItem(REMEMBERED, JSON.stringify(catalogues)), [catalogues]);
   const [unlisted, setUnlisted] = useState<Record<string, boolean>>({});
   useEffect(() => {
     void client.brains().then(setBrains, () => {});
