@@ -1,4 +1,4 @@
-import { APPROVAL_OPTIONS, type Approval } from "@midna/protocol";
+import { APPROVAL_OPTIONS, plainText, type Approval } from "@midna/protocol";
 import { useCallback, useEffect, useState } from "react";
 import { answerHere, handsApprovals, onHands } from "./host";
 import { Mark } from "./ui";
@@ -53,7 +53,7 @@ export function ApprovalPanel() {
             <Mark className="size-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] leading-snug font-semibold">midna wants to {a.summary}</div>
+            <div className="text-[13px] leading-snug font-semibold">midna wants to {plainText(a.summary)}</div>
             <div className="mt-0.5 text-[11.5px] text-dim">
               No answer in {left} s means no{pending.length > 1 ? ` · ${pending.length - 1} more waiting` : ""}
             </div>

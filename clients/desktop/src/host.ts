@@ -278,7 +278,11 @@ export async function relaunchApp(): Promise<void> {
 }
 /** What waits for a yes on this computer: packages/protocol's Approval, oldest first. */
 export async function handsApprovals(): Promise<Approval[]> {
-  return inApp ? (await core()).invoke<Approval[]>("hands_approvals") : [];
+  if (inApp) return (await core()).invoke<Approval[]>("hands_approvals");
+  // The browser preview has no hands: ?sample puts one made-up ask in the panel, to look at it.
+  if (!new URLSearchParams(location.search).has("sample")) return [];
+  const now = Date.now();
+  return [{ id: "apr_sample", deviceId: "dev_sample", deviceName: "this Mac", capability: "shell", op: "shell", summary: "run `brew upgrade` on this Mac", commandId: "cmd_sample", episodeId: null, outboxId: null, requestedAt: now, expiresAt: now + 96_000, state: "pending", answer: null, answeredBy: null, answeredVia: null, answeredAt: null } as Approval];
 }
 /** Answer an approval from this computer's panel; rejects with why when it's already over. */
 export async function answerHere(id: string, answer: ApprovalAnswer): Promise<void> {

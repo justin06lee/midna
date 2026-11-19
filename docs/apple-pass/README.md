@@ -11,6 +11,7 @@ A rough pass, for review before it goes further. Not pushed, no app built, nothi
 | `mac-thinking-dark.png` | midna thinking: the dots, and Stop where Send was. |
 | `mac-settings.png` | Settings, with the same menu and the Claude account. |
 | `mac-today.png`, `mac-objectives.png`, `mac-welcome.png` | The other screens. |
+| `mac-approval-panel-and-pill.png` | The panel that asks for a yes and the pill over the screen, at their windows' sizes, light and dark (in a browser, with a made-up ask). |
 | `phone-chat-model-settings.png` | The phone: chat, the model sheet, Settings. |
 | `phone-dark-approvals-vault.png` | The phone in dark: chat, Approvals, Vault. |
 
@@ -30,4 +31,4 @@ The system's typeface and greys, one accent colour (the system blue) for the thi
 ## Not seen yet
 
 - The phone on a phone. This Mac has no Xcode or simulator; the first TestFlight build from this branch is the first real look.
-- The Mac app built and running: the This Computer screen, the approval panel, the pill over the screen and Mac notifications only exist in the built app, and were restyled without being seen.
+- The Mac app built and running. Everything above was seen as the app's page in a browser; the This Computer screen only exists in the built app and was restyled without being seen, and the panel and the pill were seen in a browser, not as windows over the desktop.
