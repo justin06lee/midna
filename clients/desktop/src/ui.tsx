@@ -27,15 +27,16 @@ export function Button({
   className?: string;
   type?: "button" | "submit";
 }) {
+  // A Mac's push buttons: the one to press in the accent colour, the others on a quiet grey.
   const variants = {
-    primary: "bg-primary text-primary-ink border-transparent hover:opacity-90 active:opacity-80",
-    default: "bg-panel text-ink border-line-2 hover:bg-sunken active:bg-active shadow-[0_1px_1px_rgba(0,0,0,0.03)]",
-    ghost: "bg-transparent text-dim border-transparent hover:bg-hover hover:text-ink active:bg-active",
+    primary: "bg-primary text-primary-ink hover:brightness-110 active:brightness-95",
+    default: "bg-control text-ink hover:bg-control-hover active:bg-active",
+    ghost: "bg-transparent text-accent hover:bg-hover active:bg-active",
   }[variant];
   const sizes = {
-    sm: "h-7 px-2.5 text-[12.5px] gap-1.5 rounded-[7px]",
-    md: "h-8 px-3 text-[13px] gap-1.5 rounded-lg",
-    lg: "h-10 px-4 text-[14px] gap-2 rounded-[10px]",
+    sm: "h-6 px-2.5 text-[12px] gap-1 rounded-[6px]",
+    md: "h-7 px-3 text-[13px] gap-1.5 rounded-[7px]",
+    lg: "h-9 px-4 text-[14px] gap-2 rounded-[9px]",
   }[size];
   return (
     <button
@@ -43,7 +44,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled || busy}
       title={title}
-      className={`inline-flex shrink-0 items-center justify-center border font-medium whitespace-nowrap transition-[background-color,opacity,color,border-color] duration-150 disabled:opacity-40 ${variants} ${sizes} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-[background-color,filter,opacity] duration-150 disabled:opacity-40 ${variant === "primary" ? "font-medium" : ""} ${variants} ${sizes} ${className}`}
     >
       {busy ? <Spinner /> : icon}
       {children}
@@ -70,14 +71,15 @@ export function Mark({ className = "size-5" }: { className?: string }) {
 }
 
 /**
- * State by shape, not colour: a solid dot is running, a ring is reachable,
- * a cross is unreachable, a spinner is working on it.
+ * State by shape first: a solid dot is running (green, as the system marks
+ * what is on), a ring is reachable, a cross is unreachable, a spinner is
+ * working on it.
  */
 export function StateMark({ state }: { state: "running" | "online" | "offline" | "working" }) {
   if (state === "working") return <Spinner className="size-3" />;
   return (
     <svg className="size-3 shrink-0" viewBox="0 0 12 12" aria-hidden="true">
-      {state === "running" && <circle cx="6" cy="6" r="4" fill="currentColor" />}
+      {state === "running" && <circle cx="6" cy="6" r="4" fill="var(--ok)" />}
       {state === "online" && <circle cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.3" />}
       {state === "offline" && <path d="M3.5 3.5l5 5M8.5 3.5l-5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />}
     </svg>
@@ -86,14 +88,16 @@ export function StateMark({ state }: { state: "running" | "online" | "offline" |
 
 export function Segmented<T extends string>({ value, options, onChange, disabled }: { value: T; options: Array<{ value: T; label: string }>; onChange: (v: T) => void; disabled?: boolean }) {
   return (
-    <div className="inline-flex rounded-lg border border-line-2 bg-sunken p-0.5">
+    <div role="radiogroup" className={`inline-flex rounded-[7px] bg-control p-0.5 ${disabled ? "opacity-50" : ""}`}>
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          role="radio"
+          aria-checked={o.value === value}
           disabled={disabled}
           onClick={() => onChange(o.value)}
-          className={`h-7 rounded-md px-3 text-[12.5px] font-medium transition-colors ${o.value === value ? "bg-panel text-ink shadow-[0_0_0_1px_var(--line-2)]" : "text-dim hover:text-ink"}`}
+          className={`h-6 rounded-[5px] px-3 text-[12.5px] transition-[background-color,box-shadow] duration-150 ${o.value === value ? "bg-knob font-medium text-ink shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.14)]" : "text-ink-2"}`}
         >
           {o.label}
         </button>
@@ -102,15 +106,64 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
   );
 }
 
-export function Section({ title, aside, children, className = "" }: { title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
+/** On or off, as a switch: for a setting that takes effect at once. */
+export function Switch({ on, onChange, disabled, label }: { on: boolean; onChange: (on: boolean) => void; disabled?: boolean; label?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      className={`relative h-[20px] w-[34px] shrink-0 rounded-full transition-colors duration-200 disabled:opacity-40 ${on ? "bg-accent" : "bg-active"}`}
+    >
+      <span className={`absolute top-[2px] left-[2px] size-4 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform duration-200 ${on ? "translate-x-[14px]" : ""}`} />
+    </button>
+  );
+}
+
+export function Section({ title, aside, footer, children, className = "" }: { title?: string; aside?: ReactNode; footer?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <section className={className}>
-      <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
-        <h2 className="text-[11.5px] font-medium tracking-wide text-dim uppercase">{title}</h2>
-        {aside}
-      </div>
+      {(title || aside) && (
+        <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
+          {title && <h2 className="text-[13px] font-semibold">{title}</h2>}
+          {aside}
+        </div>
+      )}
       {children}
+      {footer && <p className="mt-1.5 px-3 text-[11.5px] leading-[1.4] text-dim">{footer}</p>}
     </section>
+  );
+}
+
+/** A group of rows on one toned surface, a hairline between them: how System Settings lays out a form. */
+export function Group({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <div className={`sheet divide-y divide-line overflow-hidden rounded-[10px] ${className}`}>{children}</div>;
+}
+
+/** One row of a Group: what it is on the left (with a line under it, if it needs one), its control on the right. */
+export function Row({ label, note, children, top }: { label: ReactNode; note?: ReactNode; children?: ReactNode; top?: boolean }) {
+  return (
+    <div className={`flex min-h-[40px] gap-3 px-3 py-2 ${top ? "items-start" : "items-center"}`}>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px]">{label}</div>
+        {note && <div className="mt-0.5 text-[11.5px] leading-[1.4] text-dim">{note}</div>}
+      </div>
+      {children && <div className="flex shrink-0 items-center gap-2">{children}</div>}
+    </div>
+  );
+}
+
+/** A line across the top of a screen that says something is up, with what to do about it. */
+export function Banner({ children, actions, busy }: { children: ReactNode; actions?: ReactNode; busy?: boolean }) {
+  return (
+    <div role="status" className="rise mx-6 mb-2 flex items-center gap-3 rounded-[10px] bg-fill px-3.5 py-2 text-[12.5px]">
+      {busy && <Spinner className="shrink-0 text-dim" />}
+      <span className="min-w-0 flex-1">{children}</span>
+      {actions}
+    </div>
   );
 }
 
@@ -138,7 +191,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
 }
 
-export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause" | "key" | "plus"; className?: string }) {
+export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause" | "key" | "plus" | "chevron" | "updown" | "stop"; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     chat: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" />,
     today: (
@@ -176,6 +229,9 @@ export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | 
       </>
     ),
     plus: <path d="M10 4.5v11M4.5 10h11" />,
+    chevron: <path d="m7.5 5 5 5-5 5" />,
+    updown: <path d="m6.5 8 3.5-3.5L13.5 8M6.5 12l3.5 3.5 3.5-3.5" />,
+    stop: <rect x="6" y="6" width="8" height="8" rx="1.5" fill="currentColor" stroke="none" />,
     back: <path d="M11.5 5 6.5 10l5 5" />,
     refresh: <path d="M15.5 10a5.5 5.5 0 1 1-1.6-3.9M15.5 4v3h-3" />,
     copy: (

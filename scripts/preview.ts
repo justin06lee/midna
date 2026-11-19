@@ -72,7 +72,8 @@ async function act(run: BrainRun, call: (name: string, args: Record<string, unkn
     return "";
   }
   await Bun.sleep(Number(process.env.PREVIEW_THINK_MS ?? 400));
-  return "Okay.";
+  // Says what it was asked to think with, so a change of model can be seen to hold from the next turn.
+  return `Okay. (This turn ran as ${run.model}${run.account ? ` on the ${run.account} account` : ""}.)`;
 }
 
 const brain: Brain = async (run) => {

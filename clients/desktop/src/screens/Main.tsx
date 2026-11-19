@@ -4,7 +4,8 @@ import { draftKey } from "../drafts";
 import { enableNotifications, inApp, macTitleBar, onNotificationOpen, openTerminal, setHandsPaused } from "../host";
 import { useHands } from "../useHands";
 import { useNotifications } from "../useNotifications";
-import { Button, Icon, Loading, Mark, Spinner, StateMark } from "../ui";
+import { ModelMenu } from "../ModelMenu";
+import { Banner, Button, Icon, Loading, Mark } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
 import { Computer } from "./Computer";
@@ -118,20 +119,22 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-[208px] shrink-0 flex-col border-r border-line">
+      {/* The sidebar is told from the content by its tone, as a Mac's is. */}
+      <aside className="flex w-[200px] shrink-0 flex-col bg-sidebar">
         {/* The title bar: midna's mark beside the traffic lights; which machine it's on, in its tooltip. */}
         <div data-tauri-drag-region="deep" title={`${m.status?.name ?? connection.name} on ${host}`} className={`flex h-11 shrink-0 items-center pr-3 ${macTitleBar ? "pl-[92px]" : "pl-4"}`}>
           <Mark className="size-[18px] text-ink" />
         </div>
-        <nav className="space-y-0.5 px-2 pt-1.5">
+        <nav className="space-y-px px-2.5 pt-1">
           {NAV.map((n) => (
             <button
               key={n.id}
               type="button"
+              aria-current={view === n.id ? "page" : undefined}
               onClick={() => setView(n.id)}
-              className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-[13px] transition-colors ${view === n.id ? "bg-active font-medium text-ink" : "text-ink-2 hover:bg-hover"}`}
+              className={`flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-[13px] text-ink transition-colors ${view === n.id ? "bg-active" : "hover:bg-hover"}`}
             >
-              <Icon name={n.icon} className="size-[17px]" />
+              <Icon name={n.icon} className="size-4 text-accent" />
               {n.label}
             </button>
           ))}
@@ -141,58 +144,60 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
       <main className="flex min-w-0 flex-1 flex-col">
         <div data-tauri-drag-region className="h-11 shrink-0" />
         {unreachable && (
-          <div className="rise mx-6 mb-2 flex items-center gap-2.5 rounded-xl border border-line-2 bg-panel px-4 py-2.5 text-[12.5px]">
-            <Spinner className="text-dim" />
-            <span>
-              <span className="font-medium">Can't reach midna on {host}.</span> <span className="text-dim">Trying again…</span>
-            </span>
-          </div>
+          <Banner busy>
+            <span className="font-medium">Can't reach midna on {host}.</span> <span className="text-dim">Trying again…</span>
+          </Banner>
         )}
         {hands?.active && !hands.paused && (
-          <div className="rise mx-6 mb-2 flex items-center gap-2.5 rounded-xl border border-line-2 bg-panel px-4 py-2.5 text-[12.5px]">
-            <StateMark state="working" />
-            <span className="flex-1">
-              <span className="font-medium">midna is using this computer:</span> <span className="text-dim">{hands.active}</span>
-            </span>
-            <Button size="sm" onClick={() => void setHandsPaused(true)} icon={<Icon name="pause" className="size-3.5" />}>
-              Pause
-            </Button>
-          </div>
+          <Banner
+            busy
+            actions={
+              <Button size="sm" onClick={() => void setHandsPaused(true)} icon={<Icon name="pause" className="size-3.5" />}>
+                Pause
+              </Button>
+            }
+          >
+            <span className="font-medium">midna is using this computer:</span> <span className="text-dim">{hands.active}</span>
+          </Banner>
         )}
         {notificationsOff && (
-          <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
-            <span className="flex-1 text-[12.5px]">
-              <span className="font-medium">Notifications are off on this computer.</span> <span className="text-dim">You won't hear when midna replies or needs you.</span>
-            </span>
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => {
-                setAskedNotifications(true);
-                void enableNotifications();
-              }}
-            >
-              Turn on
-            </Button>
-          </div>
+          <Banner
+            actions={
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  setAskedNotifications(true);
+                  void enableNotifications();
+                }}
+              >
+                Turn On
+              </Button>
+            }
+          >
+            <span className="font-medium">Notifications are off on this computer.</span> <span className="text-dim">You won't hear when midna replies or needs you.</span>
+          </Banner>
         )}
         {brain?.ok === false && (
-          <div className="rise mx-6 mb-2 flex items-center gap-3 rounded-xl border border-line-2 bg-panel px-4 py-2.5">
-            <span className="flex-1 text-[12.5px]">
-              <span className="font-medium">midna can't think right now.</span>{" "}
-              <span className="text-dim">
-                {brain.reason === "signed_out" ? `${m.status?.model.split(":")[0]} isn't signed in on ${host}.` : brain.reason === "not_installed" ? `Its brain isn't installed on ${host}: ${brain.installHint}` : brain.message}
-              </span>
+          <Banner
+            actions={
+              <>
+                {brain.reason === "signed_out" && (
+                  <Button size="sm" variant="primary" onClick={signIn} icon={<Icon name="terminal" className="size-3.5" />}>
+                    Sign In on {host}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => void checkBrain()}>
+                  Check Again
+                </Button>
+              </>
+            }
+          >
+            <span className="font-medium">midna can't think right now.</span>{" "}
+            <span className="text-dim">
+              {brain.reason === "signed_out" ? `${m.status?.model.split(":")[0]} isn't signed in on ${host}.` : brain.reason === "not_installed" ? `Its brain isn't installed on ${host}: ${brain.installHint}` : brain.message}
             </span>
-            {brain.reason === "signed_out" && (
-              <Button size="sm" variant="primary" onClick={signIn} icon={<Icon name="terminal" className="size-3.5" />}>
-                Sign in on {host}
-              </Button>
-            )}
-            <Button size="sm" onClick={() => void checkBrain()}>
-              Check again
-            </Button>
-          </div>
+          </Banner>
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Hidden, never unmounted: a half-written message and its uploads wait here. */}
@@ -213,6 +218,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
               answerApproval={m.answerApproval}
               shown={view === "chat"}
               draftKey={draftKey(connection)}
+              controls={<ModelMenu client={m.client} status={m.status} onStatus={(s) => m.setStatus(s)} />}
             />
           </div>
           {(view === "today" || view === "goals") && !overview && <Loading error={overviewError} onRetry={() => setOverviewTry((n) => n + 1)} />}
