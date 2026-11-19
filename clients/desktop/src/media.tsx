@@ -173,7 +173,7 @@ function FileChip({ a }: { a: Attachment }) {
   };
   return (
     <Captioned a={a} width={340}>
-      <div title={`${a.name} · ${a.mime}`} className="flex max-w-[340px] items-center rounded-[10px] border border-line bg-panel text-[12.5px]">
+      <div title={`${a.name} · ${a.mime}`} className="flex max-w-[340px] items-center rounded-[10px] bg-fill text-[12.5px]">
         <button type="button" onClick={act("open", show)} className="flex min-w-0 flex-1 items-center gap-2 rounded-l-[9px] py-1.5 pr-1.5 pl-2.5 text-left hover:bg-hover">
           {busy === "open" ? <Spinner className="size-4 shrink-0 text-dim" /> : <Icon name="file" className="size-4 shrink-0 text-dim" />}
           <span className="truncate font-medium">{a.name}</span>
@@ -210,7 +210,7 @@ function AttachedImage({ a, single }: { a: Attachment; single: boolean }) {
   if (failed) {
     return (
       <Captioned a={a} width={200}>
-        <div title={failed} className="flex h-[72px] w-[200px] flex-col items-center justify-center gap-1 rounded-[10px] border border-line bg-sunken px-3 text-center text-[11.5px] text-dim">
+        <div title={failed} className="flex h-[72px] w-[200px] flex-col items-center justify-center gap-1 rounded-[10px] bg-sunken px-3 text-center text-[11.5px] text-dim">
           <span className="truncate font-medium text-ink-2">{a.name}</span>
           couldn't load this image
         </div>
@@ -220,7 +220,7 @@ function AttachedImage({ a, single }: { a: Attachment; single: boolean }) {
   if (!image) {
     return (
       <Captioned a={a} width={single ? 260 : 150}>
-        <div className={`flex items-center justify-center rounded-[10px] border border-line bg-sunken text-dimmer ${single ? "h-[180px] w-[260px]" : "h-[150px] w-[150px]"}`}>
+        <div className={`flex items-center justify-center rounded-[10px] bg-sunken text-dimmer ${single ? "h-[180px] w-[260px]" : "h-[150px] w-[150px]"}`}>
           <Spinner />
         </div>
       </Captioned>
@@ -231,7 +231,7 @@ function AttachedImage({ a, single }: { a: Attachment; single: boolean }) {
   const height = single ? width / ratio : 150;
   return (
     <Captioned a={a} width={width}>
-      <button type="button" title={a.name} onClick={() => media?.view({ kind: "image", src: image.src, name: a.name, attachment: a })} className="block max-w-full cursor-zoom-in overflow-hidden rounded-[10px] border border-line bg-sunken outline-none focus-visible:shadow-[0_0_0_3px_var(--focus)]">
+      <button type="button" title={a.name} onClick={() => media?.view({ kind: "image", src: image.src, name: a.name, attachment: a })} className="block max-w-full cursor-zoom-in overflow-hidden rounded-[10px] bg-sunken outline-none focus-visible:shadow-[0_0_0_3px_var(--focus)]">
         <img src={image.src} alt={a.name} draggable={false} style={{ width, height }} className="block max-w-full object-cover" />
       </button>
     </Captioned>
@@ -245,7 +245,7 @@ export function WebImage({ src, alt }: { src: string; alt: string }) {
   const web = /^https?:\/\//i.test(src);
   if (!web || failed) {
     return (
-      <span title={src} className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-[8px] border border-line bg-sunken px-2 py-1 align-middle text-[12px] text-dim">
+      <span title={src} className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-[8px] bg-sunken px-2 py-1 align-middle text-[12px] text-dim">
         <Icon name="image" className="size-3.5 shrink-0" />
         <span className="truncate">{failed ? `couldn't load ${alt || "image"}` : `${alt || "an image"} on midna's machine — ask midna to attach it`}</span>
       </span>

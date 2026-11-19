@@ -42,7 +42,7 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
   if (none)
     return (
       <Page>
-        <div className="sheet rounded-xl px-5 py-8 text-center">
+        <div className="sheet rounded-[10px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">No vault on this midna</p>
           <p className="selectable mx-auto mt-1 max-w-[400px] text-[12.5px] text-dim">{none.replace(/^there's no vault here: /, "")}. ghostly keeps its vault on midna's host.</p>
         </div>
@@ -59,13 +59,13 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
       action={
         open.value !== NEW && (
           <Button onClick={() => open.set(NEW)} icon={<Icon name="plus" className="size-3.5" />}>
-            Add login
+            Add Login
           </Button>
         )
       }
     >
       {items.length > 0 && (
-        <input className="field mb-3 h-9 w-full px-3 text-[13px]" placeholder="Find by title" value={query.value} onChange={(e) => query.set(e.target.value)} spellCheck={false} />
+        <input type="search" className="mb-3 h-7 w-full rounded-[7px] bg-control px-2.5 text-[13px] outline-none placeholder:text-dim focus:shadow-[0_0_0_3px_var(--focus)]" placeholder="Search" value={query.value} onChange={(e) => query.set(e.target.value)} spellCheck={false} />
       )}
       {open.value === NEW && (
         <div className="mb-3">
@@ -73,26 +73,27 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
         </div>
       )}
       {items.length === 0 && open.value !== NEW ? (
-        <div className="sheet rounded-xl px-5 py-8 text-center">
+        <div className="sheet rounded-[10px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">Nothing in the vault yet</p>
           <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] text-dim">Add a login, and midna can find it by its title when you ask.</p>
         </div>
       ) : shown.length === 0 && q ? (
-        <p className="px-1 py-2 text-[12.5px] text-dimmer">No login titled "{query.value.trim()}".</p>
+        <p className="px-1 py-2 text-[12.5px] text-dim">No login titled "{query.value.trim()}".</p>
       ) : (
         shown.length > 0 && (
-          <div className="sheet overflow-hidden rounded-xl">
+          <div className="sheet divide-y divide-line overflow-hidden rounded-[10px]">
             {shown.map((i) =>
               open.value === i.id ? (
-                <div key={i.id} className="border-b border-line last:border-b-0">
+                <div key={i.id}>
                   <Editor client={client} item={i} draftKey={draftKey} onDone={() => (close(), reload())} onCancel={close} flat />
                 </div>
               ) : (
-                <button key={i.id} type="button" onClick={() => open.set(i.id)} className="flex w-full items-baseline gap-3 border-b border-line px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-hover">
+                <button key={i.id} type="button" onClick={() => open.set(i.id)} className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-hover">
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[13.5px] font-medium">{i.title}</span>
-                    {(i.username || i.url) && <span className="block text-[12px] text-dim">{[i.username, vaultSite(i.url)].filter(Boolean).join(" · ")}</span>}
+                    <span className="block text-[13px]">{i.title}</span>
+                    {(i.username || i.url) && <span className="block text-[11.5px] text-dim">{[i.username, vaultSite(i.url)].filter(Boolean).join(" · ")}</span>}
                   </span>
+                  <Icon name="chevron" className="size-3 shrink-0 text-dimmer" />
                 </button>
               ),
             )}
@@ -105,10 +106,10 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
 
 function Page({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-[760px] px-8 pt-4 pb-10">
+    <div className="mx-auto w-full max-w-[760px] px-8 pt-2 pb-10">
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.02em]">Vault</h1>
+          <h1 className="text-[20px] font-semibold">Vault</h1>
           <p className="mt-0.5 max-w-[460px] text-[13px] text-dim">Logins midna keeps in ghostly. Hermes finds one by its title, and asks you before it uses a password.</p>
         </div>
         {action}
@@ -209,19 +210,19 @@ function Editor({ client, item, draftKey, onDone, onCancel, flat }: { client: Mi
   };
 
   return (
-    <form onSubmit={save} className={flat ? "bg-sunken px-4 py-4" : "sheet rounded-xl px-4 py-4"}>
-      <div className="grid grid-cols-[88px_1fr] items-center gap-x-3 gap-y-2.5">
-        <label className="text-[12.5px] text-dim">Title</label>
-        <input autoFocus={!item} className="field h-8 px-2.5 text-[13px]" value={title.value} onChange={(e) => title.set(e.target.value)} placeholder="GitHub" spellCheck={false} />
-        <label className="text-[12.5px] text-dim">Username</label>
-        <input className="field h-8 px-2.5 text-[13px]" value={username.value} onChange={(e) => username.set(e.target.value)} autoComplete="off" spellCheck={false} />
-        <label className="text-[12.5px] text-dim">Website</label>
-        <input className="field h-8 px-2.5 text-[13px]" value={url.value} onChange={(e) => url.set(e.target.value)} placeholder="https://" spellCheck={false} />
-        <label className="text-[12.5px] text-dim">Password</label>
+    <form onSubmit={save} className={flat ? "px-3 py-3.5" : "sheet rounded-[10px] px-3 py-3.5"}>
+      <div className="grid grid-cols-[80px_1fr] items-center gap-x-3 gap-y-2">
+        <label className="text-right text-[13px]">Title</label>
+        <input autoFocus={!item} className="field h-7 px-2 text-[13px]" value={title.value} onChange={(e) => title.set(e.target.value)} placeholder="GitHub" spellCheck={false} />
+        <label className="text-right text-[13px]">Username</label>
+        <input className="field h-7 px-2 text-[13px]" value={username.value} onChange={(e) => username.set(e.target.value)} autoComplete="off" spellCheck={false} />
+        <label className="text-right text-[13px]">Website</label>
+        <input className="field h-7 px-2 text-[13px]" value={url.value} onChange={(e) => url.set(e.target.value)} placeholder="https://" spellCheck={false} />
+        <label className="text-right text-[13px]">Password</label>
         <div className="flex items-center gap-1.5">
           <input
             type={visible ? "text" : "password"}
-            className="field h-8 min-w-0 flex-1 px-2.5 font-mono text-[12.5px]"
+            className="field h-7 min-w-0 flex-1 px-2 font-mono text-[12.5px]"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={item ? "Unchanged" : ""}
@@ -243,16 +244,14 @@ function Editor({ client, item, draftKey, onDone, onCancel, flat }: { client: Mi
       {problem && <p className="selectable mt-3 text-[12.5px] text-ink-2">{problem}</p>}
       <div className="mt-4 flex items-center gap-2">
         {item && (
-          <Button size="sm" variant="ghost" busy={busy === "trash"} onClick={() => void trash()}>
-            {sure ? "Move to trash?" : "Move to trash"}
+          <Button variant="ghost" className="-ml-3 text-[var(--bad)]" busy={busy === "trash"} onClick={() => void trash()}>
+            {sure ? "Move to Trash?" : "Move to Trash"}
           </Button>
         )}
         <span className="flex-1" />
         {busy === "save" && <Spinner className="text-dim" />}
-        <Button size="sm" variant="ghost" onClick={cancel}>
-          Cancel
-        </Button>
-        <Button size="sm" variant="primary" type="submit" disabled={busy !== null}>
+        <Button onClick={cancel}>Cancel</Button>
+        <Button variant="primary" type="submit" disabled={busy !== null}>
           {item ? "Save" : "Add"}
         </Button>
       </div>

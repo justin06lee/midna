@@ -46,11 +46,14 @@ export function ApprovalPanel() {
 
   return (
     <div className="flex h-screen items-start justify-center p-1">
-      <div className="w-full rounded-2xl border border-line-2 bg-panel p-3.5 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.5)]">
+      {/* As the system asks for a permission: who is asking, what for, and the answer to give in the accent colour. */}
+      <div role="alertdialog" aria-label="midna asks" className="w-full rounded-2xl bg-panel p-3.5 shadow-[0_0_0_0.5px_var(--line-2),0_10px_30px_-10px_rgba(0,0,0,0.5)]">
         <div className="flex items-start gap-2.5">
-          <Mark className="mt-0.5 size-4 shrink-0" />
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-[7px] bg-ink text-bg">
+            <Mark className="size-4" />
+          </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] leading-snug font-medium">midna wants to {a.summary}</div>
+            <div className="text-[13px] leading-snug font-semibold">midna wants to {a.summary}</div>
             <div className="mt-0.5 text-[11.5px] text-dim">
               No answer in {left} s means no{pending.length > 1 ? ` · ${pending.length - 1} more waiting` : ""}
             </div>
@@ -58,14 +61,15 @@ export function ApprovalPanel() {
         </div>
         {problem && <div className="mt-2 text-[11.5px] text-ink-2">{problem}</div>}
         <div className="mt-3 flex justify-end gap-1.5">
-          {APPROVAL_OPTIONS.map((o) => (
+          {/* The answer that lets it go ahead sits last, where a Mac's dialogs put theirs. */}
+          {[...APPROVAL_OPTIONS].reverse().map((o) => (
             <button
               key={o.answer}
               type="button"
               disabled={busy}
               onClick={() => void answer(o.answer)}
-              className={`h-7 rounded-full px-3 text-[12.5px] font-medium transition-colors disabled:opacity-45 ${
-                o.answer === "allow" ? "bg-primary text-primary-ink" : "border border-line-2 bg-panel hover:bg-sunken"
+              className={`h-7 rounded-[7px] px-3 text-[13px] transition-colors disabled:opacity-45 ${
+                o.answer === "allow" ? "bg-primary font-medium text-primary-ink hover:brightness-110" : "bg-control hover:bg-control-hover"
               }`}
             >
               {o.label}

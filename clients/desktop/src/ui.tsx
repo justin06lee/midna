@@ -188,7 +188,7 @@ export function Loading({ error, onRetry }: { error?: string | null; onRetry?: (
 }
 
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="px-1 py-2 text-[12.5px] text-dimmer">{children}</p>;
+  return <p className="px-3 py-2.5 text-[12.5px] text-dim">{children}</p>;
 }
 
 export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause" | "key" | "plus" | "chevron" | "updown" | "stop"; className?: string }) {

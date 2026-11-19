@@ -43,18 +43,18 @@ export function Welcome({ choices, onChoices, onPick, notice }: { choices: Insta
       <div className="flex flex-1 justify-center overflow-y-auto px-8 pb-10">
         <div className="w-full max-w-[560px] pt-6">
           <div className="mb-7 flex flex-col items-center text-center">
-            <div className="mb-4 flex size-12 items-center justify-center rounded-[14px] bg-primary text-primary-ink shadow-[0_8px_24px_-10px_rgba(0,0,0,0.5)]">
+            <div className="mb-4 flex size-14 items-center justify-center rounded-[14px] bg-ink text-bg">
               <Mark className="size-7" />
             </div>
-            <h1 className="text-[22px] font-semibold tracking-[-0.02em]">Where should midna live?</h1>
+            <h1 className="text-[20px] font-semibold">Where should midna live?</h1>
             <p className="mt-1.5 max-w-[420px] text-[13.5px] text-dim">
               Pick the computer that stays on. midna runs there, keeps track of everything, and reaches you wherever you are.
             </p>
           </div>
 
-          {notice && <div className="rise mb-4 rounded-lg border border-line-2 bg-panel px-3.5 py-2.5 text-[12.5px] text-ink-2">{notice}</div>}
+          {notice && <div role="status" className="rise mb-4 rounded-[10px] bg-fill px-3.5 py-2.5 text-[12.5px] text-ink-2">{notice}</div>}
 
-          <div className="sheet overflow-hidden rounded-xl">
+          <div className="sheet overflow-hidden rounded-[10px]">
             {!devices && !error && (
               <div className="flex items-center gap-2.5 px-4 py-5 text-dim">
                 <Spinner /> Looking for your machines…
@@ -66,34 +66,34 @@ export function Welcome({ choices, onChoices, onPick, notice }: { choices: Insta
             ))}
           </div>
 
-          <div className="mt-2.5 flex items-center justify-between px-1 text-[12px] text-dimmer">
+          <div className="mt-1.5 flex items-center justify-between pl-3 text-[11.5px] text-dim">
             <span>
               {devices && remote === 0
                 ? "No other machines found. midna finds them over makima or Tailscale."
                 : "Found over makima and Tailscale. Setting up a machine reaches it over SSH."}
             </span>
             <Button variant="ghost" size="sm" onClick={() => void look()} busy={looking} icon={<Icon name="refresh" className="size-3.5" />}>
-              Look again
+              Look Again
             </Button>
           </div>
 
-          <div className="mt-6 rounded-xl border border-line px-4 py-3">
+          <div className="sheet mt-6 rounded-[10px] px-3 py-2.5">
             <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setShowOptions((v) => !v)}>
               <span className="text-[12.5px] text-dim">
                 Starts with <span className="text-ink-2">{choices.model}</span> · <span className="text-ink-2">{choices.timezone}</span> ·{" "}
                 <span className="text-ink-2">{choices.mode === "autonomous" ? "acts on its own" : "asks first"}</span>
               </span>
-              <span className="text-[12px] text-dimmer">{showOptions ? "Done" : "Change"}</span>
+              <span className="text-[12.5px] text-accent">{showOptions ? "Done" : "Change…"}</span>
             </button>
             {showOptions && (
               <div className="rise mt-3 grid grid-cols-[110px_1fr] items-center gap-x-4 gap-y-3 border-t border-line pt-3">
                 <label className="text-[12.5px] text-dim">Brain</label>
                 <div className="flex items-center gap-2">
-                  <input className="field h-8 w-52 px-2.5 font-mono text-[12px]" value={choices.model} onChange={(e) => onChoices({ ...choices, model: e.target.value })} spellCheck={false} />
-                  <span className="text-[11.5px] text-dimmer">claude:opus, claude:sonnet, codex, gemini…</span>
+                  <input className="field h-7 w-52 px-2 font-mono text-[12px]" value={choices.model} onChange={(e) => onChoices({ ...choices, model: e.target.value })} spellCheck={false} />
+                  <span className="text-[11.5px] text-dim">claude:opus, claude:sonnet, codex, gemini…</span>
                 </div>
                 <label className="text-[12.5px] text-dim">Timezone</label>
-                <input className="field h-8 w-52 px-2.5 text-[12.5px]" value={choices.timezone} onChange={(e) => onChoices({ ...choices, timezone: e.target.value })} spellCheck={false} />
+                <input className="field h-7 w-52 px-2 text-[12.5px]" value={choices.timezone} onChange={(e) => onChoices({ ...choices, timezone: e.target.value })} spellCheck={false} />
                 <label className="text-[12.5px] text-dim">Acting</label>
                 <Segmented
                   value={choices.mode}
@@ -115,16 +115,16 @@ export function Welcome({ choices, onChoices, onPick, notice }: { choices: Insta
 function DeviceRow({ device: d, first, onPick }: { device: DiscoveredDevice; first: boolean; onPick: () => void }) {
   const state = !d.online ? "offline" : d.midna.running ? "running" : "online";
   return (
-    <div className={`group flex items-center gap-3.5 px-4 py-3.5 ${first ? "" : "border-t border-line"} ${d.online ? "" : "opacity-50"}`}>
-      <div className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] border ${d.midna.running ? "border-transparent bg-primary text-primary-ink" : "border-line-2 bg-sunken text-ink-2"}`}>
+    <div className={`group flex items-center gap-3 px-3 py-2.5 ${first ? "" : "border-t border-line"} ${d.online ? "" : "opacity-50"}`}>
+      <div className={`flex size-8 shrink-0 items-center justify-center rounded-[8px] ${d.midna.running ? "bg-ink text-bg" : "bg-control text-ink-2"}`}>
         {d.midna.running ? <Mark className="size-[18px]" /> : <span className="text-[14px] font-semibold uppercase">{d.name.slice(0, 1)}</span>}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-medium">{d.name}</span>
-          {d.self && <span className="rounded-full border border-line-2 px-1.5 text-[10.5px] text-dim">this computer</span>}
+          <span className="truncate text-[13px] font-medium">{d.name}</span>
+          {d.self && <span className="rounded-full bg-control px-1.5 text-[10.5px] text-dim">This Mac</span>}
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-dim">
+        <div className="flex items-center gap-1.5 text-[11.5px] text-dim">
           <StateMark state={state} />
           <span className="truncate">
             {!d.online ? "offline" : d.midna.running ? `midna ${d.midna.version} is running here` : d.self ? "midna would run on this computer" : viaLabel(d)}
@@ -132,7 +132,7 @@ function DeviceRow({ device: d, first, onPick }: { device: DiscoveredDevice; fir
         </div>
       </div>
       <Button variant={first && d.online ? "primary" : "default"} disabled={!d.online} onClick={onPick}>
-        {d.midna.running ? "Connect" : "Set up here"}
+        {d.midna.running ? "Connect" : "Set Up Here"}
       </Button>
     </div>
   );

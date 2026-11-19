@@ -200,7 +200,7 @@ function PendingItem({ p, onRemove, onRetry }: { p: Pending; onRemove: () => voi
 
   if (thumb && p.preview) {
     return (
-      <div title={title} className="relative size-14 shrink-0 overflow-hidden rounded-[9px] border border-line bg-sunken">
+      <div title={title} className="relative size-14 shrink-0 overflow-hidden rounded-[9px] bg-sunken">
         <img src={p.preview} alt={p.file.name} draggable={false} onError={() => setThumb(false)} className={`size-full object-cover ${uploading ? "opacity-60" : ""}`} />
         {p.error && (
           <button type="button" title={p.retryable ? `${p.error} — try again` : p.error} onClick={p.retryable ? onRetry : undefined} className="absolute inset-0 flex items-center justify-center bg-black/55 text-white">
@@ -213,7 +213,7 @@ function PendingItem({ p, onRemove, onRetry }: { p: Pending; onRemove: () => voi
     );
   }
   return (
-    <div title={title} className="relative flex h-14 max-w-[230px] min-w-[150px] shrink-0 items-center gap-2 overflow-hidden rounded-[9px] border border-line bg-panel pr-7 pl-2.5">
+    <div title={title} className="relative flex h-14 max-w-[230px] min-w-[150px] shrink-0 items-center gap-2 overflow-hidden rounded-[9px] bg-fill pr-7 pl-2.5">
       {uploading ? <Spinner className="size-4 shrink-0 text-dim" /> : <Icon name="file" className="size-4 shrink-0 text-dim" />}
       <div className="min-w-0 text-[12px] leading-[1.35]">
         <div className="truncate font-medium">{p.file.name}</div>

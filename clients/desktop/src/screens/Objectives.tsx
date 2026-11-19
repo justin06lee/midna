@@ -19,19 +19,19 @@ export function Objectives({ overview, onDiscuss }: { overview: Overview; onDisc
   const orphans = overview.tasks.filter((t) => t.goal_id === null && t.owner === "user");
 
   return (
-    <div className="mx-auto w-full max-w-[760px] px-8 pt-4 pb-10">
+    <div className="mx-auto w-full max-w-[760px] px-8 pt-2 pb-10">
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-[-0.02em]">Objectives</h1>
+          <h1 className="text-[20px] font-semibold">Objectives</h1>
           <p className="mt-0.5 max-w-[460px] text-[13px] text-dim">What everything midna does is for. Goals change by talking them through — every change keeps its reason.</p>
         </div>
         <Button onClick={() => onDiscuss(goals.length ? "Let's review my objectives." : "Let's set my objectives — interview me.")} icon={<Icon name="chat" className="size-3.5" />}>
-          {goals.length ? "Review with midna" : "Set them with midna"}
+          {goals.length ? "Review with midna" : "Set Them with midna"}
         </Button>
       </header>
 
       {goals.length === 0 ? (
-        <div className="sheet rounded-xl px-5 py-8 text-center">
+        <div className="sheet rounded-[10px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">No objectives yet.</p>
           <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] text-dim">midna works best when it knows what you're aiming for — for your life, this year, this quarter. It'll interview you and draft them with you.</p>
         </div>
@@ -44,10 +44,10 @@ export function Objectives({ overview, onDiscuss }: { overview: Overview; onDisc
       )}
 
       {orphans.length > 0 && (
-        <Section title="Tasks that serve no goal" className="mt-8" aside={<span className="text-[11.5px] text-dimmer">midna will ask about these</span>}>
-          <div className="sheet overflow-hidden rounded-xl">
+        <Section title="Tasks that serve no goal" className="mt-8" aside={<span className="text-[11.5px] text-dim">midna will ask about these</span>}>
+          <div className="sheet divide-y divide-line overflow-hidden rounded-[10px]">
             {orphans.map((t) => (
-              <div key={t.id} className="border-b border-line px-3.5 py-2 text-[13px] last:border-b-0">
+              <div key={t.id} className="px-3 py-2 text-[13px]">
                 {t.title}
               </div>
             ))}
@@ -62,13 +62,13 @@ function GoalCard({ goal: g, depth, childrenOf, tasksFor }: { goal: Goal; depth:
   const kids = childrenOf(g.id);
   const tasks = tasksFor(g.id);
   return (
-    <div className={depth === 0 ? "sheet rounded-xl px-4 py-3.5" : "mt-3 border-l border-line-2 pl-4"}>
+    <div className={depth === 0 ? "sheet rounded-[10px] px-3.5 py-3" : "mt-3 border-l border-line-2 pl-3.5"}>
       <div className="flex items-baseline gap-2">
-        <span className="shrink-0 text-[10.5px] font-medium tracking-wide text-dimmer uppercase">{HORIZON[g.horizon]}</span>
-        {g.status === "paused" && <span className="text-[10.5px] text-dimmer uppercase">· paused</span>}
-        {g.target_at && <span className="ml-auto text-[11.5px] text-dimmer tabular">by {new Date(g.target_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>}
+        <span className="shrink-0 text-[11.5px] text-dim">{HORIZON[g.horizon]}</span>
+        {g.status === "paused" && <span className="text-[11.5px] text-dim">· Paused</span>}
+        {g.target_at && <span className="ml-auto text-[11.5px] text-dim tabular">by {new Date(g.target_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>}
       </div>
-      <div className={`selectable mt-0.5 font-medium ${depth === 0 ? "text-[15px]" : "text-[13.5px]"}`}>{g.title}</div>
+      <div className={`selectable mt-0.5 font-semibold ${depth === 0 ? "text-[15px]" : "text-[13px]"}`}>{g.title}</div>
       {(g.why || g.success) && (
         <div className="selectable mt-1 space-y-0.5 text-[12.5px] text-dim">
           {g.why && <p>Why: {g.why}</p>}
@@ -79,7 +79,7 @@ function GoalCard({ goal: g, depth, childrenOf, tasksFor }: { goal: Goal; depth:
         <ul className="mt-2 space-y-0.5 text-[12.5px] text-ink-2">
           {tasks.slice(0, 4).map((t) => (
             <li key={t.id} className="flex gap-2">
-              <span className="text-dimmer">{t.owner === "midna" ? "midna" : "you"}</span>
+              <span className="w-9 shrink-0 text-dim">{t.owner === "midna" ? "midna" : "You"}</span>
               <span className="selectable">{t.title}</span>
             </li>
           ))}

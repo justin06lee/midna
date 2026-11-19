@@ -20,16 +20,16 @@ export function Insecure({ connection, blocked, onRetry, onDisconnect }: { conne
       <div className="flex flex-1 justify-center overflow-y-auto px-8 pb-10">
         <div className="w-full max-w-[520px] pt-8">
           <div className="mb-6 flex items-center gap-3.5">
-            <div className="flex size-11 items-center justify-center rounded-[12px] bg-primary text-primary-ink">
+            <div className="flex size-11 items-center justify-center rounded-[12px] bg-ink text-bg">
               <Mark className="size-6" />
             </div>
             <div>
-              <h1 className="text-[19px] font-semibold tracking-[-0.015em]">midna on {host} needs an HTTPS address</h1>
+              <h1 className="text-[18px] font-semibold">midna on {host} needs an HTTPS address</h1>
               <p className="selectable text-[12.5px] text-dim">{connection.url}</p>
             </div>
           </div>
-          <div className="rise rounded-xl border border-line-2 bg-panel px-4 py-3.5">
-            <p className="text-[13.5px] font-medium">This app's window can't use plain http on the tailnet, and midna has no HTTPS address there.</p>
+          <div className="rise sheet rounded-[10px] px-3.5 py-3">
+            <p className="text-[13px] font-semibold">This app's window can't use plain http on the tailnet, and midna has no HTTPS address there.</p>
             <p className="selectable mt-1 text-[12.5px] text-dim">
               {blocked.message} Run <code className="font-mono">{blocked.command}</code> on {host} (HTTPS certificates must be on for the tailnet), then try again.
             </p>
@@ -38,10 +38,10 @@ export function Insecure({ connection, blocked, onRetry, onDisconnect }: { conne
                 Run it on {host}
               </Button>
               <Button onClick={() => void retry()} busy={busy}>
-                Try again
+                Try Again
               </Button>
               <Button variant="ghost" onClick={onDisconnect}>
-                Use another machine
+                Use Another Machine
               </Button>
             </div>
           </div>
