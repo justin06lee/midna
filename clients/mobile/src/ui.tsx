@@ -166,12 +166,13 @@ const s = StyleSheet.create({
   group: { borderRadius: 12, overflow: "hidden" },
   row: { paddingLeft: 16 },
   rowBody: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 10, paddingRight: 16, paddingVertical: 11 },
-  rowText: { flexShrink: 0, maxWidth: "70%" },
+  // The label keeps its width and the value takes what is left, so a long name is cut only when the row itself is too narrow.
+  rowText: { flexShrink: 1 },
   // With no value beside it, the label has the row.
-  rowTextAlone: { flex: 1, maxWidth: "100%" },
+  rowTextAlone: { flex: 1 },
   rowLabel: { fontSize: 17 },
   rowNote: { fontSize: 13, lineHeight: 18, marginTop: 2 },
-  rowValue: { flex: 1, fontSize: 17, textAlign: "right" },
+  rowValue: { flex: 1, minWidth: 0, fontSize: 17, textAlign: "right" },
   tick: { fontSize: 17, fontWeight: "600", marginLeft: "auto" },
   chevron: { fontSize: 22, lineHeight: 22, marginTop: -2 },
   button: { height: 50, borderRadius: 12, alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },

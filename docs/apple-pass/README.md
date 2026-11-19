@@ -2,6 +2,34 @@
 
 A rough pass, for review before it goes further. Not pushed, no app built, nothing on the host.
 
+## Round 3 (after the second review)
+
+| What was wrong | Before | After |
+| --- | --- | --- |
+| The Mac showed `*Justice*` with its asterisks | `mac-table-before.png` (the line above the table) | `mac-italic-after.png` |
+| The phone's table lost its right edge | `phone-table-before.png` | `phone-table-after.png` |
+| "Default" under a brain said nothing | round 2's menu | `mac-model-menu.png`, `phone-chat-model-settings.png` |
+| The Mac's code block had no Copy | | `mac-code-copy.png` (pointer over the block) |
+
+- **Italics.** The Mac's grammar had no `*italic*` at all (only `_italic_`), so the asterisks showed anywhere, not only in lists. It now reads what the phone reads: bold, italic both ways, struck, code and links, one inside another, in a line, a list item or a table's cell. Tested for each.
+- **The phone's table** is drawn to fit when it only just overflows the message (its column widths are a generous guess), so its right edge is there; a much wider table still scrolls inside itself.
+- **Default** names the model the brain runs when none is named, when its list marks one: "Default (Tidepool Alpha Free)", "Default (Grok 4.7)". The list request gives up after 20 seconds, so "Asking for its models…" always ends in a list or in "Couldn't list …'s models."
+- **Copy** sits in the corner of a code block on the Mac while the pointer is over it, and says "Copied" for a moment.
+- Found on the way, in WebKit: the menu's translucent surface let the chat read through its words, because the blur it leaned on isn't always drawn. Menus and notices are solid now. The model's name is also remembered between launches, so the button doesn't show a raw id for a moment while the brain is asked.
+
+### The built app
+
+The Mac app was built on charizard from this branch (release, under a bundle id and name of its own, `sh.midna.desktop.preview` / `midna-preview`, so the installed midna.app and its permissions were not touched; not installed, not notarized). Opened against the throwaway midna it starts, loads its page and connects: its WebKit process held the event stream, and the daemon logged its hands saying hello as app 0.13.6.
+
+It could not be photographed. charizard's screen is locked (nobody has touched it for nine hours), and behind a lock screen WebKit paints nothing: the window is there, empty. So the Mac pictures in this round are the next closest thing: **the production page the app carries, drawn by WebKit itself off screen** (`clients/desktop/scripts/websnap.swift`), at the app's window size. They show the real engine, type and colours. They do not show the title bar and traffic lights, or the screens that only exist in the app (This Computer, the panel, the pill). To photograph the real window once the Mac is unlocked:
+
+```sh
+cd clients/desktop && bun scripts/sidecar.ts
+bun run tauri build --bundles app --config '{"identifier":"sh.midna.desktop.preview","productName":"midna-preview","mainBinaryName":"midna-preview"}'
+# put the throwaway midna's connection.json (bun run preview prints its home) in ~/Library/Application Support/sh.midna.desktop.preview/
+open -g src-tauri/target/release/bundle/macos/midna-preview.app
+```
+
 ## Round 2 (after the first review)
 
 | What was wrong | Before | After |
@@ -19,16 +47,15 @@ A rough pass, for review before it goes further. Not pushed, no app built, nothi
 
 | Picture | What it shows |
 | --- | --- |
-| `mac-chat.png`, `mac-chat-dark.png` | The Mac's chat. `mac-chat-before.png` is how it was. |
-| `mac-model-menu.png` | The model menu, opened from the composer. |
-| `mac-thinking-dark.png` | midna thinking: the dots, and Stop where Send was. |
-| `mac-settings.png` | Settings, with the same menu and the Claude account. |
-| `mac-today.png`, `mac-objectives.png`, `mac-welcome.png` | The other screens. |
+| `mac-chat.png`, `mac-chat-dark.png` | The Mac's chat, drawn by WebKit. `mac-chat-before.png` is how it was before any of this. |
+| `mac-model-menu.png`, `mac-model-menu-dark.png`, `mac-model-menu-accounts.png` | The model menu, opened from the composer; the last is scrolled to the accounts. |
+| `mac-settings.png` | Settings, with the same menu, the Claude account and the fallbacks by name. |
+| `mac-thinking-dark.png`, `mac-today.png`, `mac-objectives.png`, `mac-welcome.png` | Round 1's pictures of the other screens (a browser, not WebKit). |
 | `mac-approval-panel-and-pill.png` | The panel that asks for a yes and the pill over the screen, at their windows' sizes, light and dark (in a browser, with a made-up ask). |
 | `phone-chat-model-settings.png` | The phone: chat, the model sheet, Settings. |
 | `phone-dark-approvals-vault.png` | The phone in dark: chat, Approvals, Vault. |
 
-The Mac pictures are the app's page in a browser against a throwaway midna (`bun run preview`, then `bun run --cwd clients/desktop dev`). The phone pictures are a **web render** of the phone's own source (`bun run preview:phone`), not an iPhone: layout, colours and type are the app's; the sheet, the keyboard, native controls and safe areas are approximations.
+The Mac pictures marked WebKit are the production page drawn off screen by the engine the app uses, against a throwaway midna (`bun run preview`). The phone pictures are a **web render** of the phone's own source (`bun run preview:phone`), also drawn by WebKit here, not an iPhone: layout, colours and type are the app's; the sheet, the keyboard, native controls and safe areas are approximations.
 
 ## The model switcher
 
@@ -44,4 +71,4 @@ The system's typeface and greys, one accent colour (the system blue) for the thi
 ## Not seen yet
 
 - The phone on a phone. This Mac has no Xcode or simulator; the first TestFlight build from this branch is the first real look.
-- The Mac app built and running. Everything above was seen as the app's page in a browser; the This Computer screen only exists in the built app and was restyled without being seen, and the panel and the pill were seen in a browser, not as windows over the desktop.
+- The Mac app's own window. It builds, starts and connects (see The built app), but it has not been seen painted: the This Computer screen has never been seen at all, and the panel and the pill only in a browser.

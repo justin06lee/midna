@@ -1,8 +1,11 @@
 <!doctype html>
 <html><head><meta charset="UTF-8" /><title>midna on the phone (web render)</title>
 <style>
-  body { margin: 0; background: #d9d9de; display: flex; gap: 22px; justify-content: center; align-items: center; height: 100vh; font-family: -apple-system, system-ui; }
-  .phone { width: 393px; height: 852px; zoom: 0.86; border-radius: 48px; overflow: hidden; box-shadow: 0 0 0 9px #111, 0 20px 50px rgba(0,0,0,.3); background: #000; }
+  body { margin: 0; background: #d9d9de; display: flex; gap: 40px; justify-content: center; align-items: center; height: 100vh; font-family: -apple-system, system-ui; }
+  /* Each phone is laid out at an iPhone's size and scaled down to fit the page: a transform, which every engine
+     treats alike (zoom on a frame changes the frame's own width in WebKit). */
+  .slot { width: 338px; height: 733px; }
+  .phone { width: 393px; height: 852px; transform: scale(0.86); transform-origin: top left; border-radius: 48px; overflow: hidden; box-shadow: 0 0 0 9px #111, 0 20px 50px rgba(0,0,0,.3); background: #000; }
   iframe { width: 393px; height: 852px; border: 0; }
 </style></head>
 <body><script>
@@ -11,6 +14,7 @@
     const d = document.createElement("div"); d.className = "phone";
     const f = document.createElement("iframe");
     f.src = `/index.html?connect=${encodeURIComponent(q.get("connect"))}&scheme=${q.get("scheme") ?? "light"}${open === "chat" ? "" : `&open=${open}`}`;
-    d.append(f); document.body.append(d);
+    const slot = document.createElement("div"); slot.className = "slot";
+    d.append(f); slot.append(d); document.body.append(slot);
   }
 </script></body></html>
