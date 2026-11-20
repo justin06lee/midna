@@ -11,6 +11,8 @@
 #                                    ~/Library/Keychains/midna-signing.keychain-db does unless told SIGNING=manual.
 #                                    The key needs the Admin role for it; an App Manager key is refused.
 #   UPLOAD=0 scripts/testflight.sh   archive and export an .ipa only
+#   ARCHIVE=0 scripts/testflight.sh  export and upload the archive already in build/ (after a signing problem),
+#                                    if its build number is app.json's
 #   MIDNA_ALARMS=0 scripts/testflight.sh   a build without the alarms module (modules/midna-alarms),
 #                                    should its Swift ever stop a build: the app runs without it
 #   MIDNA_FOCUS=1 scripts/testflight.sh    a build with Screen Time (docs/screen-time.md): only once Apple has
@@ -106,16 +108,23 @@ trap unhide EXIT
 [ "${MIDNA_ALARMS:-1}" = 0 ] && hide midna-alarms
 [ "${MIDNA_FOCUS:-0}" = 1 ] || hide midna-focus
 
-CI=1 bunx expo prebuild -p ios --clean
-mkdir -p "$out"
-rm -rf "$out/midna.xcarchive" "$out/export"
-echo "archiving build $build for team $TEAM_ID"
-# shellcheck disable=SC2086
-run "$out/archive.log" xcodebuild -workspace ios/midna.xcworkspace -scheme midna -configuration Release \
-  -destination generic/platform=iOS -derivedDataPath "$out/DerivedData" \
-  -archivePath "$out/midna.xcarchive" $auth \
-  DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
-  archive
+if [ "${ARCHIVE:-1}" = 0 ]; then
+  archived=$(/usr/libexec/PlistBuddy -c "Print :ApplicationProperties:CFBundleVersion" "$out/midna.xcarchive/Info.plist" 2>/dev/null || true)
+  [ "$archived" = "$build" ] || { echo "ARCHIVE=0: $out/midna.xcarchive is build ${archived:-none}, not $build" >&2; exit 1; }
+  rm -rf "$out/export"
+  echo "using the archive of build $build already in $out"
+else
+  CI=1 bunx expo prebuild -p ios --clean
+  mkdir -p "$out"
+  rm -rf "$out/midna.xcarchive" "$out/export"
+  echo "archiving build $build for team $TEAM_ID"
+  # shellcheck disable=SC2086
+  run "$out/archive.log" xcodebuild -workspace ios/midna.xcworkspace -scheme midna -configuration Release \
+    -destination generic/platform=iOS -derivedDataPath "$out/DerivedData" \
+    -archivePath "$out/midna.xcarchive" $auth \
+    DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+    archive
+fi
 
 dest=export
 [ "$UPLOAD" = 1 ] && dest=upload
