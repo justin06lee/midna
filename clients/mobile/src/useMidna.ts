@@ -9,6 +9,7 @@ import { draftKey, dropDraft, loadDraft, saveDraft } from "./drafts";
 import { start as startLocation } from "./location";
 import { ECHO_WINDOW_MS, fromHistory, fromOutbox, mergeLines, type Line } from "./lines";
 import { syncFocus } from "./focus";
+import { preview } from "./preview";
 import { clearDelivered, onTokenChange, phonePush, type PushSetup } from "./push";
 
 export type Link = "connecting" | "live" | "lost" | "unpaired";
@@ -104,6 +105,7 @@ export function useMidna(connection: PhoneConnection) {
 
   // Location, once turned on: running for this pairing, with what waits sent and the watched places current — now and on each return.
   useEffect(() => {
+    if (preview) return;
     const go = () => void startLocation(client, connection).catch((err: Error) => console.warn(`location: ${err.message}`));
     go();
     const fg = AppState.addEventListener("change", (s) => s === "active" && go());
@@ -112,6 +114,7 @@ export function useMidna(connection: PhoneConnection) {
 
   // Alarms: iOS brought up to midna's list and midna told what it holds, now and on each return; iOS asks to allow them the first time.
   useEffect(() => {
+    if (preview) return;
     const go = () => void syncAlarms(client, connection, { ask: true }).catch((err: Error) => console.warn(`alarms: ${err.message}`));
     go();
     const fg = AppState.addEventListener("change", (s) => s === "active" && go());
@@ -120,6 +123,7 @@ export function useMidna(connection: PhoneConnection) {
 
   // Screen Time, in a build that has it: midna's rules applied and the numbers sent, now and on each return.
   useEffect(() => {
+    if (preview) return;
     const go = () => void syncFocus(client, connection).catch((err: Error) => console.warn(`screen time: ${err.message}`));
     go();
     const fg = AppState.addEventListener("change", (s) => s === "active" && go());
@@ -130,6 +134,7 @@ export function useMidna(connection: PhoneConnection) {
   // never on a token event for the token just sent: asking for it raises that event, which looped.
   const [push, setPush] = useState<PushSetup>("unknown");
   useEffect(() => {
+    if (preview) return;
     let live = true;
     const registration = phonePush(client);
     const register = () => {

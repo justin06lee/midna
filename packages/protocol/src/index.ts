@@ -374,6 +374,25 @@ export interface Overview {
   spendLast7DaysUsd: number;
 }
 
+/**
+ * One block of the day on midna's calendar, or an event from a connected calendar (`source`). A day midna has
+ * planned is "tentative" until the user approves it, then "confirmed"; cancelled ones aren't sent. After 0.13.7.
+ */
+export interface CalendarBlock {
+  id: number;
+  title: string;
+  /** Epoch ms. */
+  starts_at: number;
+  ends_at: number | null;
+  all_day: number;
+  location: string | null;
+  notes: string | null;
+  /** "midna" for midna's own blocks; otherwise the calendar it came from. */
+  source: string;
+  status: "tentative" | "confirmed";
+  updated_at: number;
+}
+
 /** An agent CLI on the host that could be midna's brain. */
 export interface BrainInfo { id: string; label: string; installed: boolean; loginCommand: string; installHint: string }
 /** One model a brain offers, as it lists it itself. `id` is what follows the provider in a model ref: "claude:<id>". After 0.13.6. */
@@ -691,6 +710,10 @@ export class MidnaClient {
   }
   overview(signal?: AbortSignal): Promise<Overview> {
     return this.call("GET", "/v1/overview", undefined, signal);
+  }
+  /** Calendar blocks overlapping [from, to) (epoch ms, at most 31 days), in order. After 0.13.7: an older host answers 404. */
+  calendar(from: number, to: number, signal?: AbortSignal): Promise<CalendarBlock[]> {
+    return this.call("GET", `/v1/calendar?from=${Math.floor(from)}&to=${Math.floor(to)}`, undefined, signal);
   }
   devices(): Promise<DeviceInfo[]> {
     return this.call("GET", "/v1/devices");

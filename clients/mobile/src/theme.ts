@@ -25,6 +25,8 @@ const light = {
   line2: "rgba(60, 60, 67, 0.29)",
   primary: "#007aff",
   primaryInk: "#ffffff",
+  /** The accent, faint: the one thing that is on now. */
+  tint: "rgba(0, 122, 255, 0.1)",
   danger: "#ff3b30",
   ok: "#34c759",
   warn: "#ff9500",
@@ -45,6 +47,7 @@ const dark: typeof light = {
   line2: "rgba(84, 84, 88, 0.6)",
   primary: "#0a84ff",
   primaryInk: "#ffffff",
+  tint: "rgba(10, 132, 255, 0.2)",
   danger: "#ff453a",
   ok: "#30d158",
   warn: "#ff9f0a",

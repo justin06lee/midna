@@ -62,8 +62,6 @@ async function act(run: BrainRun, call: (name: string, args: Record<string, unkn
     await call("task_save", { title: "Build 8 to TestFlight from the Air", priority: 1, due: "today 18:00", estimate_min: 30 });
     await call("task_save", { title: "Read Justice, chapter 4", priority: 2, estimate_min: 45 });
     await call("task_save", { title: "Draft the caveira agenda", priority: 2, owner: "midna", status: "doing" });
-    await call("event_save", { title: "caveira team call", start: "tomorrow 05:00", end: "tomorrow 06:00", location: "Zoom" });
-    await call("event_save", { title: "Dinner with Huiyun", start: "today 19:00", location: "Seongsu" });
     return "Noted. I've put those down as objectives, with this week's tasks under them.";
   }
   if (turn === 2) return REPLY;
@@ -87,9 +85,41 @@ const brain: Brain = async (run) => {
   }
 };
 
+/**
+ * A day as midna would plan it, in this process's local time (run it with TZ=… to match a phone's): today's
+ * blocks approved, tomorrow's waiting for the OK unless PREVIEW_TOMORROW=approved.
+ */
+const DAY_PLAN: Array<[string, string, string, string?]> = [
+  ["04:30", "05:00", "Wake, Fajr"],
+  ["05:00", "06:00", "caveira team call", "Zoom"],
+  ["06:00", "07:00", "Read Justice, chapter 4"],
+  ["07:00", "07:30", "Breakfast"],
+  ["07:30", "11:30", "Deep work: midna"],
+  ["11:30", "12:30", "Lunch and a walk"],
+  ["12:30", "14:30", "Study: algorithms"],
+  ["14:30", "17:00", "Deep work: caveira"],
+  ["17:30", "18:30", "Gym"],
+  ["19:00", "20:30", "Dinner with Huiyun", "Seongsu"],
+  ["21:00", "21:30", "Plan tomorrow with midna"],
+  ["21:30", "22:30", "Read before bed"],
+];
+function seedDay(store: Awaited<ReturnType<typeof startDaemon>>["store"]) {
+  for (const [days, status] of [[0, "confirmed"], [1, process.env.PREVIEW_TOMORROW === "approved" ? "confirmed" : "tentative"]] as const) {
+    for (const [from, to, title, location] of DAY_PLAN) {
+      const at = (hm: string) => {
+        const [h, m] = hm.split(":").map(Number);
+        const d = new Date();
+        return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, h, m).getTime();
+      };
+      store.planning.saveEvent({ title, starts_at: at(from), ends_at: at(to), location: location ?? null, source: "midna", status });
+    }
+  }
+}
+
 const home = mkdtempSync(join(tmpdir(), "midna-preview-"));
 const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null });
 daemon.store.updateSettings({ quietHours: null });
+seedDay(daemon.store);
 const host = new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim());
 
 const wait = async (what: string, ok: () => Promise<boolean>) => {

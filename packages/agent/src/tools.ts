@@ -221,7 +221,7 @@ export function createToolServer(ctx: ToolContext): McpServer {
 
   tool(
     "event_save",
-    "Add an event to your calendar (title + start required) or change one. Set status 'cancelled' to cancel.",
+    "Add an event to your calendar (title + start required) or change one. Set status 'cancelled' to cancel. A day you plan for the user is a run of blocks, each with a start and an end: add them 'tentative' while the plan waits for their approval, and set each 'confirmed' once they approve it; their phone's timetable shows a day's blocks once they're confirmed.",
     {
       id: id.optional(),
       title: z.string().optional(),

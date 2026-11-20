@@ -121,6 +121,19 @@ describe("midnad", () => {
     expect(runs[0]!.prompt).toContain("Wakeup");
   });
 
+  test("the calendar route returns a day's blocks from its midnight, tentative or confirmed, and refuses a bad window", async () => {
+    const at = (h: number, m = 0) => new Date(new Date().setHours(h, m, 0, 0)).getTime();
+    const morning = daemon.store.planning.saveEvent({ title: "Read Justice", starts_at: at(0, 30), ends_at: at(1, 15), source: "midna", status: "confirmed" });
+    const later = daemon.store.planning.saveEvent({ title: "Plan tomorrow", starts_at: at(23), ends_at: at(23, 30), source: "midna", status: "tentative" });
+    const dropped = daemon.store.planning.saveEvent({ title: "Gone", starts_at: at(12), ends_at: at(13), source: "midna", status: "cancelled" });
+    const day = await client.calendar(at(0), at(0) + 86_400_000);
+    const mine = day.filter((b) => [morning.id, later.id, dropped.id].includes(b.id));
+    expect(mine.map((b) => [b.title, b.status])).toEqual([["Read Justice", "confirmed"], ["Plan tomorrow", "tentative"]]);
+    expect(mine[0]).toMatchObject({ starts_at: at(0, 30), ends_at: at(1, 15), source: "midna", notes: null });
+    await expect(client.calendar(at(2), at(1))).rejects.toThrow("from before to");
+    await expect(client.calendar(at(0), at(0) + 40 * 86_400_000)).rejects.toThrow("at most 31 days");
+  });
+
   test("a brain's models are asked of the brain: Hermes has none to pick, and an unknown brain is an error a picker can read", async () => {
     expect(await client.brainModels("hermes")).toEqual([]);
     await expect(client.brainModels("nope", "personal")).rejects.toThrow('unknown provider "nope"');
