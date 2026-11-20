@@ -32,6 +32,9 @@ cd "$(dirname "$0")/.."
 # the API key may not use Apple's cloud signing, so the export signs manually.
 : "${PROFILE:=midna App Store}"
 export DEVELOPER_DIR
+# CocoaPods refuses to run without a UTF-8 locale ("Unicode Normalization not appropriate for ASCII-8BIT"),
+# which a shell started by a program rather than a terminal may not have.
+export LANG="${LANG:-en_US.UTF-8}" LC_ALL="${LC_ALL:-en_US.UTF-8}"
 
 [ -f "$ASC_KEY_PATH" ] || { echo "no API key at $ASC_KEY_PATH" >&2; exit 1; }
 build=$(bun -e 'console.log(require("./app.json").expo.ios.buildNumber ?? "")')
