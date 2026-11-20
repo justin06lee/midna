@@ -1,23 +1,16 @@
 import { useEffect, useState } from "react";
-import type { BrainInfo, BridgeInfo, BridgeSetupResult, Connection, DeviceInfo, MidnaClient, Status } from "@midna/protocol";
+import { accountChoices, modelName, thinkingWith, type BridgeInfo, type BridgeSetupResult, type Connection, type DeviceInfo, type MidnaClient, type Status } from "@midna/protocol";
 import { loadAppearance, setAppearance, type Appearance } from "../appearance";
 import { draftKey, useDraft, useSecretDraft } from "../drafts";
 import { copy, enableNotifications, inApp, launchAtLogin, openUrl, testNotification } from "../host";
-import { Button, Icon, Section, Segmented, StateMark } from "../ui";
+import { ModelMenu, useModels } from "../ModelMenu";
+import { Button, Group, Icon, Row, Section, Segmented, StateMark, Switch } from "../ui";
 import { useNotifications } from "../useNotifications";
-
-const SUGGESTED = ["claude:opus", "claude:sonnet", "claude:haiku", "codex", "gemini", "opencode"];
 
 /** "codex, claude:sonnet" as the list it names. */
 const models = (text: string): string[] => text.split(",").map((m) => m.trim()).filter(Boolean);
 
-/** " until 4:00 PM" for the model's provider's reset, when the host says. */
-function capUntil(status: Status): string {
-  const provider = status.model.includes(":") ? status.model.slice(0, status.model.indexOf(":")) : "claude";
-  // Claude's caps are per account on hosts after 0.13.2: "claude@work".
-  const until = status.caps?.[provider === "claude" && status.account ? `claude@${status.account}` : provider] ?? status.caps?.[provider];
-  return until ? ` until ${new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
-}
+const KIND: Record<string, string> = { desktop: "Computer", mobile: "Phone", cli: "Command line", bridge: "Bridge", host: "Host", service: "Service" };
 
 /** Saves a change; says whether it took, so a draft goes only then. */
 type Save = (what: string, patch: Parameters<MidnaClient["updateSettings"]>[0]) => Promise<boolean>;
@@ -40,11 +33,12 @@ export function Settings({
   onSignIn: () => void;
   onDisconnect: () => void;
 }) {
-  const [brains, setBrains] = useState<BrainInfo[]>([]);
+  // The brains' own lists, so a stand-in and the fallbacks are called what their brains call them.
+  const { brains, catalogues } = useModels(client, status, false);
   const [bridges, setBridges] = useState<BridgeInfo[]>([]);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const drafts = draftKey(connection);
-  const model = useDraft(`${drafts}:model`, status?.model ?? "");
+  const other = useDraft(`${drafts}:model`, "");
   const fallback = useDraft(`${drafts}:fallback`, status?.fallback?.join(", ") ?? "");
   const timezone = useDraft(`${drafts}:timezone`, status?.timezone ?? "");
   const [saving, setSaving] = useState<string | null>(null);
@@ -54,7 +48,6 @@ export function Settings({
   const [appearance, setAppearanceState] = useState<Appearance>(loadAppearance);
 
   useEffect(() => {
-    void client.brains().then(setBrains, () => {});
     void client.bridges().then(setBridges, () => {});
     void client.devices().then(setDevices, () => {});
     void launchAtLogin().then(setAtLogin, () => setAtLogin(null));
@@ -76,63 +69,63 @@ export function Settings({
   const telegram = bridges.find((b) => b.name === "telegram");
   const installed = brains.filter((b) => b.installed).map((b) => b.id);
   const brain = status?.brain;
+  const host = status?.host.name ?? connection.host;
+  const accounts = status ? accountChoices(status) : [];
+  const account = accounts.find((a) => a.selected);
+  const now = status ? thinkingWith(status, brains, catalogues) : null;
+  const fallbacks = (status?.fallback ?? []).map((m) => modelName(m, brains, catalogues));
 
   return (
-    <div className="mx-auto w-full max-w-[680px] space-y-8 px-8 pt-4 pb-12">
-      <h1 className="text-[22px] font-semibold tracking-[-0.02em]">Settings</h1>
-      {error && <div className="rise rounded-lg border border-line-2 bg-panel px-3.5 py-2.5 text-[12.5px]">{error}</div>}
+    <div className="mx-auto w-full max-w-[620px] space-y-7 px-8 pt-2 pb-12">
+      <h1 className="text-[20px] font-semibold">Settings</h1>
+      {error && (
+        <div role="alert" className="rise selectable rounded-[10px] bg-fill px-3.5 py-2.5 text-[12.5px]">
+          {error}
+        </div>
+      )}
 
-      <Section title="Brain">
-        <Card>
-          <p className="text-[12.5px] text-dim">
-            The agent CLI midna thinks with, as <span className="font-mono text-[11.5px]">provider:model</span>. Installed on {status?.host.name ?? "the host"}: {installed.length ? installed.join(", ") : "…"}.
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            <input list="models" className="field h-8 w-56 px-2.5 font-mono text-[12px]" value={model.value} onChange={(e) => model.set(e.target.value)} spellCheck={false} />
-            <datalist id="models">
-              {SUGGESTED.filter((s) => installed.includes(s.split(":")[0]!)).map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-            <Button onClick={async () => (await save("model", { model: model.value })) && model.clear()} busy={saving === "model"} disabled={!model.value.trim() || model.value === status?.model}>
-              Use this
-            </Button>
-          </div>
-          {status?.fallback && (
-            <>
-              <p className="mt-4 text-[12.5px] text-dim">While it's out of usage, think with these instead, in order — e.g. <span className="font-mono text-[11.5px]">codex</span>. Empty for none: midna waits for the reset.</p>
-              <div className="mt-2 flex items-center gap-2">
-                <input list="models" className="field h-8 w-56 px-2.5 font-mono text-[12px]" value={fallback.value} onChange={(e) => fallback.set(e.target.value)} placeholder="none" spellCheck={false} />
-                <Button
-                  onClick={async () => (await save("fallback", { fallback: models(fallback.value) })) && fallback.clear()}
-                  busy={saving === "fallback"}
-                  disabled={models(fallback.value).join(",") === status.fallback.join(",")}
-                >
-                  Use these
-                </Button>
-              </div>
-            </>
+      <Section title="Model">
+        <Group>
+          <Row label="Thinks with" note={now?.standIn ? `${now.standIn}, so ${now.name} is thinking meanwhile.` : "A change holds from midna's next turn, on every device."}>
+            <ModelMenu client={client} status={status} onStatus={onStatus} look="button" drop="down" />
+          </Row>
+          {account && (
+            <Row label="Claude account" note={account.note}>
+              <Segmented value={account.account} disabled={saving === "account"} onChange={(a) => void save("account", { account: a })} options={accounts.map((a) => ({ value: a.account, label: a.name }))} />
+            </Row>
           )}
-          <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[12.5px]">
-            <StateMark state={brain?.ok === false ? "offline" : brain?.ok ? "running" : "online"} />
-            <span className="flex-1 text-ink-2">
-              {brain?.ok === false
-                ? brain.reason === "signed_out"
-                  ? `Not signed in on ${status?.host.name}`
-                  : brain.message
-                : status?.activeModel && status.activeModel !== status.model
-                  ? `${status.model} is out of usage${capUntil(status)}; thinking with ${status.activeModel} meanwhile`
-                  : brain?.ok
-                    ? "Answering"
-                    : "Not tried yet"}
-            </span>
+          {status?.fallback && (
+            <Row label="When it runs out of usage" note={`${fallbacks.length ? `Now ${fallbacks.join(", then ")}. ` : ""}Think with these meanwhile, in order, as provider:model. Empty, midna waits for the reset.`}>
+              <input className="field h-7 w-52 px-2 font-mono text-[12px]" value={fallback.value} onChange={(e) => fallback.set(e.target.value)} placeholder="none" spellCheck={false} />
+              {models(fallback.value).join(",") !== status.fallback.join(",") && (
+                <Button onClick={async () => (await save("fallback", { fallback: models(fallback.value) })) && fallback.clear()} busy={saving === "fallback"}>
+                  Save
+                </Button>
+              )}
+            </Row>
+          )}
+          <Row label="Another model" note={`One the menu doesn't list, as provider:model. On ${host}: ${installed.length ? installed.join(", ") : "…"}.`}>
+            <input className="field h-7 w-52 px-2 font-mono text-[12px]" value={other.value} onChange={(e) => other.set(e.target.value)} placeholder={status?.model} spellCheck={false} />
+            {other.value.trim() && other.value.trim() !== status?.model && (
+              <Button onClick={async () => (await save("model", { model: other.value.trim() })) && other.clear()} busy={saving === "model"}>
+                Use
+              </Button>
+            )}
+          </Row>
+          <Row
+            label={
+              <span className="flex items-center gap-2">
+                <StateMark state={brain?.ok === false ? "offline" : brain?.ok ? "running" : "online"} />
+                {brain?.ok === false ? (brain.reason === "signed_out" ? `Not signed in on ${host}` : brain.message) : brain?.ok ? "Answering" : "Not tried yet"}
+              </span>
+            }
+          >
             {brain?.ok === false && brain.reason === "signed_out" && (
-              <Button size="sm" variant="primary" onClick={onSignIn} icon={<Icon name="terminal" className="size-3.5" />}>
-                Sign in on {status?.host.name}
+              <Button variant="primary" onClick={onSignIn} icon={<Icon name="terminal" className="size-3.5" />}>
+                Sign In on {host}
               </Button>
             )}
             <Button
-              size="sm"
               busy={checking}
               onClick={async () => {
                 setChecking(true);
@@ -141,55 +134,60 @@ export function Settings({
             >
               Check
             </Button>
-          </div>
-        </Card>
+          </Row>
+        </Group>
       </Section>
 
-      <Section title="How midna acts">
-        <Card>
-          <Segmented
-            value={status?.mode ?? "autonomous"}
-            disabled={!status || saving === "mode"}
-            onChange={(mode) => void save("mode", { mode })}
-            options={[
-              { value: "autonomous", label: "On its own" },
-              { value: "ask", label: "Ask first" },
-            ]}
-          />
-          <p className="mt-2.5 text-[12.5px] text-dim">
-            {status?.mode === "ask"
-              ? "midna reads and keeps its records freely, but asks before running commands, changing files or acting for you."
-              : `midna has the run of ${status?.host.name ?? "its machine"} and acts without asking, judged against your objectives. Everything it does is logged.`}
-          </p>
-        </Card>
+      <Section
+        title="How midna acts"
+        footer={
+          status?.mode === "ask"
+            ? "midna reads and keeps its records freely, but asks before running commands, changing files or acting for you."
+            : `midna has the run of ${host} and acts without asking, judged against your objectives. Everything it does is logged.`
+        }
+      >
+        <Group>
+          <Row label="Ask before acting">
+            <Switch label="Ask before acting" on={status?.mode === "ask"} disabled={!status || saving === "mode"} onChange={(ask) => void save("mode", { mode: ask ? "ask" : "autonomous" })} />
+          </Row>
+        </Group>
       </Section>
 
       <Section title="Time">
-        <Card>
+        <Group>
           <Row label="Timezone">
-            <input className="field h-8 w-56 px-2.5 text-[12.5px]" value={timezone.value} onChange={(e) => timezone.set(e.target.value)} spellCheck={false} />
-            <Button onClick={async () => (await save("tz", { timezone: timezone.value })) && timezone.clear()} busy={saving === "tz"} disabled={!timezone.value.trim() || timezone.value === status?.timezone}>
-              Save
-            </Button>
+            <input className="field h-7 w-52 px-2 text-[12.5px]" value={timezone.value} onChange={(e) => timezone.set(e.target.value)} spellCheck={false} />
+            {timezone.value.trim() && timezone.value !== status?.timezone && (
+              <Button onClick={async () => (await save("tz", { timezone: timezone.value })) && timezone.clear()} busy={saving === "tz"}>
+                Save
+              </Button>
+            )}
           </Row>
           {status && <QuietHours saved={status.quietHours} drafts={drafts} save={save} />}
-        </Card>
+        </Group>
       </Section>
 
       <Section title="Your phone">
-        <Card>
+        <Group>
           {telegram?.enabled ? (
-            <div className="flex items-center gap-2 text-[13px]">
-              <StateMark state="running" /> Telegram is connected. midna messages you there when you're away from here.
-            </div>
+            <Row
+              label={
+                <span className="flex items-center gap-2">
+                  <StateMark state="running" /> Telegram is connected
+                </span>
+              }
+              note="midna messages you there when you're away from here."
+            />
           ) : (
-            <TelegramSetup client={client} drafts={drafts} onDone={() => void client.bridges().then(setBridges)} />
+            <div className="px-3 py-2.5">
+              <TelegramSetup client={client} drafts={drafts} onDone={() => void client.bridges().then(setBridges)} />
+            </div>
           )}
-        </Card>
+        </Group>
       </Section>
 
       <Section title="This computer">
-        <Card>
+        <Group>
           <Row label="Appearance">
             <Segmented
               value={appearance}
@@ -198,7 +196,7 @@ export function Settings({
                 setAppearanceState(a);
               }}
               options={[
-                { value: "system", label: "System" },
+                { value: "system", label: "Auto" },
                 { value: "light", label: "Light" },
                 { value: "dark", label: "Dark" },
               ]}
@@ -206,61 +204,47 @@ export function Settings({
           </Row>
           {inApp && <NotificationsRow />}
           {inApp && (
-            <Row label="Open at login">
-              <Segmented
-                value={atLogin ? "on" : "off"}
-                disabled={atLogin === null}
-                onChange={async (v) => setAtLogin(await launchAtLogin(v === "on"))}
-                options={[
-                  { value: "on", label: "On" },
-                  { value: "off", label: "Off" },
-                ]}
-              />
-              <span className="text-[12px] text-dimmer">so midna can reach you from the tray</span>
+            <Row label="Open at login" note="So midna can reach you from the menu bar.">
+              <Switch label="Open at login" on={atLogin === true} disabled={atLogin === null} onChange={async (on) => setAtLogin(await launchAtLogin(on))} />
             </Row>
           )}
-        </Card>
+        </Group>
       </Section>
 
       <Section title="Where midna lives">
-        <Card>
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[14px] font-medium">{connection.host}</div>
-              <div className="selectable mt-0.5 font-mono text-[11.5px] text-dim">
-                {connection.url} · midna {status?.version ?? "…"} · {status?.host.platform}
-              </div>
-            </div>
-            <Button onClick={onDisconnect}>Use another machine</Button>
-          </div>
-          {devices.length > 0 && (
-            <div className="mt-3 border-t border-line pt-3">
-              <div className="mb-1.5 text-[12px] text-dim">Paired with it</div>
-              {devices.map((d) => (
-                <div key={d.id} className="flex items-center gap-2 py-1 text-[12.5px]">
-                  <span className="w-14 text-[11.5px] text-dimmer">{d.kind}</span>
-                  <span className="flex-1 truncate">
-                    {d.name}
-                    {d.id === connection.device && <span className="text-dimmer"> · this app</span>}
-                  </span>
-                  <span className="text-[11.5px] text-dimmer">{d.last_seen_at ? `seen ${new Date(d.last_seen_at).toLocaleDateString()}` : "never seen"}</span>
-                  {d.id !== connection.device && d.kind !== "host" && !d.name.endsWith("(host)") && (
-                    <Button size="sm" variant="ghost" onClick={async () => setDevices(await client.revokeDevice(d.id).then(() => client.devices()))}>
-                      Unpair
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
+        <Group>
+          <Row label={connection.host} note={<span className="selectable">{[connection.url, `midna ${status?.version ?? "…"}`, status?.host.platform].filter(Boolean).join(" · ")}</span>}>
+            <Button onClick={onDisconnect}>Use Another Machine…</Button>
+          </Row>
+        </Group>
       </Section>
+
+      {devices.length > 0 && (
+        <Section title="Paired with it">
+          <Group>
+            {devices.map((d) => (
+              <Row
+                key={d.id}
+                label={
+                  <>
+                    {d.name}
+                    {d.id === connection.device && <span className="text-dim"> (this app)</span>}
+                  </>
+                }
+                note={`${KIND[d.kind] ?? d.kind} · ${d.last_seen_at ? `seen ${new Date(d.last_seen_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "never seen"}`}
+              >
+                {d.id !== connection.device && d.kind !== "host" && !d.name.endsWith("(host)") && (
+                  <Button variant="ghost" onClick={async () => setDevices(await client.revokeDevice(d.id).then(() => client.devices()))}>
+                    Unpair
+                  </Button>
+                )}
+              </Row>
+            ))}
+          </Group>
+        </Section>
+      )}
     </div>
   );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return <div className="sheet rounded-xl px-4 py-3.5">{children}</div>;
 }
 
 /** Whether midna's notifications reach the user here, a way to turn them on, and one to try. */
@@ -279,35 +263,22 @@ function NotificationsRow() {
     refresh();
   };
   return (
-    <Row label="Notifications">
-      <span className="text-[12.5px]">{on ? "On" : notifications.state === "unknown" ? "Unknown" : "Off"}</span>
+    <Row label="Notifications" note={tried ?? notifications.problem ?? (on ? "Replies and alerts, with a sound and a Dock badge." : "So you hear when midna replies or needs you.")}>
+      <span className="text-[12.5px] text-dim">{on ? "On" : notifications.state === "unknown" ? "Unknown" : "Off"}</span>
       {on ? (
-        <Button size="sm" onClick={() => void test()}>
-          Send a test
-        </Button>
+        <Button onClick={() => void test()}>Send a Test</Button>
       ) : (
         <Button
-          size="sm"
           variant="primary"
           onClick={() => {
             setAsked(true);
             void enableNotifications();
           }}
         >
-          Turn on
+          Turn On
         </Button>
       )}
-      <span className="text-[12px] text-dimmer">{tried ?? notifications.problem ?? (on ? "replies and alerts, with a sound and a Dock badge" : "so you hear when midna replies or needs you")}</span>
     </Row>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 py-1">
-      <span className="w-28 shrink-0 text-[12.5px] text-dim">{label}</span>
-      <div className="flex flex-1 items-center gap-2">{children}</div>
-    </div>
   );
 }
 
@@ -315,37 +286,30 @@ function QuietHours({ saved, drafts, save }: { saved: Status["quietHours"]; draf
   const [on, setOn] = useState(saved !== null);
   const start = useDraft(`${drafts}:quiet-start`, saved?.start ?? "23:00");
   const end = useDraft(`${drafts}:quiet-end`, saved?.end ?? "08:00");
-  const [done, setDone] = useState(false);
   const commit = async (next: { on: boolean; start: string; end: string }) => {
-    setDone(false);
     if (!(await save("quiet", { quietHours: next.on ? { start: next.start, end: next.end } : null }))) return;
     if (next.on) {
       start.clear();
       end.clear();
     }
-    setDone(true);
   };
   return (
-    <Row label="Quiet hours">
-      <Segmented
-        value={on ? "on" : "off"}
-        onChange={(v) => {
-          setOn(v === "on");
-          void commit({ on: v === "on", start: start.value, end: end.value });
-        }}
-        options={[
-          { value: "on", label: "On" },
-          { value: "off", label: "Off" },
-        ]}
-      />
+    <Row label="Quiet hours" note="What can wait is held until they end.">
       {on && (
         <>
-          <input type="time" className="field h-8 px-2 text-[12.5px]" value={start.value} onChange={(e) => start.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
-          <span className="text-dimmer">–</span>
-          <input type="time" className="field h-8 px-2 text-[12.5px]" value={end.value} onChange={(e) => end.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
+          <input type="time" aria-label="From" className="field h-7 px-1.5 text-[12.5px]" value={start.value} onChange={(e) => start.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
+          <span className="text-dim">to</span>
+          <input type="time" aria-label="To" className="field h-7 px-1.5 text-[12.5px]" value={end.value} onChange={(e) => end.set(e.target.value)} onBlur={() => void commit({ on, start: start.value, end: end.value })} />
         </>
       )}
-      {done && <Icon name="check" className="size-3.5 text-dim" />}
+      <Switch
+        label="Quiet hours"
+        on={on}
+        onChange={(v) => {
+          setOn(v);
+          void commit({ on: v, start: start.value, end: end.value });
+        }}
+      />
     </Row>
   );
 }
@@ -362,9 +326,8 @@ function TelegramSetup({ client, drafts, onDone }: { client: MidnaClient; drafts
       <div className="rise">
         <p className="text-[13px]">{result.instructions}</p>
         <div className="mt-3 flex items-center gap-2">
-          <code className="selectable rounded-md border border-line-2 bg-sunken px-2.5 py-1.5 font-mono text-[13px]">{result.code}</code>
+          <code className="selectable rounded-[7px] bg-control px-2.5 py-1 font-mono text-[13px]">{result.code}</code>
           <Button
-            size="sm"
             onClick={async () => {
               await copy(result.code!);
               setCopied(true);
@@ -374,12 +337,12 @@ function TelegramSetup({ client, drafts, onDone }: { client: MidnaClient; drafts
             {copied ? "Copied" : "Copy"}
           </Button>
           {result.link && (
-            <Button size="sm" variant="primary" onClick={() => void openUrl(result.link!)} icon={<Icon name="external" className="size-3.5" />}>
-              Open the bot
+            <Button variant="primary" onClick={() => void openUrl(result.link!)} icon={<Icon name="external" className="size-3.5" />}>
+              Open the Bot
             </Button>
           )}
         </div>
-        <Button size="sm" variant="ghost" className="mt-2 -ml-2" onClick={onDone}>
+        <Button variant="ghost" className="mt-2 -ml-3" onClick={onDone}>
           Done
         </Button>
       </div>
@@ -389,13 +352,13 @@ function TelegramSetup({ client, drafts, onDone }: { client: MidnaClient; drafts
     <div>
       <p className="text-[12.5px] text-dim">
         Until midna has its own phone app, it reaches you through a Telegram bot of your own. In Telegram, message{" "}
-        <a className="cursor-pointer text-ink underline decoration-dimmer underline-offset-2" onClick={() => void openUrl("https://t.me/BotFather")}>
+        <a className="cursor-pointer text-accent" onClick={() => void openUrl("https://t.me/BotFather")}>
           @BotFather
         </a>
         , send <span className="font-mono text-[11.5px]">/newbot</span>, and paste the token it gives you.
       </p>
       <div className="mt-3 flex items-center gap-2">
-        <input className="field h-8 flex-1 px-2.5 font-mono text-[12px]" placeholder="123456789:AA…" value={token} onChange={(e) => setToken(e.target.value)} spellCheck={false} />
+        <input className="field h-7 flex-1 px-2 font-mono text-[12px]" placeholder="123456789:AA…" value={token} onChange={(e) => setToken(e.target.value)} spellCheck={false} />
         <Button
           variant="primary"
           busy={busy}

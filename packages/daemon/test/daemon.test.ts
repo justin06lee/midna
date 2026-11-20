@@ -121,6 +121,11 @@ describe("midnad", () => {
     expect(runs[0]!.prompt).toContain("Wakeup");
   });
 
+  test("a brain's models are asked of the brain: Hermes has none to pick, and an unknown brain is an error a picker can read", async () => {
+    expect(await client.brainModels("hermes")).toEqual([]);
+    await expect(client.brainModels("nope", "personal")).rejects.toThrow('unknown provider "nope"');
+  });
+
   test("status says what thinking cost: each of the last 7 days, today by what started each turn", async () => {
     await until("intro", () => outbox().find((i) => i.text === "Hi, I'm midna."));
     const spend = (await client.status()).spend!;

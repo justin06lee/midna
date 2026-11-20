@@ -1,6 +1,5 @@
-import type { ReactNode } from "react";
 import { openPermissionSettings, relaunchApp, requestPermission, setHandsPaused, setOffer, type HandsStatus, type PermissionState, type Policy } from "../host";
-import { Button, Empty, Icon, Section, Segmented, StateMark } from "../ui";
+import { Button, Empty, Group, Icon, Row, Section, Segmented, StateMark } from "../ui";
 import { useHands } from "../useHands";
 
 const CAPABILITY: Record<string, { label: string; what: string }> = {
@@ -42,55 +41,59 @@ export function Computer() {
   const permission = (id: string | null) => hands.permissions.find((p) => p.id === id);
 
   return (
-    <div className="mx-auto w-full max-w-[680px] space-y-8 px-8 pt-4 pb-12">
+    <div className="mx-auto w-full max-w-[620px] space-y-7 px-8 pt-2 pb-12">
       <div>
-        <h1 className="text-[22px] font-semibold tracking-[-0.02em]">This computer</h1>
-        <p className="mt-1 text-[13px] text-dim">What midna may do on {here}, and what it did.</p>
+        <h1 className="text-[20px] font-semibold">This Computer</h1>
+        <p className="mt-0.5 text-[13px] text-dim">What midna may do on {here}, and what it did.</p>
       </div>
 
-      <Card>
-        <div className="flex items-center gap-3">
-          <StateMark state={hands.paused ? "offline" : hands.active ? "working" : hands.connected ? "running" : "online"} />
-          <div className="min-w-0 flex-1 text-[13px]">
-            {hands.paused ? (
-              <>Paused. midna can't do anything on {here} until you resume.</>
-            ) : hands.active ? (
-              <>midna is using {here}: {hands.active}</>
-            ) : hands.connected ? (
-              <>midna can reach {here}, for what you've turned on below.</>
-            ) : (
-              <>midna isn't connected to {here} yet.</>
-            )}
-            {hands.problem && <div className="mt-1 text-[12.5px] text-ink-2">{hands.problem}</div>}
-            <div className="mt-0.5 text-[12px] text-dimmer">{mac ? "⌃⌥⌘P" : "Ctrl+Alt+Super+P"} pauses or resumes from anywhere, as does the menu bar icon.</div>
-            {hands.connected && hands.fingerprint && (
-              <div className="mt-0.5 text-[12px] text-dimmer" title="Commands run here only when they're signed with this key, the one this computer trusts for its midna.">
-                midna's key: <span className="font-mono">{hands.fingerprint}</span>
-              </div>
-            )}
-          </div>
-          <Button variant={hands.paused ? "primary" : "default"} onClick={() => void setHandsPaused(!hands.paused).then(refresh)} icon={hands.paused ? undefined : <Icon name="pause" className="size-3.5" />}>
-            {hands.paused ? "Resume" : "Pause"}
-          </Button>
-        </div>
-      </Card>
+      <Section footer={`${mac ? "⌃⌥⌘P" : "Ctrl+Alt+Super+P"} pauses or resumes from anywhere, as does the menu bar icon.`}>
+        <Group>
+          <Row
+            label={
+              <span className="flex items-center gap-2">
+                <StateMark state={hands.paused ? "offline" : hands.active ? "working" : hands.connected ? "running" : "online"} />
+                {hands.paused ? "Paused" : hands.active ? `midna is using ${here}` : hands.connected ? `midna can reach ${here}` : `midna isn't connected to ${here} yet`}
+              </span>
+            }
+            note={
+              <>
+                {hands.paused ? `midna can't do anything on ${here} until you resume.` : hands.active ? hands.active : hands.connected ? "For what you've turned on below." : null}
+                {hands.problem && <span className="block text-ink-2">{hands.problem}</span>}
+                {hands.connected && hands.fingerprint && (
+                  <span className="block" title="Commands run here only when they're signed with this key, the one this computer trusts for its midna.">
+                    midna's key: <span className="font-mono">{hands.fingerprint}</span>
+                  </span>
+                )}
+              </>
+            }
+          >
+            <Button variant={hands.paused ? "primary" : "default"} onClick={() => void setHandsPaused(!hands.paused).then(refresh)} icon={hands.paused ? undefined : <Icon name="pause" className="size-3.5" />}>
+              {hands.paused ? "Resume" : "Pause"}
+            </Button>
+          </Row>
+        </Group>
+      </Section>
 
-      <Section title="What midna may do">
-        <Card>
-          {available.map((c, i) => {
+      <Section
+        title="What midna may do"
+        footer="Ask: midna asks first, each time, here, in the chat and on Telegram; the first answer wins, and none in 2 minutes means no. In ask mode, anything that changes something asks first even when it's On."
+      >
+        <Group>
+          {available.map((c) => {
             const need = permission(c.needs);
             return (
-              <div key={c.id} className={`flex items-center gap-3 py-2.5 ${i ? "border-t border-line" : ""}`}>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium">{CAPABILITY[c.id]?.label ?? c.id}</div>
-                  <div className="text-[12px] text-dim">
+              <Row
+                key={c.id}
+                label={CAPABILITY[c.id]?.label ?? c.id}
+                note={
+                  <>
                     {CAPABILITY[c.id]?.what}
                     {c.id === "screen" && hands.displays.length > 1 && ` · ${hands.displays.length} displays`}
-                    {need && need.state !== "granted" && need.state !== "unknown" && c.policy !== "off" && (
-                      <span className="text-ink-2"> · needs {PERMISSION[need.id]?.label}, below</span>
-                    )}
-                  </div>
-                </div>
+                    {need && need.state !== "granted" && need.state !== "unknown" && c.policy !== "off" && <span className="text-ink-2"> · needs {PERMISSION[need.id]?.label}, below</span>}
+                  </>
+                }
+              >
                 <Segmented<Policy>
                   value={c.policy}
                   onChange={(p) => void setOffer(c.id, p).then(refresh)}
@@ -100,68 +103,61 @@ export function Computer() {
                     { value: "on", label: "On" },
                   ]}
                 />
-              </div>
+              </Row>
             );
           })}
-          <p className="mt-2 border-t border-line pt-3 text-[12px] text-dimmer">
-            Ask: midna asks first, each time, here, in the chat and on Telegram; the first answer wins, and none in 2 minutes means no. In ask mode, anything that changes something asks first even when it's On.
-          </p>
-        </Card>
+        </Group>
       </Section>
 
       {hands.permissions.length > 0 && (
-        <Section title="Permissions">
-          <Card>
-            {hands.permissions.map((p, i) => (
-              <PermissionRow key={p.id} id={p.id} state={p.state} first={i === 0} onChange={refresh} />
+        <Section title="Permissions" footer="They belong to midna.app, so you give each one once; updates keep them.">
+          <Group>
+            {hands.permissions.map((p) => (
+              <PermissionRow key={p.id} id={p.id} state={p.state} onChange={refresh} />
             ))}
-            <p className="mt-2 border-t border-line pt-3 text-[12px] text-dimmer">
-              They belong to midna.app, so you give each one once; updates keep them.
-            </p>
-          </Card>
+          </Group>
         </Section>
       )}
 
       <Section title="Recently">
-        <Card>{hands.recent.length ? <Recent entries={hands.recent.slice(0, 30)} /> : <p className="py-1 text-[12.5px] text-dim">Nothing yet.</p>}</Card>
+        <Group>{hands.recent.length ? <Recent entries={hands.recent.slice(0, 30)} /> : <Row label={<span className="text-dim">Nothing yet.</span>} />}</Group>
       </Section>
     </div>
   );
 }
 
-function PermissionRow({ id, state, first, onChange }: { id: string; state: PermissionState; first: boolean; onChange: () => void }) {
+function PermissionRow({ id, state, onChange }: { id: string; state: PermissionState; onChange: () => void }) {
   const info = PERMISSION[id] ?? { label: id, what: "" };
   const canAsk = state === "not_asked" || state === "not_running" || (state === "not_granted" && (id === "screen_recording" || id === "accessibility"));
   return (
-    <div className={`py-2.5 ${first ? "" : "border-t border-line"}`}>
-      <div className="flex items-center gap-3">
-        <span className={`flex size-4 items-center justify-center ${state === "granted" ? "text-ink" : "text-dimmer"}`}>
-          {state === "granted" ? <Icon name="check" className="size-3.5" /> : <span className="size-2 rounded-full border border-current" />}
+    <Row
+      label={
+        <span className="flex items-center gap-2">
+          <span className={`flex size-4 items-center justify-center ${state === "granted" ? "text-[var(--ok)]" : "text-dimmer"}`}>
+            {state === "granted" ? <Icon name="check" className="size-4" /> : <span className="size-2 rounded-full border border-current" />}
+          </span>
+          {info.label}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px]">{info.label}</div>
-          <div className="text-[12px] text-dim">
-            {STATE[state]} · {info.what}
-          </div>
-        </div>
-        {canAsk && (
-          <Button size="sm" onClick={() => void requestPermission(id).then(onChange)}>
-            Ask
-          </Button>
-        )}
-        <Button size="sm" variant="ghost" onClick={() => void openPermissionSettings(id)} icon={<Icon name="external" className="size-3.5" />}>
-          Settings
-        </Button>
-      </div>
-      {id === "screen_recording" && state !== "granted" && (
-        <div className="mt-1.5 ml-7 flex items-center gap-2 text-[12px] text-dimmer">
-          Once it's on in System Settings, it works after a relaunch.
-          <Button size="sm" variant="ghost" className="-my-1" onClick={() => void relaunchApp()}>
-            Relaunch midna
-          </Button>
-        </div>
-      )}
-    </div>
+      }
+      note={
+        <span className="block pl-6">
+          {STATE[state]} · {info.what}
+          {id === "screen_recording" && state !== "granted" && (
+            <span className="mt-1 flex items-center gap-2">
+              Once it's on in System Settings, it works after a relaunch.
+              <Button size="sm" variant="ghost" className="-my-1" onClick={() => void relaunchApp()}>
+                Relaunch midna
+              </Button>
+            </span>
+          )}
+        </span>
+      }
+    >
+      {canAsk && <Button onClick={() => void requestPermission(id).then(onChange)}>Allow…</Button>}
+      <Button variant="ghost" onClick={() => void openPermissionSettings(id)}>
+        Open Settings…
+      </Button>
+    </Row>
   );
 }
 
@@ -181,20 +177,16 @@ const OUTCOME: Record<string, string> = {
 
 function Recent({ entries }: { entries: HandsStatus["recent"] }) {
   return (
-    <div>
-      {entries.map((e, i) => (
-        <div key={e.id + e.at} className={`flex items-baseline gap-3 py-1.5 text-[12.5px] ${i ? "border-t border-line" : ""}`}>
-          <span className="w-16 shrink-0 text-[11.5px] text-dimmer tabular">{new Date(e.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+    <>
+      {entries.map((e) => (
+        <div key={e.id + e.at} className="flex items-baseline gap-3 px-3 py-1.5 text-[12.5px]">
+          <span className="w-16 shrink-0 text-[11.5px] text-dim tabular">{new Date(e.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
           <span className="min-w-0 flex-1 truncate" title={e.detail}>
             {e.summary}
           </span>
-          <span className={`shrink-0 text-[11.5px] ${e.outcome === "ok" ? "text-dimmer" : "text-ink-2"}`}>{e.outcome === "ok" ? `${e.ms} ms` : (OUTCOME[e.outcome] ?? e.outcome)}</span>
+          <span className={`shrink-0 text-[11.5px] ${e.outcome === "ok" ? "text-dim" : "text-ink-2"}`}>{e.outcome === "ok" ? `${e.ms} ms` : (OUTCOME[e.outcome] ?? e.outcome)}</span>
         </div>
       ))}
-    </div>
+    </>
   );
-}
-
-function Card({ children }: { children: ReactNode }) {
-  return <div className="sheet rounded-xl px-4 py-3.5">{children}</div>;
 }

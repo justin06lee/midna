@@ -1,76 +1,107 @@
 @import "tailwindcss";
 
-/* Ink on a pale window, content on an inset sheet, hairlines instead of
-   boxes — the same family as makima's app. Monochrome: urgency and state
-   are carried by weight, shape and words, not colour. It follows the
-   system's appearance unless Settings picks one (.light / .dark on <html>,
-   see appearance.ts); ?dark=1 or ?light=1 forces one in the browser preview. */
+/* A Mac app's look: the system's own typeface, its greys and its one accent
+   colour; a toned sidebar beside a plain content pane; groups told apart by
+   tone rather than outlines; menus and overlays on a blurred material. It
+   follows the system's appearance unless Settings picks one (.light / .dark
+   on <html>, see appearance.ts); ?dark=1 or ?light=1 forces one in the
+   browser preview. The dark values are written twice (the media query and
+   .dark): keep them the same. */
 :root {
-  --bg: #f3f3f4;
+  --bg: #ffffff;
+  --sidebar: #f2f2f4;
   --panel: #ffffff;
-  --sunken: #f6f6f7;
-  --hover: rgba(12, 12, 14, 0.04);
-  --active: rgba(12, 12, 14, 0.075);
-  --ink: #0c0c0e;
-  --ink-2: #3a3a40;
-  --dim: #6f6f78;
-  --dimmer: #a3a3ab;
-  --line: rgba(12, 12, 14, 0.075);
-  --line-2: rgba(12, 12, 14, 0.13);
-  --primary: #0c0c0e;
+  --sunken: #f5f5f7;
+  --fill: rgba(0, 0, 0, 0.035);
+  --control: rgba(0, 0, 0, 0.06);
+  --control-hover: rgba(0, 0, 0, 0.09);
+  --knob: #ffffff;
+  --hover: rgba(0, 0, 0, 0.045);
+  --active: rgba(0, 0, 0, 0.08);
+  --ink: #1d1d1f;
+  --ink-2: #424245;
+  --dim: #6e6e73;
+  --dimmer: #a1a1a6;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-2: rgba(0, 0, 0, 0.14);
+  --accent: #007aff;
+  --ok: #34c759;
+  --bad: #ff3b30;
+  --primary: var(--accent);
   --primary-ink: #ffffff;
-  --focus: rgba(12, 12, 14, 0.16);
-  --panel-shadow: 0 0 0 1px rgba(12, 12, 14, 0.06), 0 1px 2px rgba(12, 12, 14, 0.04), 0 8px 24px -12px rgba(12, 12, 14, 0.08);
-  --pop-shadow: 0 0 0 1px rgba(12, 12, 14, 0.07), 0 12px 32px -8px rgba(12, 12, 14, 0.18), 0 32px 80px -24px rgba(12, 12, 14, 0.22);
+  --focus: rgba(0, 122, 255, 0.32);
+  --selection: rgba(0, 122, 255, 0.22);
+  --material: #f6f6f8;
+  --panel-shadow: none;
+  --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.18), 0 24px 60px -20px rgba(0, 0, 0, 0.2);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --bg: #0b0b0c;
-    --panel: #141416;
-    --sunken: #1a1a1d;
-    --hover: rgba(255, 255, 255, 0.045);
-    --active: rgba(255, 255, 255, 0.08);
-    --ink: #ededf0;
-    --ink-2: #c6c6cc;
-    --dim: #8b8b94;
-    --dimmer: #5d5d66;
-    --line: rgba(255, 255, 255, 0.07);
-    --line-2: rgba(255, 255, 255, 0.12);
-    --primary: #ededf0;
-    --primary-ink: #0b0b0c;
-    --focus: rgba(255, 255, 255, 0.2);
-    --panel-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
-    --pop-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 32px 80px -24px rgba(0, 0, 0, 0.7);
+    --bg: #1e1e1f;
+    --sidebar: #28282a;
+    --panel: #2c2c2e;
+    --sunken: #29292b;
+    --fill: rgba(255, 255, 255, 0.05);
+    --control: rgba(255, 255, 255, 0.1);
+    --control-hover: rgba(255, 255, 255, 0.14);
+    --knob: #636366;
+    --hover: rgba(255, 255, 255, 0.06);
+    --active: rgba(255, 255, 255, 0.1);
+    --ink: #f5f5f7;
+    --ink-2: #d1d1d6;
+    --dim: #98989d;
+    --dimmer: #636366;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-2: rgba(255, 255, 255, 0.15);
+    --accent: #0a84ff;
+    --ok: #30d158;
+    --bad: #ff453a;
+    --focus: rgba(10, 132, 255, 0.42);
+    --selection: rgba(10, 132, 255, 0.32);
+    --material: #2a2a2c;
+    --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }
 
 :root.dark {
-  --bg: #0b0b0c;
-  --panel: #141416;
-  --sunken: #1a1a1d;
-  --hover: rgba(255, 255, 255, 0.045);
-  --active: rgba(255, 255, 255, 0.08);
-  --ink: #ededf0;
-  --ink-2: #c6c6cc;
-  --dim: #8b8b94;
-  --dimmer: #5d5d66;
-  --line: rgba(255, 255, 255, 0.07);
-  --line-2: rgba(255, 255, 255, 0.12);
-  --primary: #ededf0;
-  --primary-ink: #0b0b0c;
-  --focus: rgba(255, 255, 255, 0.2);
-  --panel-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
-  --pop-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 32px 80px -24px rgba(0, 0, 0, 0.7);
+  --bg: #1e1e1f;
+  --sidebar: #28282a;
+  --panel: #2c2c2e;
+  --sunken: #29292b;
+  --fill: rgba(255, 255, 255, 0.05);
+  --control: rgba(255, 255, 255, 0.1);
+  --control-hover: rgba(255, 255, 255, 0.14);
+  --knob: #636366;
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(255, 255, 255, 0.1);
+  --ink: #f5f5f7;
+  --ink-2: #d1d1d6;
+  --dim: #98989d;
+  --dimmer: #636366;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.15);
+  --accent: #0a84ff;
+  --ok: #30d158;
+  --bad: #ff453a;
+  --focus: rgba(10, 132, 255, 0.42);
+  --selection: rgba(10, 132, 255, 0.32);
+  --material: #2a2a2c;
+  --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
   --color-panel: var(--panel);
   --color-sunken: var(--sunken);
+  --color-fill: var(--fill);
+  --color-control: var(--control);
+  --color-control-hover: var(--control-hover);
+  --color-knob: var(--knob);
   --color-hover: var(--hover);
   --color-active: var(--active);
   --color-ink: var(--ink);
@@ -79,11 +110,13 @@
   --color-dimmer: var(--dimmer);
   --color-line: var(--line);
   --color-line-2: var(--line-2);
+  --color-accent: var(--accent);
   --color-primary: var(--primary);
   --color-primary-ink: var(--primary-ink);
 
-  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  /* The system's own faces: San Francisco on a Mac, whatever the desktop uses elsewhere. */
+  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 html, body, #root {
@@ -100,9 +133,7 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   font-size: 13px;
-  line-height: 1.45;
-  letter-spacing: -0.003em;
-  font-feature-settings: "ss01", "cv11";
+  line-height: 1.4;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
   user-select: none;
@@ -115,7 +146,7 @@ body {
 }
 
 ::selection {
-  background: var(--focus);
+  background: var(--selection);
 }
 
 * {
@@ -137,20 +168,33 @@ body {
   }
 }
 
+/* A group of rows: told from the page by its tone, not by an outline. */
 .sheet {
-  background: var(--panel);
-  box-shadow: var(--panel-shadow);
+  background: var(--fill);
+}
+
+/* What menus and notices sit on: a solid surface with the shadow of something lifted. It was translucent over a
+   blur, but WebKit doesn't always draw the blur, and then what is underneath reads through the words. */
+.material {
+  background: var(--material);
+  box-shadow: var(--pop-shadow);
 }
 
 .field {
   background: var(--panel);
   border: 1px solid var(--line-2);
-  border-radius: 8px;
+  border-radius: 7px;
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .field:focus, .field:focus-within {
-  border-color: var(--dim);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+/* The keyboard's focus, as the system draws it. */
+button:focus-visible, a:focus-visible, [role="menuitemradio"]:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 3px var(--focus);
 }
 
@@ -186,6 +230,13 @@ body {
 /* Nothing midna writes makes the chat scroll sideways: a long path or link wraps, and code blocks and tables scroll inside themselves. */
 .prose-midna { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .prose-midna pre, .prose-midna .md-table { max-width: 100%; }
+/* Copy sits in the block's corner and shows while the pointer is over it, or it has the keyboard. */
+.prose-midna .md-code { position: relative; }
+.prose-midna .md-code > button { position: absolute; top: 5px; right: 6px; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; color: var(--dim); background: var(--sunken); opacity: 0; transition: opacity 0.15s, color 0.15s; cursor: default; user-select: none; }
+.prose-midna .md-code:hover > button, .prose-midna .md-code > button:focus-visible { opacity: 1; }
+.prose-midna .md-code > button:hover { color: var(--ink); }
+.prose-midna em { font-style: italic; }
+.prose-midna s { text-decoration: line-through; color: var(--dim); }
 .prose-midna ul, .prose-midna ol { margin: 0.2em 0 0.55em; padding-left: 1.25em; }
 .prose-midna ul { list-style: disc; }
 .prose-midna ol { list-style: decimal; }
@@ -196,7 +247,8 @@ body {
 .prose-midna a { text-decoration: underline; text-decoration-color: var(--dimmer); text-underline-offset: 2px; cursor: pointer; }
 .prose-midna strong { font-weight: 600; }
 .prose-midna h3 { font-weight: 600; margin: 0.6em 0 0.25em; }
-.prose-midna .md-table { overflow-x: auto; margin: 0.3em 0 0.6em; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; }
+/* The box is as wide as its table, up to the message's width; past that the table scrolls inside it. */
+.prose-midna .md-table { width: fit-content; overflow-x: auto; margin: 0.3em 0 0.6em; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; }
 .prose-midna table { border-collapse: collapse; font-size: 0.95em; }
 .prose-midna th, .prose-midna td { padding: 0.35em 0.75em; vertical-align: top; max-width: 22em; }
 .prose-midna th { font-weight: 600; white-space: nowrap; }

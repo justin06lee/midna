@@ -75,17 +75,17 @@ function Waiting({ a, now, midna }: { a: Approval; now: number; midna: Midna }) 
 }
 
 const s = StyleSheet.create({
-  body: { padding: 14, gap: 12 },
+  body: { padding: 16, gap: 14 },
   empty: { paddingTop: 60, paddingHorizontal: 18, gap: 8, alignItems: "center" },
-  emptyTitle: { fontSize: 18, fontWeight: "600" },
-  emptyText: { fontSize: 15, lineHeight: 21, textAlign: "center" },
+  emptyTitle: { fontSize: 20, fontWeight: "600" },
+  emptyText: { fontSize: 15, lineHeight: 20, textAlign: "center" },
   section: { marginTop: 18, gap: 2 },
-  heading: { fontSize: 13, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 },
-  past: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 3 },
-  pastSummary: { fontSize: 15 },
+  heading: { fontSize: 13, textTransform: "uppercase", marginLeft: 16, marginBottom: 6 },
+  past: { paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: StyleSheet.hairlineWidth, gap: 3 },
+  pastSummary: { fontSize: 17 },
   pastMeta: { fontSize: 13 },
   top: { flexDirection: "row", justifyContent: "space-between" },
-  device: { fontSize: 13, fontWeight: "500" },
+  device: { fontSize: 13 },
   left: { fontSize: 13, fontVariant: ["tabular-nums"] },
-  summary: { fontSize: 17, lineHeight: 23, fontWeight: "500" },
+  summary: { fontSize: 17, lineHeight: 22, fontWeight: "600" },
 });

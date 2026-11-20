@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AlarmAuthorization } from "@midna/protocol";
-import { Alert, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, AppState, Linking, ScrollView, StyleSheet } from "react-native";
 import { alarmAuthorization, heldOf, syncAlarms, upcoming, type AlarmsOnPhone } from "../alarms";
 import type { PhoneConnection } from "../connection";
 import { locationSetup, type LocationSetup } from "../location";
-import { useTheme } from "../theme";
-import { Button, Card, Problem } from "../ui";
+import { Group, GroupNote, Problem, Row } from "../ui";
 import type { Midna } from "../useMidna";
 import { focusStatus, minutes } from "../focus";
 import { FocusSettings } from "./Focus";
 import { LocationSettings } from "./Location";
 
-/** Which midna this phone talks to, location, Screen Time, and the way out: pair again, or unpair. `focusAsk` changes when a shield's "Ask midna" was tapped: Screen Time opens. */
-export function Settings({ midna, connection, onPairAgain, onUnpaired, focusAsk = 0 }: { midna: Midna; connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void; focusAsk?: number }) {
-  const t = useTheme();
+/** The model midna thinks with, which midna this phone talks to, location, Screen Time, alarms, and the way out: pair again, or unpair. `focusAsk` changes when a shield's "Ask midna" was tapped: Screen Time opens. */
+export function Settings({
+  midna,
+  connection,
+  onPairAgain,
+  onUnpaired,
+  focusAsk = 0,
+  model,
+  onPickModel,
+}: {
+  midna: Midna;
+  connection: PhoneConnection;
+  onPairAgain: () => void;
+  onUnpaired: () => void;
+  focusAsk?: number;
+  /** What is thinking now, and the sheet that changes it. */
+  model: string;
+  onPickModel: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [location, setLocation] = useState<LocationSetup | null>(null);
@@ -50,7 +65,6 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired, focusAsk 
     ["Address", connection.url],
     ["Version", midna.status?.version ?? "—"],
     ["Lives on", midna.status?.host.name || "—"],
-    ["Mode", midna.status?.mode ?? "—"],
     ["Notifications", notifications(midna)],
     ["This phone", connection.device],
   ];
@@ -80,48 +94,41 @@ export function Settings({ midna, connection, onPairAgain, onUnpaired, focusAsk 
 
   return (
     <ScrollView testID="settings" contentContainerStyle={s.body}>
-      <Card style={s.card}>
-        {rows.map(([k, v]) => (
-          <View key={k} style={[s.row, { borderBottomColor: t.line }]}>
-            <Text style={[s.key, { color: t.dim }]}>{k}</Text>
-            <Text selectable numberOfLines={1} style={[s.value, { color: t.ink }]}>
-              {v}
-            </Text>
-          </View>
+      <Group>
+        <Row testID="settings-model" label="Model" value={model} first chevron onPress={onPickModel} />
+        <Row label="Mode" value={midna.status?.mode === "ask" ? "Asks first" : midna.status?.mode === "autonomous" ? "On its own" : "—"} />
+      </Group>
+      <Group>
+        {rows.map(([k, v], n) => (
+          <Row key={k} label={k} value={v} first={n === 0} />
         ))}
-      </Card>
-      <Text style={[s.note, { color: t.dim }]}>{whereAlertsGo(midna)}</Text>
-      <Card style={s.card}>
-        <Pressable testID="settings-location" accessibilityRole="button" onPress={() => setShowLocation(true)} style={({ pressed }) => [s.row, s.last, pressed && { opacity: 0.6 }]}>
-          <Text style={[s.key, { color: t.dim }]}>Location</Text>
-          <Text style={[s.value, { color: location === "while-using" ? t.warn : t.ink }]}>
-            {locationLabel(location)} <Text style={{ color: t.dimmer }}>›</Text>
-          </Text>
-        </Pressable>
+      </Group>
+      <GroupNote>{whereAlertsGo(midna)}</GroupNote>
+      <Group>
+        <Row testID="settings-location" label="Location" value={locationLabel(location)} tone={location === "while-using" ? "warn" : undefined} first chevron onPress={() => setShowLocation(true)} />
         {focus ? (
-          <Pressable testID="settings-focus" accessibilityRole="button" onPress={() => setShowFocus(true)} style={({ pressed }) => [s.row, s.last, { borderTopColor: t.line, borderTopWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
-            <Text style={[s.key, { color: t.dim }]}>Screen Time</Text>
-            <Text style={[s.value, { color: t.ink }]}>
-              {!focus.authorized ? "Off" : focus.shielded ? `Held · ${minutes(focus.minutesToday)} today` : `${minutes(focus.minutesToday)} today`} <Text style={{ color: t.dimmer }}>›</Text>
-            </Text>
-          </Pressable>
+          <Row
+            testID="settings-focus"
+            label="Screen Time"
+            value={!focus.authorized ? "Off" : focus.shielded ? `Held · ${minutes(focus.minutesToday)} today` : `${minutes(focus.minutesToday)} today`}
+            chevron
+            onPress={() => setShowFocus(true)}
+          />
         ) : null}
-      </Card>
-      <Card style={s.card}>
-        <Pressable
+        <Row
           testID="settings-alarms"
-          accessibilityRole="button"
+          label="Alarms"
+          value={alarmsLabel(allowed, wanted.length, ringing.length)}
+          tone={allowed === "authorized" && ringing.length === wanted.length ? undefined : "warn"}
           onPress={() => (allowed === "denied" ? void Linking.openSettings() : lookAtAlarms(true))}
-          style={({ pressed }) => [s.row, s.last, pressed && { opacity: 0.6 }]}
-        >
-          <Text style={[s.key, { color: t.dim }]}>Alarms</Text>
-          <Text style={[s.value, { color: allowed === "authorized" && ringing.length === wanted.length ? t.ink : t.warn }]}>{alarmsLabel(allowed, wanted.length, ringing.length)}</Text>
-        </Pressable>
-      </Card>
-      <Text style={[s.note, { color: t.dim }]}>{alarmsNote(allowed)}</Text>
+        />
+      </Group>
+      <GroupNote>{alarmsNote(allowed)}</GroupNote>
       <Problem text={problem} />
-      <Button label="Pair again" onPress={onPairAgain} disabled={busy} />
-      <Button label="Unpair this phone" kind="danger" busy={busy} onPress={unpair} />
+      <Group>
+        <Row testID="settings-pair-again" label="Pair Again" tone="tint" first onPress={busy ? undefined : onPairAgain} />
+        <Row testID="settings-unpair" label="Unpair This Phone" tone="danger" busy={busy} onPress={busy ? undefined : unpair} />
+      </Group>
     </ScrollView>
   );
 }
@@ -169,11 +176,5 @@ function whereAlertsGo(midna: Midna): string {
 }
 
 const s = StyleSheet.create({
-  body: { padding: 14, gap: 14 },
-  card: { paddingVertical: 4, gap: 0 },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, gap: 16 },
-  key: { fontSize: 15 },
-  value: { fontSize: 15, flexShrink: 1, textAlign: "right" },
-  last: { borderBottomWidth: 0 },
-  note: { fontSize: 13.5, lineHeight: 19, paddingHorizontal: 4 },
+  body: { padding: 16, paddingBottom: 32, gap: 22 },
 });

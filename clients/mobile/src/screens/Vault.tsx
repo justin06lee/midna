@@ -89,7 +89,7 @@ export function Vault({ midna, connection }: { midna: Midna; connection: PhoneCo
           autoCorrect={false}
           autoCapitalize="none"
           clearButtonMode="while-editing"
-          style={[s.find, { color: t.ink, backgroundColor: t.panel, borderColor: t.line2 }]}
+          style={[s.find, { color: t.ink, backgroundColor: t.fill }]}
         />
       )}
       {items.length === 0 ? (
@@ -269,19 +269,19 @@ function Editor({ midna, item, draft, onDone, onBack }: { midna: Midna; item: Va
 const s = StyleSheet.create({
   body: { padding: 16, gap: 14 },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
-  title: { fontSize: 24, fontWeight: "700" },
+  title: { fontSize: 28, fontWeight: "700" },
   lede: { fontSize: 15, lineHeight: 21, marginTop: -6 },
-  find: { height: 44, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, fontSize: 16 },
-  list: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  row: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 52, justifyContent: "center", gap: 2 },
-  rowTitle: { fontSize: 16.5, fontWeight: "500" },
-  rowMeta: { fontSize: 14 },
+  find: { height: 36, borderRadius: 10, paddingHorizontal: 12, fontSize: 17 },
+  list: { borderRadius: 12, overflow: "hidden" },
+  row: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: "center", gap: 2 },
+  rowTitle: { fontSize: 17 },
+  rowMeta: { fontSize: 15 },
   note: { fontSize: 15, lineHeight: 21, paddingVertical: 8 },
   empty: { flex: 1, paddingTop: 60, paddingHorizontal: 24, gap: 10, alignItems: "center" },
   emptyTitle: { fontSize: 18, fontWeight: "600" },
   emptyText: { fontSize: 15, lineHeight: 21, textAlign: "center" },
   back: { minHeight: 44, justifyContent: "center" },
-  backText: { fontSize: 16 },
+  backText: { fontSize: 17 },
   fields: { gap: 14 },
   password: { gap: 8 },
   secretActions: { flexDirection: "row", gap: 8 },

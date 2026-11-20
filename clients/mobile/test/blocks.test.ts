@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { cells, columnWidths, parse } from "../src/blocks.ts";
+import { describe, expect, test } from "bun:test";
+import { cells, columnWidths, fitColumns, parse } from "../src/blocks.ts";
 
 test("a table between paragraphs: its header, alignment and rows", () => {
   const md = [
@@ -56,4 +56,25 @@ test("column widths follow the longest cell, Hangul counted wide, within bounds"
   expect(wide!).toBeGreaterThan(narrow!);
   expect(hangul!).toBeGreaterThan(wide! - 20);
   expect(long).toBe(240);
+});
+
+describe("a table in the width it has", () => {
+  test("one that fits, or has no width yet, keeps its columns", () => {
+    expect(fitColumns([60, 196, 78], 400)).toEqual([60, 196, 78]);
+    expect(fitColumns([60, 196, 78], 0)).toEqual([60, 196, 78]);
+  });
+
+  test("one that only just overflows is drawn to fit, so its edge isn't cut", () => {
+    const fitted = fitColumns([60, 196, 78], 330);
+    expect(fitted.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(330);
+    expect(fitted.every((w, i) => w <= [60, 196, 78][i]! && w >= 44)).toBe(true);
+  });
+
+  test("one a good deal wider keeps its widths and scrolls", () => {
+    expect(fitColumns([120, 240, 240, 120], 330)).toEqual([120, 240, 240, 120]);
+  });
+
+  test("columns already at their narrowest aren't squeezed further: it scrolls", () => {
+    expect(fitColumns([44, 44, 44, 44, 44, 44, 44, 44], 340)).toEqual([44, 44, 44, 44, 44, 44, 44, 44]);
+  });
 });

@@ -12,6 +12,7 @@ export * from "./location.ts";
 export * from "./permissions.ts";
 export * from "./alarms.ts";
 export * from "./focus.ts";
+export * from "./models.ts";
 import type { FocusLiftAsk, FocusReport, FocusRules, FocusRulesPatch, FocusState } from "./focus.ts";
 import type { Alarm, AlarmReport, AlarmSet, AlarmsState } from "./alarms.ts";
 import type { AskedPermission, PermissionAsk } from "./permissions.ts";
@@ -375,6 +376,16 @@ export interface Overview {
 
 /** An agent CLI on the host that could be midna's brain. */
 export interface BrainInfo { id: string; label: string; installed: boolean; loginCommand: string; installHint: string }
+/** One model a brain offers, as it lists it itself. `id` is what follows the provider in a model ref: "claude:<id>". After 0.13.6. */
+export interface BrainModel {
+  id: string;
+  /** What the brain calls it. */
+  name: string;
+  description?: string;
+  /** The model an alias stands for, when the brain says: "opus" is "claude-opus-5-5". */
+  resolved?: string;
+  default?: boolean;
+}
 
 /** A bridge to somewhere else (Telegram today). */
 export interface BridgeInfo { name: string; enabled: boolean }
@@ -611,6 +622,13 @@ export class MidnaClient {
   }
   brains(): Promise<BrainInfo[]> {
     return this.call("GET", "/v1/brains");
+  }
+  /**
+   * The models one brain offers; Claude's are an account's (the setting's when left out). After 0.13.6: an older host answers 404.
+   * The brain is started to ask it, so this gives up after 20 s rather than leave a picker waiting.
+   */
+  brainModels(id: string, account?: Account, signal?: AbortSignal): Promise<BrainModel[]> {
+    return this.call("GET", `/v1/brains/${encodeURIComponent(id)}/models${account ? `?account=${account}` : ""}`, undefined, signal, undefined, 20_000);
   }
   /** Try the brain now (a tiny real turn); work that was waiting on it runs if it answers. */
   checkBrain(): Promise<BrainHealth> {

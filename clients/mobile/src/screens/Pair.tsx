@@ -54,10 +54,10 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={[s.root, { backgroundColor: t.bg }]}>
+    <KeyboardAvoidingView behavior="padding" style={[s.root, { backgroundColor: t.grouped }]}>
       <ScrollView contentContainerStyle={[s.body, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
         <View style={s.head}>
-          <Text style={[s.title, { color: t.ink }]}>{previous ? "Pair again" : "Pair with midna"}</Text>
+          <Text style={[s.title, { color: t.ink }]}>{previous ? "Pair Again" : "Pair with midna"}</Text>
           <Text style={[s.lede, { color: t.dim }]}>
             Enter midna's address and a pairing code. For a code, run <Text style={s.code}>midna pair</Text> on midna's machine or your Mac.
           </Text>
@@ -85,9 +85,9 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  body: { paddingHorizontal: 22, gap: 18 },
-  head: { gap: 8, marginBottom: 8 },
-  title: { fontSize: 30, fontWeight: "700", letterSpacing: -0.5 },
-  lede: { fontSize: 15.5, lineHeight: 21 },
-  code: { fontFamily: mono, fontSize: 14 },
+  body: { paddingHorizontal: 16, gap: 22 },
+  head: { gap: 8, marginBottom: 4, paddingHorizontal: 4 },
+  title: { fontSize: 34, fontWeight: "700" },
+  lede: { fontSize: 17, lineHeight: 22 },
+  code: { fontFamily: mono, fontSize: 15 },
 });

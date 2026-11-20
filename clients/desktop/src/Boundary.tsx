@@ -18,7 +18,7 @@ export class Boundary extends Component<{ children: ReactNode; onReset?: () => v
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 text-center">
         <Mark className="mb-3 size-8 text-dimmer" />
-        <p className="text-[14px] font-medium">Something in this window broke.</p>
+        <p className="text-[15px] font-semibold">Something in this window broke.</p>
         <p className="selectable mt-1 max-w-[440px] font-mono text-[11.5px] text-dim">{this.state.error.message}</p>
         <div className="mt-4 flex gap-2">
           <Button variant="primary" onClick={() => location.reload()}>
@@ -31,7 +31,7 @@ export class Boundary extends Component<{ children: ReactNode; onReset?: () => v
                 this.props.onReset!();
               }}
             >
-              Pick another machine
+              Pick Another Machine
             </Button>
           )}
         </div>

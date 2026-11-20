@@ -168,7 +168,11 @@ export function useMidna(connection: PhoneConnection) {
       else if (e.type === "user_message") {
         merge([{ key: `m:${e.id}`, role: "user", text: e.text, client: e.client, at: e.createdAt, attachments: e.attachments ?? [] }]);
         if (e.replyTo) setLines((cur) => cur.map((l) => (l.outboxId === e.replyTo ? { ...l, answered: true } : l)));
-      } else if (e.type === "status") setThinking(e.state === "thinking" ? { tool: null } : null);
+      } else if (e.type === "status") {
+        setThinking(e.state === "thinking" ? { tool: null } : null);
+        // A turn is over: what thinks may have changed (set from another device, or a fallback took over), and nothing on the stream says so.
+        if (e.state === "idle") void client.status().then(setStatus, () => {});
+      }
       else if (e.type === "activity") setThinking({ tool: e.tool });
       else if (e.type === "approval") noteApproval(e.approval);
     }
@@ -319,7 +323,7 @@ export function useMidna(connection: PhoneConnection) {
     [attachmentSource, auth],
   );
 
-  return { client, status, push, lines, link, thinking, send, retry, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
+  return { client, status, setStatus, push, lines, link, thinking, send, retry, loadOlder, olderExhausted, approvals, answerApproval, upload, discardUpload, attachmentSource, fetchAttachment, reconnect: () => kick.current() };
 }
 
 export type Midna = ReturnType<typeof useMidna>;

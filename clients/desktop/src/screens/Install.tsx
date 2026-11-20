@@ -49,24 +49,24 @@ export function Install({ device, choices, onDone, onBack }: { device: Discovere
       <div className="flex flex-1 justify-center overflow-y-auto px-8 pb-10">
         <div className="w-full max-w-[520px] pt-8">
           <div className="mb-6 flex items-center gap-3.5">
-            <div className="flex size-11 items-center justify-center rounded-[12px] bg-primary text-primary-ink">
+            <div className="flex size-11 items-center justify-center rounded-[12px] bg-ink text-bg">
               {finished ? <Icon name="check" className="size-5" /> : <Mark className="size-6" />}
             </div>
             <div>
-              <h1 className="text-[19px] font-semibold tracking-[-0.015em]">{finished ? `midna lives on ${device.name}` : `${verb} ${device.name}`}</h1>
+              <h1 className="text-[18px] font-semibold">{finished ? `midna lives on ${device.name}` : `${verb} ${device.name}`}</h1>
               <p className="text-[12.5px] text-dim">{device.self ? "this computer" : `${device.via} · ${device.address}`}</p>
             </div>
           </div>
 
-          <ol className="sheet overflow-hidden rounded-xl">
+          <ol className="sheet overflow-hidden rounded-[10px]">
             {ORDER.map((id, i) => (
               <StepRow key={id} title={INSTALL_STEPS[id]} state={steps[id]} first={i === 0} />
             ))}
           </ol>
 
           {failure && (
-            <div className="rise mt-4 rounded-xl border border-line-2 bg-panel px-4 py-3.5">
-              <p className="text-[13.5px] font-medium">{failure.message}</p>
+            <div role="alert" className="rise sheet mt-4 rounded-[10px] px-3.5 py-3">
+              <p className="text-[13px] font-semibold">{failure.message}</p>
               {failure.hint && <p className="selectable mt-1 text-[12.5px] text-dim">{failure.hint}</p>}
               <div className="mt-3 flex gap-2">
                 {failure.action && (
@@ -75,10 +75,10 @@ export function Install({ device, choices, onDone, onBack }: { device: Discovere
                   </Button>
                 )}
                 <Button variant={failure.action ? "default" : "primary"} onClick={() => setAttempt((n) => n + 1)}>
-                  Try again
+                  Try Again
                 </Button>
                 <Button variant="ghost" onClick={onBack}>
-                  Pick another machine
+                  Pick Another Machine
                 </Button>
               </div>
             </div>
@@ -93,13 +93,13 @@ function StepRow({ title, state, first }: { title: string; state: StepState; fir
   const mark = {
     waiting: <span className="size-3 rounded-full border border-line-2" />,
     running: <Spinner className="size-3.5" />,
-    done: <Icon name="check" className="size-3.5" />,
+    done: <Icon name="check" className="size-4 text-[var(--ok)]" />,
     skipped: <span className="h-px w-2.5 bg-dimmer" />,
-    failed: <Icon name="cross" className="size-3.5" />,
+    failed: <Icon name="cross" className="size-4 text-[var(--bad)]" />,
   }[state.status];
   const pct = state.progress && state.status === "running" ? Math.round((state.progress.done / state.progress.total) * 100) : null;
   return (
-    <li className={`flex items-center gap-3 px-4 py-3 ${first ? "" : "border-t border-line"}`}>
+    <li className={`flex items-center gap-2.5 px-3 py-2.5 ${first ? "" : "border-t border-line"}`}>
       <span className="flex size-4 items-center justify-center">{mark}</span>
       <span className={`flex-1 text-[13px] ${state.status === "waiting" ? "text-dimmer" : state.status === "failed" ? "font-medium" : ""}`}>{title}</span>
       {pct !== null ? (

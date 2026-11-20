@@ -25,9 +25,9 @@ export function Today({ overview }: { overview: Overview }) {
   const overdue = due.filter((t) => t.due_at !== null && t.due_at < now).length;
 
   return (
-    <div className="mx-auto w-full max-w-[880px] px-8 pt-4 pb-10">
+    <div className="mx-auto w-full max-w-[880px] px-8 pt-2 pb-10">
       <header className="mb-6">
-        <h1 className="text-[22px] font-semibold tracking-[-0.02em]">{new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h1>
+        <h1 className="text-[20px] font-semibold">{new Date(now).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h1>
         <p className="mt-0.5 text-[13px] text-dim">
           {[
             events.length ? `${events.length} on the calendar` : "nothing on the calendar",
@@ -81,16 +81,16 @@ export function Today({ overview }: { overview: Overview }) {
 
 function List({ children, empty }: { children: React.ReactNode[] | React.ReactNode; empty: string }) {
   const items = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean);
-  return <div className="sheet overflow-hidden rounded-xl">{items.length ? items : <Empty>{empty}</Empty>}</div>;
+  return <div className="sheet divide-y divide-line overflow-hidden rounded-[10px]">{items.length ? items : <Empty>{empty}</Empty>}</div>;
 }
 
 function Row({ lead, text, sub, strong }: { lead: string; text: string; sub?: string | null; strong?: boolean }) {
   return (
-    <div className="flex gap-3 border-b border-line px-3.5 py-2.5 last:border-b-0">
-      <span className={`w-[124px] shrink-0 pt-px text-[12px] tabular ${strong ? "font-semibold text-ink" : "text-dim"}`}>{lead}</span>
+    <div className="flex gap-3 px-3 py-2">
+      <span className={`w-[124px] shrink-0 pt-px text-[12px] tabular ${strong ? "font-medium text-[var(--bad)]" : "text-dim"}`}>{lead}</span>
       <div className="min-w-0 flex-1">
         <div className="selectable text-[13px] leading-[1.4]">{text}</div>
-        {sub && <div className="mt-0.5 text-[11.5px] text-dimmer">{sub}</div>}
+        {sub && <div className="mt-0.5 text-[11.5px] text-dim">{sub}</div>}
       </div>
     </div>
   );

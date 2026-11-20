@@ -1,5 +1,5 @@
-import { Fragment, type ReactNode } from "react";
-import { openUrl } from "./host";
+import { Fragment, useState, type ReactNode } from "react";
+import { copy, openUrl } from "./host";
 import { WebImage } from "./media";
 
 /**
@@ -56,7 +56,7 @@ export function Markdown({ text }: { text: string }) {
       const body: string[] = [];
       for (i++; i < lines.length && !lines[i]!.startsWith("```"); i++) body.push(lines[i]!);
       i++;
-      blocks.push(<pre key={key++}>{body.join("\n")}</pre>);
+      blocks.push(<Code key={key++} text={body.join("\n")} />);
       continue;
     }
     if (/^\s*[-*•]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line)) {
@@ -148,33 +148,63 @@ export function Markdown({ text }: { text: string }) {
   return <div className="prose-midna selectable">{blocks}</div>;
 }
 
-const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\((?:https?:\/\/|tg:\/\/)[^)\s]+\))|(https?:\/\/[^\s)]+)|((?:^|[\s(])_[^_\n]+_(?=[\s).,!?:;]|$))|(!\[[^\]]*\]\([^)\s]+\))/g;
+/**
+ * What can sit inside a line, a list item or a table's cell: code, an image, a link, a bare address,
+ * **bold**, ~~struck~~, *italic* and _italic_ (the phone's grammar: clients/mobile/src/blocks.ts).
+ * No lookbehind (older WebKit): the underscore form carries the space or bracket before it.
+ */
+const INLINE =
+  /(`[^`]+`)|(!\[[^\]]*\]\([^)\s]+\))|(\[[^\]]+\]\((?:https?:\/\/|tg:\/\/)[^)\s]+\))|(https?:\/\/[^\s)]+)|(\*\*(?=\S)(?:[^*]|\*(?!\*)|\*(?=\*\*(?!\*)))+\*\*(?!\*))|(~~(?=\S)[^~\n]+~~)|(\*(?=[^\s*])[^*\n]*[^\s*]\*|\*[^\s*]\*)|((?:^|[\s(])_[^_\n]+_(?=[\s).,!?:;]|$))/g;
 
-function inline(text: string): ReactNode[] {
+/** A line's words as elements. Bold, struck, italic and a link's label can hold more of the same inside them. */
+export function inline(text: string, key = ""): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
-  let k = 0;
+  let n = 0;
   for (const m of text.matchAll(INLINE)) {
     if (m.index! > last) out.push(text.slice(last, m.index));
     const [tok] = m;
-    if (m[6]) {
+    const k = `${key}${n++}`;
+    if (m[1]) out.push(<code key={k}>{tok.slice(1, -1)}</code>);
+    else if (m[2]) {
       const [, alt, src] = /\[([^\]]*)\]\(([^)\s]+)\)$/.exec(tok)!;
-      out.push(<WebImage key={k++} src={src!} alt={alt!} />);
-    } else if (m[1]) out.push(<code key={k++}>{tok.slice(1, -1)}</code>);
-    else if (m[2]) out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
-    else if (m[3]) {
+      out.push(<WebImage key={k} src={src!} alt={alt!} />);
+    } else if (m[3]) {
       const [, label, href] = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok)!;
-      out.push(<Link key={k++} href={href!}>{label}</Link>);
-    } else if (m[4]) out.push(<Link key={k++} href={tok}>{tok}</Link>);
-    else if (m[5]) {
-      // The match carries the space or bracket before the underscore (no lookbehind on older WebKit).
+      out.push(<Link key={k} href={href!}>{inline(label!, `${k}.`)}</Link>);
+    } else if (m[4]) out.push(<Link key={k} href={tok}>{tok}</Link>);
+    else if (m[5]) out.push(<strong key={k}>{inline(tok.slice(2, -2), `${k}.`)}</strong>);
+    else if (m[6]) out.push(<s key={k}>{inline(tok.slice(2, -2), `${k}.`)}</s>);
+    else if (m[7]) out.push(<em key={k}>{inline(tok.slice(1, -1), `${k}.`)}</em>);
+    else if (m[8]) {
       const lead = tok.startsWith("_") ? "" : tok[0]!;
-      out.push(lead, <em key={k++}>{tok.slice(lead.length + 1, -1)}</em>);
+      out.push(lead, <em key={k}>{inline(tok.slice(lead.length + 1, -1), `${k}.`)}</em>);
     }
     last = m.index! + tok.length;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
+}
+
+/** A block of code, with a quiet Copy that shows while the pointer is over it. */
+function Code({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="md-code">
+      <pre>{text}</pre>
+      <button
+        type="button"
+        onClick={() =>
+          void copy(text).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1400);
+          })
+        }
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
 }
 
 function Link({ href, children }: { href: string; children: ReactNode }) {

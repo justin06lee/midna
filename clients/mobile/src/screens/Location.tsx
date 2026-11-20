@@ -289,9 +289,9 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
       accessibilityRole="button"
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={({ pressed }) => [s.chip, { borderColor: selected ? t.ink : t.line2, backgroundColor: selected ? t.active : t.panel, opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [s.chip, { backgroundColor: selected ? t.primary : t.fill, opacity: pressed ? 0.7 : 1 }]}
     >
-      <Text style={[s.chipText, { color: selected ? t.ink : t.ink2 }]}>{label}</Text>
+      <Text style={[s.chipText, { color: selected ? t.primaryInk : t.ink }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -300,7 +300,7 @@ const s = StyleSheet.create({
   body: { padding: 16, gap: 14 },
   loading: { flex: 1, paddingTop: 60, alignItems: "center" },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
-  title: { fontSize: 24, fontWeight: "700" },
+  title: { fontSize: 28, fontWeight: "700" },
   heading: { fontSize: 17, fontWeight: "600" },
   lede: { fontSize: 15, lineHeight: 21, marginTop: -6 },
   para: { fontSize: 15, lineHeight: 21 },
@@ -308,17 +308,17 @@ const s = StyleSheet.create({
   kv: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, gap: 16 },
   key: { fontSize: 15 },
   value: { fontSize: 15, flexShrink: 1, textAlign: "right" },
-  list: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  row: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 52, justifyContent: "center", gap: 2 },
-  rowTitle: { fontSize: 16.5, fontWeight: "500" },
-  rowMeta: { fontSize: 14 },
+  list: { borderRadius: 12, overflow: "hidden" },
+  row: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: "center", gap: 2 },
+  rowTitle: { fontSize: 17 },
+  rowMeta: { fontSize: 15 },
   note: { fontSize: 13.5, lineHeight: 19, paddingHorizontal: 4 },
   back: { minHeight: 44, justifyContent: "center" },
-  backText: { fontSize: 16 },
+  backText: { fontSize: 17 },
   group: { gap: 8 },
   label: { fontSize: 13, fontWeight: "500" },
   hint: { fontSize: 12.5, lineHeight: 17 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { height: 32, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 13, justifyContent: "center" },
-  chipText: { fontSize: 14, fontWeight: "500" },
+  chip: { height: 34, borderRadius: 17, paddingHorizontal: 14, justifyContent: "center" },
+  chipText: { fontSize: 15, fontWeight: "500" },
 });
