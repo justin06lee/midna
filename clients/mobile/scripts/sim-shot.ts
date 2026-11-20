@@ -2,7 +2,7 @@
  * A screenshot of the iPhone app in the simulator, against a throwaway midna
  * with a day planned in it (scripts/preview.ts at the repo's root):
  *
- *   bun scripts/sim-shot.ts [--build] [--tab today] [--tomorrow approved] [--dark] [out.png]
+ *   bun scripts/sim-shot.ts [--build [--clean]] [--tab today] [--tomorrow approved] [--dark] [out.png]
  *
  * --build makes a Release build for the simulator first (prebuild, pods,
  * xcodebuild; Screen Time left out as in TestFlight builds), into
@@ -61,8 +61,11 @@ if (flag("build")) {
   const hidden = existsSync(focus);
   if (hidden) renameSync(focus, `${focus}.off`);
   try {
-    say("[build 1/2] prebuild and pods");
-    run(["bunx", "expo", "prebuild", "-p", "ios", "--clean"], { env: { CI: "1" }, log: join(mobile, "build", "sim-prebuild.log") });
+    // The native project is made again only when asked (--clean) or missing: a JavaScript change needs only the build.
+    if (flag("clean") || !existsSync(join(mobile, "ios", "midna.xcworkspace"))) {
+      say("[build 1/2] prebuild and pods");
+      run(["bunx", "expo", "prebuild", "-p", "ios", "--clean"], { env: { CI: "1" }, log: join(mobile, "build", "sim-prebuild.log") });
+    }
     say("[build 2/2] xcodebuild, Release for the simulator (several minutes)");
     run(
       ["xcodebuild", "-workspace", "ios/midna.xcworkspace", "-scheme", "midna", "-configuration", "Release", "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-derivedDataPath", "build/DerivedData-sim", "CODE_SIGNING_ALLOWED=NO", "build"],

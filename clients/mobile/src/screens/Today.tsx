@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import { AppState, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MidnaError, type CalendarBlock } from "@midna/protocol";
 import { useTheme, type Theme } from "../theme";
-import { clock, midnight, span, timetable, type Day, type Gap, type Row } from "../timetable";
+import { clock, clockParts, midnight, span, timetable, type Day, type Gap, type Row } from "../timetable";
 import { GroupNote, GroupTitle, Problem } from "../ui";
 import type { Midna } from "../useMidna";
 
@@ -82,13 +82,25 @@ export function Today({ midna }: { midna: Midna }) {
   const { blocks, problem, loading, load } = useDay(midna);
   const table = blocks ? timetable(blocks, now) : null;
 
+  // Opened, the table shows the block on now (or the next) near the top, not the morning's.
+  const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
+  const tableTop = useRef(0);
+  const placed = useRef(false);
+  const onRowAt = useCallback((y: number) => {
+    if (placed.current) return;
+    placed.current = true;
+    scroller.current?.scrollTo({ y: Math.max(0, tableTop.current + y - 220), animated: false });
+  }, []);
+
   return (
-    <ScrollView testID="today" contentContainerStyle={s.body} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
+    <ScrollView ref={scroller} testID="today" contentContainerStyle={s.body} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
       <Text style={[s.date, { color: t.dim }]}>{weekday(now)}</Text>
       {table && (table.now || table.next) ? <NowNext table={table} now={now} t={t} /> : null}
       <Problem text={problem} />
       {table && table.today.rows.length + table.today.allDay.length > 0 ? (
-        <Table day={table.today} now={now} t={t} />
+        <View onLayout={(e) => (tableTop.current = e.nativeEvent.layout.y)}>
+          <Table day={table.today} now={now} t={t} onFocusRow={onRowAt} />
+        </View>
       ) : table ? (
         <GroupNote>Nothing planned today. midna plans each day the night before; it shows here once you approve it.</GroupNote>
       ) : null}
@@ -130,7 +142,16 @@ function NowNext({ table, now, t }: { table: NonNullable<ReturnType<typeof timet
 }
 
 /** A day's blocks in a column: the time on the left, what on the right; the block on now on the faint accent, what's past quieter. No lines between rows. */
-function Table({ day, now, t }: { day: Day; now: number; t: Theme }) {
+function Table({ day, now, t, onFocusRow }: { day: Day; now: number; t: Theme; onFocusRow?: (y: number) => void }) {
+  // AM or PM is said at the first time and where it changes, not at every row.
+  let period = "";
+  const shownPeriod = (at: number) => {
+    const p = clockParts(at).period;
+    const show = p !== period;
+    period = p;
+    return show ? p : "";
+  };
+  const focus = day.rows.find((r) => !("gap" in r) && (r.state === "now" || r.next));
   return (
     <View style={[s.table, { backgroundColor: t.panel }]}>
       {day.allDay.map((r) => (
@@ -141,21 +162,34 @@ function Table({ day, now, t }: { day: Day; now: number; t: Theme }) {
           </View>
         </View>
       ))}
-      {day.rows.map((r) => ("gap" in r ? <Free key={`g${r.start}`} gap={r} t={t} /> : <Block key={r.id} r={r} now={now} t={t} />))}
+      {day.rows.map((r) =>
+        "gap" in r ? (
+          <Free key={`g${r.start}`} gap={r} t={t} />
+        ) : (
+          <Block key={r.id} r={r} now={now} t={t} period={shownPeriod(r.start)} onLayoutY={r === focus ? onFocusRow : undefined} />
+        ),
+      )}
     </View>
   );
 }
 
-function Block({ r, now, t }: { r: Row; now: number; t: Theme }) {
+function Block({ r, now, t, period, onLayoutY }: { r: Row; now: number; t: Theme; period: string; onLayoutY?: (y: number) => void }) {
   const past = r.state === "past";
   const on = r.state === "now";
   // What a block says under its name: how long, where, whose, and whether it's approved. A check-in's result will sit at the right.
   const meta = [r.end !== null ? span(r.end - r.start) : null, r.place, r.from, r.tentative ? "not approved yet" : null].filter(Boolean).join(" · ");
   return (
-    <View style={[s.row, on && [s.onRow, { backgroundColor: t.tint }]]} accessibilityLabel={`${clock(r.start)}, ${r.title}${on ? ", now" : r.next ? ", next" : ""}`}>
+    <View
+      style={[s.row, on && [s.onRow, { backgroundColor: t.tint }]]}
+      onLayout={onLayoutY ? (e) => onLayoutY(e.nativeEvent.layout.y) : undefined}
+      accessibilityLabel={`${clock(r.start)}, ${r.title}${on ? ", now" : r.next ? ", next" : ""}`}
+    >
       <View style={s.timeCol}>
-        <Text style={[s.time, { color: on ? t.primary : past ? t.dimmer : t.ink2 }, on && s.strong]}>{clock(r.start)}</Text>
-        {r.end !== null && midnight(r.end) === midnight(r.start) ? <Text style={[s.until, { color: past ? t.dimmer : t.dim }]}>{clock(r.end)}</Text> : null}
+        <Text style={[s.time, { color: on ? t.primary : past ? t.dimmer : t.ink2 }, on && s.strong]}>
+          {clockParts(r.start).time}
+          {period ? <Text style={s.period}>{` ${period}`}</Text> : null}
+        </Text>
+        {r.end !== null && midnight(r.end) === midnight(r.start) ? <Text style={[s.until, { color: past ? t.dimmer : t.dim }]}>{clockParts(r.end).time}</Text> : null}
       </View>
       <View style={s.what}>
         <Text style={[s.title, { color: past ? t.dim : t.ink }, on && s.strong]} numberOfLines={2}>
@@ -172,7 +206,7 @@ function Block({ r, now, t }: { r: Row; now: number; t: Theme }) {
 function Free({ gap, t }: { gap: Gap; t: Theme }) {
   return (
     <View style={[s.row, s.freeRow]}>
-      <Text style={[s.time, s.freeText, { color: t.dimmer }]}>{clock(gap.start)}</Text>
+      <Text style={[s.time, s.freeText, { color: t.dimmer }]}>{clockParts(gap.start).time}</Text>
       <Text style={[s.freeText, { color: t.dimmer }]}>{`Free · ${span(gap.end - gap.start)}`}</Text>
     </View>
   );
@@ -192,6 +226,7 @@ const s = StyleSheet.create({
   onRow: { borderRadius: 10 },
   timeCol: { width: 64 },
   time: { fontSize: 15, fontVariant: ["tabular-nums"], width: 64 },
+  period: { fontSize: 11, fontWeight: "500" },
   until: { fontSize: 13, fontVariant: ["tabular-nums"], marginTop: 1 },
   what: { flex: 1, gap: 2 },
   title: { fontSize: 17, lineHeight: 22 },

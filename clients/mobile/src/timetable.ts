@@ -107,8 +107,16 @@ export function timetable(blocks: CalendarBlock[], now = Date.now()): Timetable 
   return { today, tomorrow, waiting: approved ? 0 : waiting, now: now_, next };
 }
 
-/** "10:30" in the phone's own clock style. */
+/** "10:30 AM" or "10:30", in the phone's own clock style. */
 export const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+/** A time for the timetable's column: the clock without its AM or PM, and that apart ("" on a 24-hour phone), so the column stays narrow. */
+export function clockParts(at: number): { time: string; period: string } {
+  const parts = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).formatToParts(new Date(at));
+  const period = parts.find((p) => p.type === "dayPeriod")?.value ?? "";
+  const time = parts.filter((p) => p.type !== "dayPeriod").map((p) => p.value).join("").trim();
+  return { time, period };
+}
 
 /** "45 min", "1 h", "2 h 30 min". */
 export function span(ms: number): string {
