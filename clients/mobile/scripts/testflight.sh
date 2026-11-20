@@ -138,9 +138,16 @@ if [ "${MIDNA_FOCUS:-0}" = 1 ]; then
   done
 fi
 # Manual: this Mac's Apple Distribution identity and the named profiles. Cloud: Xcode asks Apple for both.
+# The identity is named by its SHA-1 from midna-signing's keychain: another "Apple Distribution: Huiyun Lee"
+# can sit in the login keychain (Xcode makes one when it signs automatically), and the profile allows only this one.
 if [ "$SIGNING" = manual ]; then
+  identity="Apple Distribution"
+  if [ -f "$kc" ]; then
+    identity=$(security find-identity -v -p codesigning "$kc" | awk '/Apple Distribution/ { print $2; exit }')
+    [ -n "$identity" ] || { echo "no Apple Distribution identity in $kc" >&2; exit 1; }
+  fi
   signing="<key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>signingCertificate</key><string>$identity</string>
   <key>provisioningProfiles</key>
   <dict>
     <key>sh.midna.mobile</key><string>$PROFILE</string>$extensions
