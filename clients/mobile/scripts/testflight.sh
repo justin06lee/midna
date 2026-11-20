@@ -5,6 +5,11 @@
 # repo); the export signs with the Apple Distribution identity and App Store profile.
 #
 #   scripts/testflight.sh            archive and upload build <ios.buildNumber in app.json>
+#   SIGNING=cloud scripts/testflight.sh   sign the export through the API key too (Apple's cloud-managed
+#                                    distribution certificate, -allowProvisioningUpdates): the way on a Mac that
+#                                    doesn't hold the Apple Distribution key. It is what a Mac without
+#                                    ~/Library/Keychains/midna-signing.keychain-db does unless told SIGNING=manual.
+#                                    The key needs the Admin role for it; an App Manager key is refused.
 #   UPLOAD=0 scripts/testflight.sh   archive and export an .ipa only
 #   MIDNA_ALARMS=0 scripts/testflight.sh   a build without the alarms module (modules/midna-alarms),
 #                                    should its Swift ever stop a build: the app runs without it
@@ -54,6 +59,8 @@ kc=$HOME/Library/Keychains/midna-signing.keychain-db
 if [ -f "$kc" ]; then
   security unlock-keychain -p "$(security find-generic-password -s midna-signing-keychain -w)" "$kc"
 fi
+# Without that keychain this Mac has no distribution key of its own: Apple signs the export.
+: "${SIGNING:=$([ -f "$kc" ] && echo manual || echo cloud)}"
 
 # The export signs with $PROFILE, which holds only the capabilities the app id had when it was made:
 # an entitlement app.json asks for that the profile lacks fails the export after a long archive. So check
@@ -72,7 +79,8 @@ missing() {
   # With Screen Time, app.config.js asks for two more than app.json does.
   GRANTED="$granted" bun -e 'const g = JSON.parse(process.env.GRANTED); const focus = process.env.MIDNA_FOCUS === "1" ? ["com.apple.developer.family-controls", "com.apple.security.application-groups"] : []; console.log([...Object.keys(require("./app.json").expo.ios.entitlements ?? {}), ...focus].filter((k) => !(k in g)).join(" "))'
 }
-lacks=$(missing)
+lacks=""
+[ "$SIGNING" = manual ] && lacks=$(missing)
 if [ -n "$lacks" ]; then
   echo "the profile \"$PROFILE\": $lacks; making it again through the API"
   ASC_KEY_ID=$ASC_KEY_ID ASC_ISSUER_ID=$ASC_ISSUER_ID ASC_KEY_PATH=$ASC_KEY_PATH PROFILE=$PROFILE bun scripts/profile.ts
@@ -117,6 +125,17 @@ if [ "${MIDNA_FOCUS:-0}" = 1 ]; then
     <key>sh.midna.mobile.$e</key><string>midna $e App Store</string>"
   done
 fi
+# Manual: this Mac's Apple Distribution identity and the named profiles. Cloud: Xcode asks Apple for both.
+if [ "$SIGNING" = manual ]; then
+  signing="<key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>sh.midna.mobile</key><string>$PROFILE</string>$extensions
+  </dict>"
+else
+  signing="<key>signingStyle</key><string>automatic</string>"
+fi
 cat > "$out/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -125,19 +144,14 @@ cat > "$out/ExportOptions.plist" <<PLIST
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>$dest</string>
   <key>teamID</key><string>$TEAM_ID</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Apple Distribution</string>
-  <key>provisioningProfiles</key>
-  <dict>
-    <key>sh.midna.mobile</key><string>$PROFILE</string>$extensions
-  </dict>
+  $signing
   <key>manageAppVersionAndBuildNumber</key><false/>
   <key>uploadSymbols</key><true/>
   <key>testFlightInternalTestingOnly</key><true/>
 </dict>
 </plist>
 PLIST
-echo "$([ "$UPLOAD" = 1 ] && echo uploading || echo exporting) build $build"
+echo "$([ "$UPLOAD" = 1 ] && echo uploading || echo exporting) build $build ($SIGNING signing)"
 # shellcheck disable=SC2086
 run "$out/export.log" xcodebuild -exportArchive -archivePath "$out/midna.xcarchive" -exportPath "$out/export" \
   -exportOptionsPlist "$out/ExportOptions.plist" $auth
