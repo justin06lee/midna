@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Platform, Pressable, Settings as RNSettings, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { PhoneConnection } from "../connection";
 import { onFocusTap } from "../focus";
@@ -10,25 +10,33 @@ import { Approvals } from "./Approvals";
 import { Chat } from "./Chat";
 import { ModelSheet, modelNow, useModels } from "./Models";
 import { Settings } from "./Settings";
+import { Today } from "./Today";
+import { preview } from "../preview";
 import { Vault } from "./Vault";
 
-type Tab = "chat" | "approvals" | "vault" | "settings";
+type Tab = "chat" | "today" | "approvals" | "vault" | "settings";
 
-const TABS: Record<Tab, string> = { chat: "Chat", approvals: "Approvals", vault: "Vault", settings: "Settings" };
+/** Chat, unless a preview launch names another (-midnaTab today; preview.ts). */
+const firstTab: Tab = ((t) => (preview && typeof t === "string" && ["chat", "today", "approvals", "vault", "settings"].includes(t) ? (t as Tab) : "chat"))(
+  Platform.OS === "ios" ? (RNSettings.get("midnaTab") as unknown) : null,
+);
+
+const TABS: Record<Tab, string> = { chat: "Chat", today: "Today", approvals: "Approvals", vault: "Vault", settings: "Settings" };
 /** Template images: the tab bar tints them (scripts/tabicons.ts in the desktop app draws them). */
 const ICONS: Record<Tab, number> = {
   chat: require("../../assets/tab-chat.png"),
+  today: require("../../assets/tab-today.png"),
   approvals: require("../../assets/tab-approvals.png"),
   vault: require("../../assets/tab-vault.png"),
   settings: require("../../assets/tab-settings.png"),
 };
 
-/** Paired: the header (on Chat it names the model and opens the sheet that switches it), and Chat, Approvals, Vault and Settings as tabs along the bottom. */
+/** Paired: the header (on Chat it names the model and opens the sheet that switches it), and Chat, Today, Approvals, Vault and Settings as tabs along the bottom. */
 export function Main({ connection, onPairAgain, onUnpaired }: { connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const midna = useMidna(connection);
-  const [tab, setTab] = useState<Tab>("chat");
+  const [tab, setTab] = useState<Tab>(firstTab);
   const [picking, setPicking] = useState(false);
   const models = useModels(midna, picking);
   // A shield's "Ask midna" opens Screen Time's lift, which asks why.
@@ -75,6 +83,7 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
       </View>
       <View style={[s.body, { opacity: offline ? 0.45 : 1 }]}>
         {tab === "chat" && <Chat midna={midna} connection={connection} onOpenApprovals={() => setTab("approvals")} />}
+        {tab === "today" && <Today midna={midna} />}
         {tab === "approvals" && <Approvals midna={midna} />}
         {tab === "vault" && <Vault midna={midna} connection={connection} />}
         {tab === "settings" && <Settings midna={midna} connection={connection} onPairAgain={onPairAgain} onUnpaired={onUnpaired} focusAsk={focusAsk} model={modelNow(midna, models)} onPickModel={() => setPicking(true)} />}

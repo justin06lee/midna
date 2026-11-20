@@ -6,6 +6,7 @@ import { forget, loadConnection, loadPrevious, setAside, type PhoneConnection } 
 import { forgetLocation } from "./location";
 import { Main } from "./screens/Main";
 import { Pair } from "./screens/Pair";
+import { previewConnection } from "./preview";
 import { useTheme } from "./theme";
 
 /** Paired, or not yet: the keychain decides which screen comes first. */
@@ -16,6 +17,8 @@ export default function App() {
   const [previous, setPrevious] = useState<PhoneConnection | null>(null);
 
   useEffect(() => {
+    // Launched with a connection to look at (preview.ts): that one, kept nowhere.
+    if (previewConnection) return setConnection(previewConnection);
     void Promise.all([loadConnection(), loadPrevious()]).then(([c, p]) => {
       setPrevious(p);
       setConnection(c);

@@ -31,6 +31,7 @@ import {
   VaultEntry,
   VaultPatch,
   type BridgeInfo,
+  type CalendarBlock,
   type BridgeSetupResult,
   type Delivery,
   type HandsStreamEvent,
@@ -739,6 +740,20 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       memory: store.memory.count(),
       spendLast7DaysUsd: store.log.spend(now - 7 * DAY),
     });
+  });
+
+  /** Calendar blocks overlapping [from, to): what the phone's timetable shows. The overview starts two hours back; a day starts at midnight. */
+  app.get("/v1/calendar", (c) => {
+    const from = Number(c.req.query("from"));
+    const to = Number(c.req.query("to"));
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return c.json({ error: "from and to are epoch ms, from before to" }, 400);
+    if (to - from > 31 * DAY) return c.json({ error: "at most 31 days at a time" }, 400);
+    return c.json<CalendarBlock[]>(
+      store.planning.events(from, to).map((e) => ({
+        id: e.id, title: e.title, starts_at: e.starts_at, ends_at: e.ends_at, all_day: e.all_day, location: e.location, notes: e.notes,
+        source: e.source, status: e.status === "tentative" ? "tentative" : "confirmed", updated_at: e.updated_at,
+      })),
+    );
   });
 
   app.get("/v1/events", (c) => {
