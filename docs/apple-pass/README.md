@@ -10,6 +10,8 @@ It found what no preview had: **in dark mode the app drew light text on a pale w
 
 To be visible to WebKit the window has to be in front, so the command brings the app forward for the two or three seconds the photograph takes (once the Mac has been idle a few seconds) and gives the screen back to what was in front. Only the chat is photographed: clicking in a real window needs Accessibility, which this session's shell doesn't have. The menu and Settings are in the WebKit pictures above.
 
+**The pill and the approval panel can't be photographed, by design:** both windows are kept out of screen captures (`exclude_from_capture`), so midna never sees them in its own screenshots, and neither does `screencapture`. What was checked instead, in WebKit: each of their pages (`#pill`, `#approval`) has a see-through `html` and `body` again (computed background `rgba(0, 0, 0, 0)`), with the body's type back at 13 px, and the test pins the rule.
+
 ## Round 4 (after the third review)
 
 | What was wrong | Before | After |
