@@ -13,9 +13,12 @@
  * token of its own. --keep leaves the app and its midna running afterwards,
  * to click around; otherwise both are stopped.
  *
- * The screen has to be unlocked: behind a lock screen WebKit paints nothing
- * and the window comes out empty (scripts/websnap.swift draws the page off
- * screen for that case). Whatever runs this needs Screen Recording.
+ * WebKit paints a window only while some of it can be seen, so the app comes
+ * to the front for the two or three seconds the photograph takes (once
+ * nobody has touched the Mac for a few seconds), and the app that was in
+ * front gets the screen back. The screen has to be unlocked: behind a lock
+ * screen the window comes out empty (scripts/websnap.swift draws the page
+ * off screen for that case). Whatever runs this needs Screen Recording.
  */
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -85,6 +88,7 @@ try {
   await new MidnaClient(c.url, c.token).updateSettings({ model: "claude:claude-fable-5-2", account: "personal" }).catch(() => {});
 
   say("[3/4] opening the app behind whatever is in front");
+  const front = /"LSDisplayName"="([^"]+)"/.exec(sh(["sh", "-c", 'lsappinfo info -only name "$(lsappinfo front)"']).stdout.toString())?.[1];
   sh(["pkill", "-f", `${NAME}.app/Contents/MacOS/${NAME}`]);
   sh(["open", "-g", APP]);
   let window = "";
@@ -101,7 +105,13 @@ try {
   say("[4/4] photographing its window");
   mkdirSync(out, { recursive: true });
   const file = join(out, "built-chat.png");
+  // In front only as long as it takes, and not in the middle of someone's typing: wait for a pause of a few seconds (a minute at most).
+  const idle = () => Number(/"HIDIdleTime" = (\d+)/.exec(sh(["ioreg", "-c", "IOHIDSystem"]).stdout.toString())?.[1] ?? 0) / 1e9;
+  for (let waited = 0; idle() < 4 && waited < 60; waited++) await Bun.sleep(1000);
+  sh(["open", "-a", APP]);
+  await Bun.sleep(2500);
   const shot = sh(["screencapture", "-x", "-o", "-l", window, file]);
+  if (front) sh(["open", "-a", front]);
   if (shot.exitCode !== 0 || !existsSync(file)) throw new Error(`screencapture couldn't take it: ${shot.stderr.toString().trim() || "no picture"}`);
   say(`saved ${file}`);
 } finally {

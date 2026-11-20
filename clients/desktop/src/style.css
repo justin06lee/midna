@@ -125,6 +125,10 @@ html, body, #root {
 
 /* The pill's window is transparent: only the pill itself shows. */
 html.pill, html.pill body {
+  background: transparent;
+}
+
+body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-sans);

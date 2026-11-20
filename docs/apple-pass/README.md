@@ -2,6 +2,14 @@
 
 A rough pass, for review before it goes further. Not pushed, no app built, nothing on the host.
 
+## The real window (charizard unlocked)
+
+`built-chat.png` is the built Mac app's own window: the preview build (release, this branch, its own bundle id so the installed midna.app is untouched) against a throwaway midna, in the system's dark appearance, taken by `bun scripts/built-shot.ts`.
+
+It found what no preview had: **in dark mode the app drew light text on a pale window.** One edit in round 1 had put the body's rules (background, ink, 13 px type, no text selection) on the selector meant for the windows over the screen, so the page had no background of its own and showed the window's pale first-paint colour, and the pill's and the approval panel's windows had lost their see-through background. The browser and the off-screen WebKit pictures both hid it, because an empty background there happens to be dark in dark mode. Fixed, with a test that pins those rules; the picture is from after the fix.
+
+To be visible to WebKit the window has to be in front, so the command brings the app forward for the two or three seconds the photograph takes (once the Mac has been idle a few seconds) and gives the screen back to what was in front. Only the chat is photographed: clicking in a real window needs Accessibility, which this session's shell doesn't have. The menu and Settings are in the WebKit pictures above.
+
 ## Round 4 (after the third review)
 
 | What was wrong | Before | After |
@@ -16,7 +24,7 @@ A rough pass, for review before it goes further. Not pushed, no app built, nothi
   cd clients/desktop && bun scripts/built-shot.ts      # saves docs/apple-pass/built-chat.png; --keep leaves it open, --build rebuilds first
   ```
 
-  It starts its own throwaway midna and hands the app that connection each time, since a throwaway midna's address and token only last as long as it runs.
+  It starts its own throwaway midna and hands the app that connection each time, since a throwaway midna's address and token only last as long as it runs. (Done since: see The real window, above.)
 
 ## Round 3 (after the second review)
 
@@ -80,4 +88,4 @@ The system's typeface and greys, one accent colour (the system blue) for the thi
 ## Not seen yet
 
 - The phone on a phone. This Mac has no Xcode or simulator; the first TestFlight build from this branch is the first real look.
-- The Mac app's own window. It builds, starts and connects (see The built app), but it has not been seen painted: the This Computer screen has never been seen at all, and the panel and the pill only in a browser.
+- Most of the Mac app's own window. Its chat has been seen (`built-chat.png`); the This Computer screen has never been seen at all, and the panel and the pill only in a browser.
