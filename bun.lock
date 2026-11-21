@@ -28,7 +28,7 @@
     },
     "clients/desktop": {
       "name": "@midna/desktop",
-      "version": "0.13.7",
+      "version": "0.13.8",
       "dependencies": {
         "@midna/protocol": "workspace:*",
         "@tauri-apps/api": "^2.11.1",
