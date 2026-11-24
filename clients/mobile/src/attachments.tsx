@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Attachment } from "@midna/protocol";
 import { size } from "./lines";
 import { Markdown } from "./markdown";
-import { useTheme } from "./theme";
+import { useTheme, type as face } from "./theme";
 import type { Midna } from "./useMidna";
 
 type Source = Midna["attachmentSource"];
@@ -48,9 +48,9 @@ export function Thumb({ a, source, width = THUMB_W, height = THUMB_H, radius = 1
   const t = useTheme();
   const [failed, setFailed] = useState(false);
   return (
-    <View style={[{ width, height, borderRadius: radius, backgroundColor: t.sunken, overflow: "hidden", alignItems: "center", justifyContent: "center" }, style]}>
+    <View style={[{ width, height, borderRadius: radius, backgroundColor: t.paperDim, overflow: "hidden", alignItems: "center", justifyContent: "center" }, style]}>
       {failed ? (
-        height >= 60 ? <Text style={[s.failed, { color: t.dimmer }]}>Couldn't load the picture</Text> : null
+        height >= 60 ? <Text style={[s.failed, { color: t.inkFaint }]}>Couldn't load the picture</Text> : null
       ) : (
         <Image source={source(a.id)} cachePolicy="memory-disk" recyclingKey={a.id} contentFit="cover" transition={120} onError={() => setFailed(true)} style={{ width, height }} />
       )}
@@ -63,7 +63,7 @@ function Picture({ a, source, onPress }: { a: Attachment; source: Source; onPres
   return (
     <Pressable accessibilityRole="imagebutton" accessibilityLabel={a.caption ?? a.name} onPress={onPress} style={s.picture}>
       <Thumb a={a} source={source} />
-      {a.caption ? <Text style={[s.caption, { color: t.dim }]}>{a.caption}</Text> : null}
+      {a.caption ? <Text style={[s.caption, { color: t.inkSoft }]}>{a.caption}</Text> : null}
     </Pressable>
   );
 }
@@ -87,16 +87,16 @@ function FileRow({ a, fetchAttachment }: { a: Attachment; fetchAttachment: Fetch
             .catch(() => setFailed(true))
             .finally(() => setBusy(false));
         }}
-        style={({ pressed }) => [s.file, { backgroundColor: t.panel, borderColor: t.line2, opacity: pressed ? 0.7 : 1 }]}
+        style={({ pressed }) => [s.file, { backgroundColor: t.paperDim, opacity: pressed ? 0.7 : 1 }]}
       >
-        <View style={[s.fileIcon, { backgroundColor: t.sunken }]}>
-          {busy ? <ActivityIndicator size="small" color={t.dim} /> : <Text style={[s.ext, { color: t.dim }]}>{ext(a.name)}</Text>}
+        <View style={[s.fileIcon, { backgroundColor: t.paperDim }]}>
+          {busy ? <ActivityIndicator size="small" color={t.inkSoft} /> : <Text style={[s.ext, { color: t.inkSoft }]}>{ext(a.name)}</Text>}
         </View>
         <View style={s.fileText}>
           <Text numberOfLines={1} style={[s.fileName, { color: t.ink }]}>
             {a.name}
           </Text>
-          <Text style={[s.fileMeta, { color: failed ? t.danger : t.dim }]}>{failed ? "Couldn't open it — tap to try again" : size(a.size)}</Text>
+          <Text style={[s.fileMeta, { color: failed ? t.destructive : t.inkSoft }]}>{failed ? "Couldn't open it — tap to try again" : size(a.size)}</Text>
         </View>
       </Pressable>
       {reading && <Reader a={a} fetchAttachment={fetchAttachment} onClose={() => setReading(false)} />}
@@ -122,12 +122,12 @@ function Reader({ a, fetchAttachment, onClose }: { a: Attachment; fetchAttachmen
   }, [a, fetchAttachment]);
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={[s.reader, { backgroundColor: t.bg }]}>
-        <View style={[s.readerBar, { borderBottomColor: t.line }]}>
+      <View style={[s.reader, { backgroundColor: t.paper }]}>
+        <View style={[s.readerBar, { borderBottomColor: t.hairline }]}>
           <Pressable accessibilityRole="button" onPress={onClose} hitSlop={12}>
             <Text style={[s.readerButton, { color: t.ink }]}>Done</Text>
           </Pressable>
-          <Text numberOfLines={1} style={[s.readerTitle, { color: t.dim }]}>
+          <Text numberOfLines={1} style={[s.readerTitle, { color: t.inkSoft }]}>
             {a.name}
           </Text>
           <Pressable
@@ -142,7 +142,7 @@ function Reader({ a, fetchAttachment, onClose }: { a: Attachment; fetchAttachmen
                 .finally(() => setSharing(false));
             }}
           >
-            {sharing ? <ActivityIndicator color={t.dim} /> : <Text style={[s.readerButton, { color: t.ink }]}>Share</Text>}
+            {sharing ? <ActivityIndicator color={t.inkSoft} /> : <Text style={[s.readerButton, { color: t.ink }]}>Share</Text>}
           </Pressable>
         </View>
         {text !== null ? (
@@ -150,7 +150,7 @@ function Reader({ a, fetchAttachment, onClose }: { a: Attachment; fetchAttachmen
             <Markdown text={text} />
           </ScrollView>
         ) : (
-          <View style={s.readerWait}>{failed ? <Text style={[s.fileMeta, { color: t.dim }]}>Couldn't load the file</Text> : <ActivityIndicator color={t.dim} />}</View>
+          <View style={s.readerWait}>{failed ? <Text style={[s.fileMeta, { color: t.inkSoft }]}>Couldn't load the file</Text> : <ActivityIndicator color={t.inkSoft} />}</View>
         )}
       </View>
     </Modal>
@@ -248,23 +248,23 @@ const THUMB_H = 180;
 const s = StyleSheet.create({
   list: { gap: 6 },
   picture: { width: 240, gap: 4 },
-  failed: { fontSize: 12.5, textAlign: "center", paddingHorizontal: 12 },
-  caption: { fontSize: 13 },
-  file: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 8, paddingRight: 14, maxWidth: 280 },
+  failed: { ...face(12.5), textAlign: "center", paddingHorizontal: 12 },
+  caption: { ...face(13) },
+  file: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 16, borderCurve: "continuous", padding: 8, paddingRight: 14, maxWidth: 280 },
   fileIcon: { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  ext: { fontSize: 11, fontWeight: "700" },
+  ext: { ...face(11, "bold") },
   fileText: { flexShrink: 1 },
-  fileName: { fontSize: 15, fontWeight: "500" },
-  fileMeta: { fontSize: 12.5, marginTop: 1 },
+  fileName: { ...face(15, "medium") },
+  fileMeta: { ...face(12.5), marginTop: 1 },
   viewer: { flex: 1, backgroundColor: "#000" },
   full: { flex: 1 },
-  viewerFailed: { color: "#8e8e93", fontSize: 15 },
+  viewerFailed: { color: "#8e8e93", ...face(15) },
   viewerBar: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 12 },
-  viewerButton: { color: "#fff", fontSize: 17, fontWeight: "600" },
+  viewerButton: { color: "#fff", ...face(17, "bold") },
   reader: { flex: 1 },
   readerBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
-  readerTitle: { flex: 1, textAlign: "center", fontSize: 14 },
-  readerButton: { fontSize: 17, fontWeight: "600" },
+  readerTitle: { flex: 1, textAlign: "center", ...face(14) },
+  readerButton: { ...face(17, "bold") },
   readerBody: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 40 },
   readerWait: { flex: 1, alignItems: "center", justifyContent: "center" },
 });

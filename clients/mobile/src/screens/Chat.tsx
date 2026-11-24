@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, t
 import { ActionSheetIOS, ActivityIndicator, Animated, AppState, Dimensions, Easing, FlatList, Keyboard, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { APPROVAL_OPTIONS, MAX_ATTACHMENTS_PER_MESSAGE, plainText, type Approval, type ApprovalAnswer, type Attachment } from "@midna/protocol";
 import { Attachments, Thumb } from "../attachments";
 import { keyboardLift } from "../keyboard";
@@ -10,8 +11,8 @@ import { draftKey, dropDraft, loadDraft, saveDraft, useDraft } from "../drafts";
 import { faceId } from "../faceid";
 import { Markdown } from "../markdown";
 import { approvalOutcome, asksApproval, size, type Line } from "../lines";
-import { useTheme } from "../theme";
-import { Problem } from "../ui";
+import { radius, type as face, useTheme } from "../theme";
+import { Glass, Icon, Problem } from "../ui";
 import type { Midna } from "../useMidna";
 
 /** A file on its way to the host, before it is an attachment. */
@@ -28,10 +29,11 @@ interface Uploading {
  */
 type Measurable = ComponentRef<typeof View>;
 
-function useKeyboardLift(ref: RefObject<Measurable | null>) {
-  const lift = useRef(new Animated.Value(0)).current;
+function useKeyboardLift(ref: RefObject<Measurable | null>, rest: number) {
+  const lift = useRef(new Animated.Value(rest)).current;
+  // Never less than `rest`: with no keyboard, the foot stands clear of the tab capsule floating over it.
   const move = (to: number, ms: number) =>
-    Animated.timing(lift, { toValue: to, duration: ms || 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    Animated.timing(lift, { toValue: Math.max(to, rest), duration: ms || 250, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
   useEffect(() => {
     // The lift is worked out afresh from the view's frame and the keyboard's
     // each time: padding doesn't move the frame, so nothing already applied
@@ -45,13 +47,13 @@ function useKeyboardLift(ref: RefObject<Measurable | null>) {
       if (AppState.currentState === "active") place(e.endCoordinates.screenY, e.endCoordinates.height, e.duration);
     });
     const hide = Keyboard.addListener("keyboardWillHide", (e) => move(0, e.duration));
-    const done = Keyboard.addListener("keyboardDidHide", () => lift.setValue(0));
+    const done = Keyboard.addListener("keyboardDidHide", () => lift.setValue(rest));
     // Back from the background: whatever the keyboard is now decides.
     const app = AppState.addEventListener("change", (state) => {
       if (state !== "active") return;
       const k = Keyboard.metrics();
       if (k) place(k.screenY, k.height, 0);
-      else lift.setValue(0);
+      else lift.setValue(rest);
     });
     return () => {
       frame.remove();
@@ -60,17 +62,21 @@ function useKeyboardLift(ref: RefObject<Measurable | null>) {
       app.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ref, lift]);
+  }, [ref, lift, rest]);
   return lift;
 }
 
 /**
- * The conversation, newest at the bottom, and the composer. What is typed,
+ * The conversation, newest at the bottom: what you said in grey bubbles on
+ * the right, midna's replies as the page itself. At its foot, one field:
+ * the words, and under them the button that adds a file, the model that is
+ * thinking (it opens the sheet that changes it) and send. What is typed,
  * and the files added to it (already on the host), are a draft until midna
  * has the message: they survive switching tabs, the app being killed, and
- * a send that failed.
+ * a send that failed. `foot` is what the tab capsule floating over the
+ * screen needs left clear.
  */
-export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; connection: PhoneConnection; onOpenApprovals: () => void }) {
+export function Chat({ midna, connection, foot, model, onPickModel, onOpenApprovals }: { midna: Midna; connection: PhoneConnection; foot: number; model: string; onPickModel: () => void; onOpenApprovals: () => void }) {
   const t = useTheme();
   const key = draftKey(connection);
   const text = useDraft(key);
@@ -89,7 +95,7 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
   const [uploading, setUploading] = useState<Uploading[]>([]);
   const [problem, setProblem] = useState("");
   const root = useRef<Measurable>(null);
-  const lift = useKeyboardLift(root);
+  const lift = useKeyboardLift(root, foot);
 
   const byOutbox = useMemo(() => new Map([...midna.approvals.values()].flatMap((a) => (a.outboxId === null ? [] : [[a.outboxId, a] as const]))), [midna.approvals]);
   const data = useMemo(() => [...midna.lines].reverse(), [midna.lines]);
@@ -143,6 +149,9 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
       }
     });
 
+  // Something to send, and nothing still on its way up.
+  const ready = canSend && uploading.length === 0 && (text.value.trim().length > 0 || files.length > 0);
+
   const unstage = (a: Attachment) => {
     setFiles((cur) => cur.filter((f) => f.id !== a.id));
     void midna.discardUpload(a.id).catch(() => {});
@@ -160,13 +169,15 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
         keyboardShouldPersistTaps="handled"
         onEndReached={() => void midna.loadOlder().catch(() => {})}
         onEndReachedThreshold={0.4}
-        // Inverted, so the header sits at the bottom, under the newest line: a quiet word while the app isn't live.
-        ListHeaderComponent={midna.link === "connecting" || midna.link === "lost" ? <Text style={[s.connecting, { color: t.dim }]}>Connecting…</Text> : undefined}
+        // Inverted, so the header sits at the bottom, under the newest line: midna at work.
+        ListHeaderComponent={midna.thinking ? <ActivityIndicator testID="chat-working" size="small" color={t.inkFaint} style={s.working} /> : undefined}
         renderItem={({ item, index }) => (
           <LineView
             line={item}
             // Inverted: the line before this one in time is the next in the list.
             stamp={stampFor(item.at, data[index + 1]?.at)}
+            // Lines of one speaker sit close; a change of speaker takes a breath.
+            gap={data[index + 1] ? (data[index + 1]!.role === item.role ? 8 : 18) : 0}
             midna={midna}
             canSend={canSend}
             approval={item.outboxId === undefined ? undefined : byOutbox.get(item.outboxId)}
@@ -180,60 +191,64 @@ export function Chat({ midna, connection, onOpenApprovals }: { midna: Midna; con
         )}
         ListEmptyComponent={
           midna.link === "connecting" ? undefined : (
-            <Text style={[s.empty, { color: t.dim }]}>Nothing said yet. Say hello.</Text>
+            <Text style={[s.empty, { color: t.inkSoft }]}>Nothing said yet. Say hello.</Text>
           )
         }
       />
-      <View style={[s.composer, { backgroundColor: t.bg }]}>
+      <View style={s.composer}>
+        {/* The conversation fades out under the field rather than stopping at a line. */}
+        <LinearGradient pointerEvents="none" colors={[t.dark ? "rgba(20,19,18,0)" : "rgba(255,255,255,0)", t.paper]} locations={[0, 0.35]} style={StyleSheet.absoluteFill} />
         <Problem text={problem} />
-        {(files.length > 0 || uploading.length > 0) && (
-          <View style={s.staged}>
-            {files.map((a) => (
-              <View key={a.id} style={[s.chip, { backgroundColor: t.fill }]}>
-                {a.kind === "image" ? <Thumb a={a} source={midna.attachmentSource} width={22} height={22} radius={6} /> : null}
-                <Text numberOfLines={1} style={[s.chipText, { color: t.ink }]}>
-                  {a.name}
-                </Text>
-                <Text style={[s.chipMeta, { color: t.dim }]}>{size(a.size)}</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${a.name}`} hitSlop={10} onPress={() => unstage(a)}>
-                  <Text style={[s.chipX, { color: t.dim }]}>×</Text>
-                </Pressable>
-              </View>
-            ))}
-            {uploading.map((u) => (
-              <View key={u.key} style={[s.chip, { backgroundColor: t.fill }]}>
-                <ActivityIndicator size="small" color={t.dim} />
-                <Text numberOfLines={1} style={[s.chipText, { color: t.dim }]}>
-                  {u.name}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-        <View style={s.row}>
-          <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.fill, opacity: pressed ? 0.6 : 1 }]}>
-            <Text style={[s.plus, { color: t.dim }]}>+</Text>
-          </Pressable>
+        <Glass fallback={t.raised} style={[s.field, !t.dark && s.fieldShadow]}>
+          {(files.length > 0 || uploading.length > 0) && (
+            <View style={s.staged}>
+              {files.map((a) => (
+                <View key={a.id} style={[s.chip, { backgroundColor: t.fill }]}>
+                  {a.kind === "image" ? <Thumb a={a} source={midna.attachmentSource} width={22} height={22} radius={6} /> : null}
+                  <Text numberOfLines={1} style={[s.chipText, { color: t.ink }]}>
+                    {a.name}
+                  </Text>
+                  <Text style={[s.chipMeta, { color: t.inkFaint }]}>{size(a.size)}</Text>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${a.name}`} hitSlop={10} onPress={() => unstage(a)}>
+                    <Icon name="xmark" size={10} color={t.inkSoft} weight="bold" />
+                  </Pressable>
+                </View>
+              ))}
+              {uploading.map((u) => (
+                <View key={u.key} style={[s.chip, { backgroundColor: t.fill }]}>
+                  <ActivityIndicator size="small" color={t.inkSoft} />
+                  <Text numberOfLines={1} style={[s.chipText, { color: t.inkSoft }]}>
+                    {u.name}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
           <TextInput
             testID="chat-input"
             value={text.value}
             onChangeText={text.set}
-            placeholder={midna.link === "live" ? "Message midna" : "Message midna (sends once it's back)"}
-            placeholderTextColor={t.dimmer}
+            placeholder={midna.link === "live" ? "Message midna…" : "Message midna (sends once it's back)"}
+            placeholderTextColor={t.inkFaint}
             multiline
-            style={[s.input, { color: t.ink, borderColor: t.line }]}
+            style={[s.input, { color: t.ink }]}
           />
-          <Pressable
-            testID="chat-send"
-            accessibilityRole="button"
-            accessibilityLabel="Send"
-            onPress={() => void submit()}
-            disabled={!canSend || uploading.length > 0 || (!text.value.trim() && !files.length)}
-            style={({ pressed }) => [s.round, { backgroundColor: t.primary, opacity: !canSend || (!text.value.trim() && !files.length) || uploading.length ? 0.35 : pressed ? 0.7 : 1 }]}
-          >
-            <Text style={[s.arrow, { color: t.primaryInk }]}>↑</Text>
-          </Pressable>
-        </View>
+          <View style={s.row}>
+            <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" hitSlop={8} onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.fill, opacity: pressed ? 0.6 : 1 }]}>
+              <Icon name="plus" size={15} color={t.ink} weight="semibold" />
+            </Pressable>
+            {/* The model that thinks, where ruri's field has it: a tap opens the sheet that changes it. */}
+            <Pressable testID="header-model" accessibilityRole="button" accessibilityLabel={`Model: ${model}. Change it`} hitSlop={8} onPress={onPickModel} style={({ pressed }) => [s.model, pressed && { opacity: 0.5 }]}>
+              <Text numberOfLines={1} style={[s.modelText, { color: t.inkSoft }]}>
+                {model}
+              </Text>
+              <Icon name="chevron.up.chevron.down" size={10} color={t.inkFaint} weight="semibold" />
+            </Pressable>
+            <Pressable testID="chat-send" accessibilityRole="button" accessibilityLabel="Send" hitSlop={5} onPress={() => void submit()} disabled={!ready} style={({ pressed }) => [s.round, { backgroundColor: ready ? t.ink : t.fill, opacity: pressed ? 0.7 : 1 }]}>
+              <Icon name="arrow.up" size={15} color={ready ? t.paper : t.inkFaint} weight="bold" />
+            </Pressable>
+          </View>
+        </Glass>
       </View>
     </Animated.View>
   );
@@ -248,12 +263,12 @@ function stampFor(at: number, before: number | undefined): string | null {
   return `${days === 0 ? "Today" : days === 1 ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} ${clock}`;
 }
 
-function LineView(props: Parameters<typeof LineBody>[0] & { stamp: string | null }) {
+function LineView(props: Parameters<typeof LineBody>[0] & { stamp: string | null; gap: number }) {
   const t = useTheme();
-  if (!props.stamp) return <LineBody {...props} />;
+  if (!props.stamp) return <View style={{ paddingTop: props.gap }}><LineBody {...props} /></View>;
   return (
-    <View style={s.stamped}>
-      <Text style={[s.stamp, { color: t.dim }]}>{props.stamp}</Text>
+    <View style={[s.stamped, { paddingTop: props.gap }]}>
+      <Text style={[s.stamp, { color: t.inkFaint }]}>{props.stamp}</Text>
       <LineBody {...props} />
     </View>
   );
@@ -280,18 +295,18 @@ function LineBody({
       <View style={s.user}>
         {l.attachments.length > 0 && <Attachments items={l.attachments} align="end" source={midna.attachmentSource} fetchAttachment={midna.fetchAttachment} />}
         {l.text ? (
-          <Pressable disabled={l.state !== "failed"} onPress={() => void midna.retry(l)} style={[s.bubble, { backgroundColor: t.primary, opacity: l.state === "sending" || l.state === "failed" ? 0.6 : 1 }]}>
-            <Text selectable={l.state !== "failed"} style={[s.userText, { color: t.primaryInk }]}>
+          <Pressable disabled={l.state !== "failed"} onPress={() => void midna.retry(l)} style={[s.bubble, { backgroundColor: t.bubble, opacity: l.state === "sending" || l.state === "failed" ? 0.55 : 1 }]}>
+            <Text selectable={l.state !== "failed"} style={[s.userText, { color: t.ink }]}>
               {l.text}
             </Text>
           </Pressable>
         ) : null}
         {l.state === "failed" ? (
-          <Text onPress={() => void midna.retry(l)} style={[s.meta, { color: t.danger }]}>
-            Not Delivered · Tap to retry
+          <Text onPress={() => void midna.retry(l)} style={[s.meta, { color: t.destructive }]}>
+            Not sent · tap to try again
           </Text>
         ) : l.state === "sending" ? (
-          <Text style={[s.meta, { color: t.dim }]}>Sending…</Text>
+          <Text style={[s.meta, { color: t.inkSoft }]}>Sending…</Text>
         ) : null}
       </View>
     );
@@ -307,10 +322,10 @@ function LineBody({
       ) : asksApproval(l) ? (
         // An approval this phone hasn't heard about: never answered by sending its label, which skips Face ID.
         l.answered ? (
-          <Text style={[s.outcome, { color: t.dim }]}>Over</Text>
+          <Text style={[s.outcome, { color: t.inkSoft }]}>Over</Text>
         ) : (
           <Pressable accessibilityRole="button" onPress={onOpenApprovals}>
-            <Text style={[s.outcome, { color: t.primary }]}>Answer in Approvals</Text>
+            <Text style={[s.outcome, { color: t.accent }]}>Answer in Approvals</Text>
           </Pressable>
         )
       ) : l.kind === "question" && l.options && l.options.length > 0 ? (
@@ -323,7 +338,7 @@ function LineBody({
               onPress={() => onAnswer(o)}
               style={({ pressed }) => [s.option, { backgroundColor: t.fill, opacity: l.answered || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
             >
-              <Text style={[s.optionText, { color: l.answered ? t.dim : t.primary }]}>{plainText(o)}</Text>
+              <Text style={[s.optionText, { color: l.answered ? t.inkSoft : t.ink }]}>{plainText(o)}</Text>
             </Pressable>
           ))}
         </View>
@@ -337,7 +352,7 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
   const t = useTheme();
   const [busy, setBusy] = useState<ApprovalAnswer | null>(null);
   const [problem, setProblem] = useState("");
-  if (approval.state !== "pending") return <Text style={[s.outcome, { color: t.dim }]}>{approvalOutcome(approval)}</Text>;
+  if (approval.state !== "pending") return <Text style={[s.outcome, { color: t.inkSoft }]}>{approvalOutcome(approval)}</Text>;
   const answer = async (label: string, a: ApprovalAnswer) => {
     setProblem("");
     setBusy(a);
@@ -361,12 +376,12 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
             accessibilityRole="button"
             disabled={!!busy || !canSend}
             onPress={() => void answer(o.label, o.answer)}
-            style={({ pressed }) => [s.option, { backgroundColor: o.answer === "allow" ? t.primary : t.fill, opacity: busy || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [s.option, { backgroundColor: o.answer === "allow" ? t.ink : t.fill, opacity: busy || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
           >
             {busy === o.answer ? (
-              <ActivityIndicator size="small" color={o.answer === "allow" ? t.primaryInk : t.dim} />
+              <ActivityIndicator size="small" color={o.answer === "allow" ? t.paper : t.inkSoft} />
             ) : (
-              <Text style={[s.optionText, { color: o.answer === "allow" ? t.primaryInk : o.answer === "deny" ? t.danger : t.primary }]}>{o.label}</Text>
+              <Text style={[s.optionText, { color: o.answer === "allow" ? t.paper : o.answer === "deny" ? t.destructive : t.ink }]}>{o.label}</Text>
             )}
           </Pressable>
         ))}
@@ -378,30 +393,33 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  lines: { paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
-  empty: { textAlign: "center", fontSize: 17, marginTop: 40, transform: [{ scaleY: -1 }] },
-  stamped: { gap: 12 },
-  stamp: { textAlign: "center", fontSize: 12, fontWeight: "500", marginTop: 8 },
-  user: { alignItems: "flex-end", gap: 4 },
-  bubble: { maxWidth: "80%", borderRadius: 19, paddingHorizontal: 14, paddingVertical: 8 },
-  userText: { fontSize: 17, lineHeight: 22 },
-  midna: { alignItems: "flex-start", gap: 6, width: "92%" },
-  meta: { fontSize: 12 },
-  connecting: { textAlign: "center", fontSize: 13, paddingVertical: 6 },
+  lines: { paddingHorizontal: 16, paddingVertical: 12 },
+  empty: { ...face(15), textAlign: "center", marginTop: 40, transform: [{ scaleY: -1 }] },
+  working: { alignSelf: "flex-start", marginTop: 14, marginLeft: 2 },
+  stamped: { gap: 14 },
+  stamp: { ...face(12), textAlign: "center", marginTop: 6 },
+  // Room on the left says whose it is, however long it runs.
+  user: { alignItems: "flex-end", gap: 4, paddingLeft: 44 },
+  bubble: { borderRadius: radius.bubble, borderCurve: "continuous", paddingHorizontal: 14, paddingVertical: 9 },
+  userText: face(16, "regular", 22),
+  midna: { alignItems: "flex-start", gap: 8 },
+  meta: { ...face(11), marginRight: 6 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  option: { minHeight: 36, borderRadius: 18, paddingHorizontal: 15, justifyContent: "center" },
-  optionText: { fontSize: 15, fontWeight: "500" },
+  option: { minHeight: 38, borderRadius: 19, paddingHorizontal: 16, justifyContent: "center" },
+  optionText: face(14, "medium"),
   approval: { gap: 6 },
-  outcome: { fontSize: 14 },
-  composer: { paddingHorizontal: 10, paddingTop: 6, paddingBottom: 8, gap: 8 },
-  staged: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  outcome: face(13),
+  composer: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
+  field: { borderRadius: radius.field, borderCurve: "continuous", paddingTop: 10, paddingLeft: 14, paddingRight: 8, paddingBottom: 8, gap: 6, overflow: "hidden" },
+  // Before glass, in light, the field is raised off the white page by a soft shadow, as ruri's is.
+  fieldShadow: { overflow: "visible", shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 10, shadowOffset: { width: 0, height: 2 } },
+  staged: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 2 },
   chip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 15, paddingHorizontal: 10, height: 30, maxWidth: 220 },
-  chipText: { fontSize: 13, flexShrink: 1 },
-  chipMeta: { fontSize: 12 },
-  chipX: { fontSize: 18, lineHeight: 20 },
-  row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
-  round: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  plus: { fontSize: 24, lineHeight: 26, fontWeight: "400" },
-  arrow: { fontSize: 20, fontWeight: "700" },
-  input: { flex: 1, minHeight: 36, maxHeight: 140, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 8, fontSize: 17 },
+  chipText: { ...face(13), flexShrink: 1 },
+  chipMeta: face(12),
+  row: { flexDirection: "row", alignItems: "center", gap: 10 },
+  round: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  model: { flex: 1, flexDirection: "row", alignItems: "center", gap: 5, height: 34 },
+  modelText: { ...face(13, "medium"), flexShrink: 1 },
+  input: { ...face(16, "regular", 21), minHeight: 24, maxHeight: 140, paddingTop: 0, paddingBottom: 0, paddingRight: 6 },
 });

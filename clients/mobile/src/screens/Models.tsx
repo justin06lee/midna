@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, ScrollView, StyleSheet, View } from "react-native";
 import Storage from "expo-sqlite/kv-store";
 import { accountChoices, modelGroups, providersInUse, thinkingWith, type Account, type BrainInfo, type BrainModel, type ModelChoice } from "@midna/protocol";
 import { useTheme } from "../theme";
-import { Group, GroupNote, GroupTitle, Problem, Row } from "../ui";
+import { Group, GroupNote, GroupTitle, Problem, Row, SheetBar } from "../ui";
 import type { Midna } from "../useMidna";
 
 export interface Models {
@@ -112,13 +112,8 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
 
   return (
     <Modal visible={open} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <View style={[s.root, { backgroundColor: t.grouped }]}>
-        <View style={s.bar}>
-          <Text style={[s.title, { color: t.ink }]}>Model</Text>
-          <Pressable testID="models-done" accessibilityRole="button" hitSlop={12} onPress={onClose} style={s.done}>
-            <Text style={[s.doneText, { color: t.primary }]}>Done</Text>
-          </Pressable>
-        </View>
+      <View style={[s.root, { backgroundColor: t.ground }]}>
+        <SheetBar title="Model" testID="models-done" onDone={onClose} />
         <ScrollView contentContainerStyle={s.body}>
           {now?.standIn ? <GroupNote>{`${now.standIn}. ${now.name} is thinking meanwhile.`}</GroupNote> : null}
           <Problem text={problem} />
@@ -128,7 +123,7 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
                 <GroupTitle>{g.label}</GroupTitle>
                 <Group>
                   {g.choices.map((c, n) => row(c, n === 0))}
-                  {g.more.length > 0 && (more[g.provider] ? g.more.map((c) => row(c, false)) : <Row label={`${g.more.length} more`} tone="tint" first={g.choices.length === 0} onPress={() => setMore((m) => ({ ...m, [g.provider]: true }))} />)}
+                  {g.more.length > 0 && (more[g.provider] ? g.more.map((c) => row(c, false)) : <Row label={`${g.more.length} more`} chevron first={g.choices.length === 0} onPress={() => setMore((m) => ({ ...m, [g.provider]: true }))} />)}
                 </Group>
                 {/* No list from this brain: say so rather than offer names of our own. */}
                 {!g.listed ? <GroupNote>{models.unlisted[g.provider] ? `Couldn't list ${g.label}'s models.` : "Asking for its models…"}</GroupNote> : null}
@@ -162,10 +157,6 @@ export function ModelSheet({ midna, models, open, onClose }: { midna: Midna; mod
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  bar: { height: 56, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 17, fontWeight: "600" },
-  done: { position: "absolute", right: 16, height: 56, justifyContent: "center" },
-  doneText: { fontSize: 17, fontWeight: "600" },
-  body: { paddingHorizontal: 16, paddingBottom: 40, gap: 22 },
-  section: { gap: 14 },
+  body: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 48, gap: 24 },
+  section: { gap: 24 },
 });

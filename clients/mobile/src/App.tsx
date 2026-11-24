@@ -29,7 +29,7 @@ export default function App() {
     <SafeAreaProvider>
       <StatusBar style="auto" />
       {connection === undefined ? (
-        <View style={{ flex: 1, backgroundColor: t.bg }} />
+        <View style={{ flex: 1, backgroundColor: t.paper }} />
       ) : connection === null ? (
         <Pair
           previous={previous}

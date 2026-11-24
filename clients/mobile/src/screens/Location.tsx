@@ -5,8 +5,8 @@ import type { PhoneConnection } from "../connection";
 import { draftKey, useDraft } from "../drafts";
 import { here, lastSent, locationSetup, preciseAccuracy, turnOff, turnOn, watch, type LocationSetup } from "../location";
 import { ago } from "../locationQueue";
-import { useTheme } from "../theme";
-import { Button, Card, Field, Problem, time } from "../ui";
+import { useTheme, type as face } from "../theme";
+import { Button, Card, Field, Problem, time, Icon } from "../ui";
 import type { Midna } from "../useMidna";
 
 const NEW = "new";
@@ -66,7 +66,7 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
   if (setup === null)
     return (
       <View style={s.loading}>
-        <ActivityIndicator color={t.dim} />
+        <ActivityIndicator color={t.inkSoft} />
       </View>
     );
 
@@ -94,11 +94,11 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
 
       {setup === "off" || setup === "denied" ? (
         <>
-          <Text style={[s.lede, { color: t.dim }]}>midna can know where you are, so it can help with what's around you and notice when you get home or leave work.</Text>
+          <Text style={[s.lede, { color: t.inkSoft }]}>midna can know where you are, so it can help with what's around you and notice when you get home or leave work.</Text>
           <Card>
-            <Text style={[s.para, { color: t.ink2 }]}>Your iPhone sends midna your precise location as you move, every few tens of metres, and when you arrive at or leave a place you've saved. It stops while you stay put. midna can also ask where you are right now.</Text>
-            <Text style={[s.para, { color: t.ink2 }]}>It goes only to your midna, on your own machine, and is kept there as your history.</Text>
-            <Text style={[s.para, { color: t.ink2 }]}>iOS asks twice. Allow while using the app, then change to Always, and keep Precise Location on, so it works while the app is closed.</Text>
+            <Text style={[s.para, { color: t.ink }]}>Your iPhone sends midna your precise location as you move, every few tens of metres, and when you arrive at or leave a place you've saved. It stops while you stay put. midna can also ask where you are right now.</Text>
+            <Text style={[s.para, { color: t.ink }]}>It goes only to your midna, on your own machine, and is kept there as your history.</Text>
+            <Text style={[s.para, { color: t.ink }]}>iOS asks twice. Allow while using the app, then change to Always, and keep Precise Location on, so it works while the app is closed.</Text>
           </Card>
           <Problem text={problem} />
           {setup === "denied" ? (
@@ -117,13 +117,13 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
           </Card>
           {setup === "while-using" ? (
             <>
-              <Text style={[s.note, { color: t.dim }]}>With Always, your iPhone sends where you are while the app is closed, and midna can ask. In iPhone Settings, choose Location → Always.</Text>
+              <Text style={[s.note, { color: t.inkSoft }]}>With Always, your iPhone sends where you are while the app is closed, and midna can ask. In iPhone Settings, choose Location → Always.</Text>
               <Button small label="Open iPhone Settings" onPress={() => void Linking.openSettings()} style={{ alignSelf: "flex-start" }} />
             </>
           ) : null}
           {!preciseAccuracy() ? (
             <>
-              <Text style={[s.note, { color: t.dim }]}>Precise Location is off, so midna only gets roughly where you are, a few kilometres wide. In iPhone Settings, choose Location and turn on Precise Location.</Text>
+              <Text style={[s.note, { color: t.inkSoft }]}>Precise Location is off, so midna only gets roughly where you are, a few kilometres wide. In iPhone Settings, choose Location and turn on Precise Location.</Text>
               <Button small label="Open iPhone Settings" onPress={() => void Linking.openSettings()} style={{ alignSelf: "flex-start" }} />
             </>
           ) : null}
@@ -133,24 +133,24 @@ export function LocationSettings({ midna, connection, onBack }: { midna: Midna; 
             <Button small label="Add" onPress={() => open.set(NEW)} testID="place-add" />
           </View>
           {places.length === 0 ? (
-            <Text style={[s.note, { color: t.dim }]}>No places yet. Save home, the office, the gym or the masjid while you're there, and midna hears when you arrive and leave.</Text>
+            <Text style={[s.note, { color: t.inkSoft }]}>No places yet. Save home, the office, the gym or the masjid while you're there, and midna hears when you arrive and leave.</Text>
           ) : (
-            <View style={[s.list, { backgroundColor: t.panel, borderColor: t.line }]}>
+            <View style={[s.list, { backgroundColor: t.raised }]}>
               {places.map((p, n) => (
                 <Pressable
                   key={p.id}
                   testID={`place-${p.id}`}
                   accessibilityRole="button"
                   onPress={() => open.set(String(p.id))}
-                  style={({ pressed }) => [s.row, n > 0 && { borderTopColor: t.line, borderTopWidth: StyleSheet.hairlineWidth }, pressed && { backgroundColor: t.active }]}
+                  style={({ pressed }) => [s.row, n > 0 && { borderTopColor: t.hairline, borderTopWidth: StyleSheet.hairlineWidth }, pressed && { backgroundColor: t.fill }]}
                 >
                   <Text style={[s.rowTitle, { color: t.ink }]}>{p.name}</Text>
-                  <Text style={[s.rowMeta, { color: t.dim }]}>{state?.place?.id === p.id ? "You're here" : `${Math.round(p.radius)} m across`}</Text>
+                  <Text style={[s.rowMeta, { color: t.inkSoft }]}>{state?.place?.id === p.id ? "You're here" : `${Math.round(p.radius)} m across`}</Text>
                 </Pressable>
               ))}
             </View>
           )}
-          <Text style={[s.note, { color: t.dim }]}>midna can save and change places too, when you ask it.</Text>
+          <Text style={[s.note, { color: t.inkSoft }]}>midna can save and change places too, when you ask it.</Text>
           <Problem text={problem} />
           <Button kind="danger" label="Turn off location" onPress={off} style={{ marginTop: 8 }} />
         </>
@@ -227,7 +227,7 @@ function PlaceEditor({ midna, place, places, draft, onBack, onDone }: { midna: M
       <View style={s.top}>
         <Back label="Location" onPress={onBack} />
         <Pressable accessibilityRole="button" onPress={discard} hitSlop={12} style={s.back}>
-          <Text style={[s.backText, { color: t.dim }]}>Discard</Text>
+          <Text style={[s.backText, { color: t.inkSoft }]}>Discard</Text>
         </Pressable>
       </View>
       <Text style={[s.title, { color: t.ink }]}>{place ? place.name : "New place"}</Text>
@@ -240,17 +240,17 @@ function PlaceEditor({ midna, place, places, draft, onBack, onDone }: { midna: M
         </View>
       ) : null}
       <View style={s.group}>
-        <Text style={[s.label, { color: t.dim }]}>Size</Text>
+        <Text style={[s.label, { color: t.inkSoft }]}>Size</Text>
         <View style={s.chips}>
           {SIZES.map((m) => (
             <Chip key={m} label={`${m} m`} selected={radius === m} onPress={() => size.set(String(m))} />
           ))}
         </View>
-        <Text style={[s.hint, { color: t.dim }]}>How far around it counts as being there. A house or a gym is 100–150 m; a campus is more.</Text>
+        <Text style={[s.hint, { color: t.inkSoft }]}>How far around it counts as being there. A house or a gym is 100–150 m; a campus is more.</Text>
       </View>
       <Problem text={problem} />
       <Button testID="place-save" kind="primary" label={place ? "Save" : "Save here"} busy={busy === "save"} disabled={busy !== null && busy !== "save"} onPress={() => void save()} />
-      {place ? null : <Text style={[s.hint, { color: t.dim, textAlign: "center" }]}>Saved where your iPhone is now.</Text>}
+      {place ? null : <Text style={[s.hint, { color: t.inkSoft, textAlign: "center" }]}>Saved where your iPhone is now.</Text>}
       {place ? (
         <>
           <Button label="Move it to where I am" busy={busy === "move"} disabled={busy !== null && busy !== "move"} onPress={() => void move()} />
@@ -265,7 +265,8 @@ export function Back({ label, onPress }: { label: string; onPress: () => void })
   const t = useTheme();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`Back to ${label}`} onPress={onPress} hitSlop={12} style={s.back}>
-      <Text style={[s.backText, { color: t.dim }]}>‹ {label}</Text>
+      <Icon name="chevron.left" size={13} color={t.inkSoft} weight="semibold" />
+      <Text style={[s.backText, { color: t.inkSoft }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -273,8 +274,8 @@ export function Back({ label, onPress }: { label: string; onPress: () => void })
 export function Row({ k, v, warn, last }: { k: string; v: string; warn?: boolean; last?: boolean }) {
   const t = useTheme();
   return (
-    <View style={[s.kv, !last && { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }]}>
-      <Text style={[s.key, { color: t.dim }]}>{k}</Text>
+    <View style={[s.kv, !last && { borderBottomColor: t.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+      <Text style={[s.key, { color: t.inkSoft }]}>{k}</Text>
       <Text numberOfLines={1} style={[s.value, { color: warn ? t.warn : t.ink }]}>
         {v}
       </Text>
@@ -289,36 +290,36 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
       accessibilityRole="button"
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={({ pressed }) => [s.chip, { backgroundColor: selected ? t.primary : t.fill, opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [s.chip, { backgroundColor: selected ? t.accent : t.fill, opacity: pressed ? 0.7 : 1 }]}
     >
-      <Text style={[s.chipText, { color: selected ? t.primaryInk : t.ink }]}>{label}</Text>
+      <Text style={[s.chipText, { color: selected ? t.paper : t.ink }]}>{label}</Text>
     </Pressable>
   );
 }
 
 const s = StyleSheet.create({
-  body: { padding: 16, gap: 14 },
+  body: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 48, gap: 16 },
   loading: { flex: 1, paddingTop: 60, alignItems: "center" },
   top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 },
-  title: { fontSize: 28, fontWeight: "700" },
-  heading: { fontSize: 17, fontWeight: "600" },
-  lede: { fontSize: 15, lineHeight: 21, marginTop: -6 },
-  para: { fontSize: 15, lineHeight: 21 },
+  title: face(26, "bold", 32),
+  heading: { ...face(16, "bold"), marginTop: 8 },
+  lede: { ...face(15, "regular", 21), marginTop: -6 },
+  para: { ...face(15, "regular", 21) },
   card: { paddingVertical: 4, gap: 0 },
   kv: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, gap: 16 },
-  key: { fontSize: 15 },
-  value: { fontSize: 15, flexShrink: 1, textAlign: "right" },
-  list: { borderRadius: 12, overflow: "hidden" },
-  row: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, justifyContent: "center", gap: 2 },
-  rowTitle: { fontSize: 17 },
-  rowMeta: { fontSize: 15 },
-  note: { fontSize: 13.5, lineHeight: 19, paddingHorizontal: 4 },
-  back: { minHeight: 44, justifyContent: "center" },
-  backText: { fontSize: 17 },
+  key: { ...face(15) },
+  value: { ...face(15), flexShrink: 1, textAlign: "right" },
+  list: { borderRadius: 18, borderCurve: "continuous", overflow: "hidden" },
+  row: { paddingHorizontal: 16, paddingVertical: 12, minHeight: 50, justifyContent: "center", gap: 2 },
+  rowTitle: face(16, "medium"),
+  rowMeta: face(14),
+  note: { ...face(13.5, "regular", 19), paddingHorizontal: 4 },
+  back: { minHeight: 44, flexDirection: "row", alignItems: "center", gap: 5 },
+  backText: face(15, "medium"),
   group: { gap: 8 },
-  label: { fontSize: 13, fontWeight: "500" },
-  hint: { fontSize: 12.5, lineHeight: 17 },
+  label: { ...face(13, "medium") },
+  hint: { ...face(12.5, "regular", 17) },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { height: 34, borderRadius: 17, paddingHorizontal: 14, justifyContent: "center" },
-  chipText: { fontSize: 15, fontWeight: "500" },
+  chip: { height: 36, borderRadius: 18, paddingHorizontal: 15, justifyContent: "center" },
+  chipText: face(14, "medium"),
 });

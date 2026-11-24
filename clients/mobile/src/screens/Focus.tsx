@@ -3,7 +3,7 @@ import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "
 import type { FocusRules, FocusRulesPatch } from "@midna/protocol";
 import type { PhoneConnection } from "../connection";
 import { clock, focus, focusStatus, minutes, parseWindow, syncFocus, type FocusStatus } from "../focus";
-import { useTheme } from "../theme";
+import { useTheme, type as face } from "../theme";
 import { Button, Card, Field, Problem, time } from "../ui";
 import type { Midna } from "../useMidna";
 import { Back, Row } from "./Location";
@@ -83,7 +83,7 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
       <Text style={[s.title, { color: t.ink }]}>Screen Time</Text>
       {!st.authorized ? (
         <>
-          <Text style={[s.para, { color: t.dim }]}>
+          <Text style={[s.para, { color: t.inkSoft }]}>
             midna can hold the apps that eat your day behind a shield, on demand or at set times, and offer you something better when you reach for them. Lifting it takes a reason, which goes to midna. iPhone asks for Face ID once; you can take it back in Settings → Screen Time.
           </Text>
           <Button testID="focus-allow" kind="primary" label="Allow Screen Time" onPress={() => void act(() => fx.authorize())} />
@@ -91,10 +91,10 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
       ) : (
         <>
           <Card style={s.card}>
-            <Pressable accessibilityRole="button" onPress={() => void act(async () => (await fx.pick()) && (await syncFocus(midna.client, connection)))} style={({ pressed }) => [s.kv, { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
-              <Text style={[s.key, { color: t.dim }]}>Held back</Text>
+            <Pressable accessibilityRole="button" onPress={() => void act(async () => (await fx.pick()) && (await syncFocus(midna.client, connection)))} style={({ pressed }) => [s.kv, { borderBottomColor: t.hairline, borderBottomWidth: StyleSheet.hairlineWidth }, pressed && { opacity: 0.6 }]}>
+              <Text style={[s.key, { color: t.inkSoft }]}>Held back</Text>
               <Text style={[s.value, { color: chosen ? t.ink : t.warn }]}>
-                {chosen || "Choose apps"} <Text style={{ color: t.dimmer }}>›</Text>
+                {chosen || "Choose apps"} <Text style={{ color: t.inkFaint }}>›</Text>
               </Text>
             </Pressable>
             <Row k="Shield" v={shield} />
@@ -110,8 +110,8 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
               <Field label="Why" value={reason} onChangeText={setReason} placeholder="Replying to Sam's DM" hint="midna keeps this, with how long, for your reviews." />
               <View style={s.chips}>
                 {LIFTS.map((m) => (
-                  <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: lift === m }} onPress={() => setLift(m)} style={[s.chip, { backgroundColor: lift === m ? t.primary : t.fill }]}>
-                    <Text style={[s.chipText, { color: lift === m ? t.primaryInk : t.ink }]}>{m} min</Text>
+                  <Pressable key={m} accessibilityRole="button" accessibilityState={{ selected: lift === m }} onPress={() => setLift(m)} style={[s.chip, { backgroundColor: lift === m ? t.accent : t.fill }]}>
+                    <Text style={[s.chipText, { color: lift === m ? t.paper : t.ink }]}>{m} min</Text>
                   </Pressable>
                 ))}
               </View>
@@ -125,11 +125,11 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
             {st.windows.length ? (
               <Card style={s.card}>
                 {st.windows.map((w, i) => (
-                  <Pressable key={i} accessibilityRole="button" accessibilityHint="Removes this window" onPress={() => dropWindow(i)} style={[s.kv, i < st.windows.length - 1 && { borderBottomColor: t.line, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                  <Pressable key={i} accessibilityRole="button" accessibilityHint="Removes this window" onPress={() => dropWindow(i)} style={[s.kv, i < st.windows.length - 1 && { borderBottomColor: t.hairline, borderBottomWidth: StyleSheet.hairlineWidth }]}>
                     <Text style={[s.key, { color: t.ink }]}>
                       {clock(w.start)}–{clock(w.end)}
                     </Text>
-                    <Text style={[s.value, { color: t.dimmer }]}>held</Text>
+                    <Text style={[s.value, { color: t.inkFaint }]}>held</Text>
                   </Pressable>
                 ))}
               </Card>
@@ -152,16 +152,16 @@ export function FocusSettings({ midna, connection, onBack }: { midna: Midna; con
 }
 
 const s = StyleSheet.create({
-  body: { padding: 16, gap: 14 },
-  title: { fontSize: 28, fontWeight: "700" },
-  heading: { fontSize: 17, fontWeight: "600" },
-  para: { fontSize: 15, lineHeight: 21 },
+  body: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 48, gap: 16 },
+  title: face(26, "bold", 32),
+  heading: { ...face(16, "bold"), marginTop: 8 },
+  para: { ...face(15, "regular", 21) },
   card: { paddingVertical: 4, gap: 0 },
   kv: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 11, gap: 16 },
-  key: { fontSize: 17 },
-  value: { fontSize: 17, flexShrink: 1, textAlign: "right" },
+  key: { ...face(17) },
+  value: { ...face(17), flexShrink: 1, textAlign: "right" },
   group: { gap: 8 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: { height: 34, borderRadius: 17, paddingHorizontal: 14, justifyContent: "center" },
-  chipText: { fontSize: 15, fontWeight: "500" },
+  chip: { height: 36, borderRadius: 18, paddingHorizontal: 15, justifyContent: "center" },
+  chipText: face(14, "medium"),
 });
