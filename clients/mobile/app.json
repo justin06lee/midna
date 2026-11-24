@@ -32,7 +32,7 @@
       "entitlements": {
         "com.apple.developer.usernotifications.time-sensitive": true
       },
-      "buildNumber": "9",
+      "buildNumber": "10",
       "appleTeamId": "65UN46K6FA"
     },
     "plugins": [
