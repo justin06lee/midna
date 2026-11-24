@@ -16,6 +16,7 @@
     "signing": "bun scripts/signing.ts"
   },
   "dependencies": {
+    "@fontsource-variable/space-grotesk": "^5.3.0",
     "@midna/protocol": "workspace:*",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",

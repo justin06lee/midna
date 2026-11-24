@@ -28,7 +28,7 @@ export function Insecure({ connection, blocked, onRetry, onDisconnect }: { conne
               <p className="selectable text-[12.5px] text-dim">{connection.url}</p>
             </div>
           </div>
-          <div className="rise sheet rounded-[10px] px-3.5 py-3">
+          <div className="rise sheet rounded-[14px] px-3.5 py-3">
             <p className="text-[13px] font-semibold">This app's window can't use plain http on the tailnet, and midna has no HTTPS address there.</p>
             <p className="selectable mt-1 text-[12.5px] text-dim">
               {blocked.message} Run <code className="font-mono">{blocked.command}</code> on {host} (HTTPS certificates must be on for the tailnet), then try again.

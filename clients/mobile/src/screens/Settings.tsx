@@ -1,34 +1,43 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AlarmAuthorization } from "@midna/protocol";
 import { Alert, AppState, Linking, ScrollView, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { alarmAuthorization, heldOf, syncAlarms, upcoming, type AlarmsOnPhone } from "../alarms";
 import type { PhoneConnection } from "../connection";
 import { locationSetup, type LocationSetup } from "../location";
-import { Group, GroupNote, Problem, Row } from "../ui";
+import { Group, GroupNote, Problem, Row, SheetBar } from "../ui";
 import type { Midna } from "../useMidna";
 import { focusStatus, minutes } from "../focus";
 import { FocusSettings } from "./Focus";
 import { LocationSettings } from "./Location";
+import { ModelSheet, modelNow, type Models } from "./Models";
 
-/** The model midna thinks with, which midna this phone talks to, location, Screen Time, alarms, and the way out: pair again, or unpair. `focusAsk` changes when a shield's "Ask midna" was tapped: Screen Time opens. */
+/**
+ * Settings, as a sheet: the model midna thinks with, which midna this phone
+ * talks to, location, Screen Time, alarms, and the way out: pair again, or
+ * unpair. `focusAsk` changes when a shield's "Ask midna" was tapped: Screen
+ * Time opens. The model's own sheet opens over this one, so it lives here.
+ */
 export function Settings({
   midna,
   connection,
   onPairAgain,
   onUnpaired,
   focusAsk = 0,
-  model,
-  onPickModel,
+  models,
+  onDone,
 }: {
   midna: Midna;
   connection: PhoneConnection;
   onPairAgain: () => void;
   onUnpaired: () => void;
   focusAsk?: number;
-  /** What is thinking now, and the sheet that changes it. */
-  model: string;
-  onPickModel: () => void;
+  /** The brains' lists, for what is thinking now and the sheet that changes it. */
+  models: Models;
+  onDone: () => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const [location, setLocation] = useState<LocationSetup | null>(null);
@@ -89,13 +98,20 @@ export function Settings({
       },
     ]);
 
-  if (showFocus) return <FocusSettings midna={midna} connection={connection} onBack={() => setShowFocus(false)} />;
-  if (showLocation) return <LocationSettings midna={midna} connection={connection} onBack={() => setShowLocation(false)} />;
+  if (showFocus || showLocation)
+    return (
+      <>
+        <SheetBar title={showFocus ? "Screen Time" : "Location"} onDone={onDone} />
+        {showFocus ? <FocusSettings midna={midna} connection={connection} onBack={() => setShowFocus(false)} /> : <LocationSettings midna={midna} connection={connection} onBack={() => setShowLocation(false)} />}
+      </>
+    );
 
   return (
-    <ScrollView testID="settings" contentContainerStyle={s.body}>
+    <>
+      <SheetBar title="Settings" testID="settings-done" onDone={onDone} />
+      <ScrollView testID="settings" contentContainerStyle={[s.body, { paddingBottom: insets.bottom + 32 }]}>
       <Group>
-        <Row testID="settings-model" label="Model" value={model} first chevron onPress={onPickModel} />
+        <Row testID="settings-model" label="Model" value={modelNow(midna, models)} first chevron onPress={() => setPicking(true)} />
         <Row label="Mode" value={midna.status?.mode === "ask" ? "Asks first" : midna.status?.mode === "autonomous" ? "On its own" : "—"} />
       </Group>
       <Group>
@@ -126,10 +142,12 @@ export function Settings({
       <GroupNote>{alarmsNote(allowed)}</GroupNote>
       <Problem text={problem} />
       <Group>
-        <Row testID="settings-pair-again" label="Pair Again" tone="tint" first onPress={busy ? undefined : onPairAgain} />
+        <Row testID="settings-pair-again" label="Pair Again" first onPress={busy ? undefined : onPairAgain} />
         <Row testID="settings-unpair" label="Unpair This Phone" tone="danger" busy={busy} onPress={busy ? undefined : unpair} />
       </Group>
-    </ScrollView>
+      </ScrollView>
+      <ModelSheet midna={midna} models={models} open={picking} onClose={() => setPicking(false)} />
+    </>
   );
 }
 
@@ -176,5 +194,5 @@ function whereAlertsGo(midna: Midna): string {
 }
 
 const s = StyleSheet.create({
-  body: { padding: 16, paddingBottom: 32, gap: 22 },
+  body: { paddingHorizontal: 16, paddingTop: 8, gap: 24 },
 });

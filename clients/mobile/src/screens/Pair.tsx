@@ -5,7 +5,7 @@ import { MidnaError } from "@midna/protocol";
 import { clientFor, saveConnection, type PhoneConnection } from "../connection";
 import { useDraft, useSecretDraft } from "../drafts";
 import { sameHost, serverUrl } from "../server";
-import { mono, useTheme } from "../theme";
+import { mono, useTheme, type as face } from "../theme";
 import { Button, Field, Problem } from "../ui";
 
 /** Waits this long for an answer before saying midna can't be reached. */
@@ -54,11 +54,11 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={[s.root, { backgroundColor: t.grouped }]}>
+    <KeyboardAvoidingView behavior="padding" style={[s.root, { backgroundColor: t.ground }]}>
       <ScrollView contentContainerStyle={[s.body, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
         <View style={s.head}>
           <Text style={[s.title, { color: t.ink }]}>{previous ? "Pair Again" : "Pair with midna"}</Text>
-          <Text style={[s.lede, { color: t.dim }]}>
+          <Text style={[s.lede, { color: t.inkSoft }]}>
             Enter midna's address and a pairing code. For a code, run <Text style={s.code}>midna pair</Text> on midna's machine or your Mac.
           </Text>
         </View>
@@ -85,9 +85,9 @@ export function Pair({ previous, onPaired }: { previous: PhoneConnection | null;
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  body: { paddingHorizontal: 16, gap: 22 },
+  body: { paddingHorizontal: 16, gap: 24 },
   head: { gap: 8, marginBottom: 4, paddingHorizontal: 4 },
-  title: { fontSize: 34, fontWeight: "700" },
-  lede: { fontSize: 17, lineHeight: 22 },
-  code: { fontFamily: mono, fontSize: 15 },
+  title: face(32, "bold", 38),
+  lede: face(16, "regular", 22),
+  code: { fontFamily: mono, fontSize: 14 },
 });

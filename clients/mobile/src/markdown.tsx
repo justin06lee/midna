@@ -2,7 +2,7 @@ import { memo, useMemo, useState, type ReactNode } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { columnWidths, fitColumns, parse, type Block } from "./blocks";
-import { mono, useTheme, type Theme } from "./theme";
+import { bold, mono, radius, useTheme, type Theme, type as face } from "./theme";
 
 /**
  * Markdown for midna's messages, small and in-house: paragraphs, headings,
@@ -27,7 +27,7 @@ function inline(text: string, t: Theme, key = ""): ReactNode[] {
     const k = `${key}${n++}`;
     if (m[2] !== undefined) {
       nodes.push(
-        <Text key={k} style={[s.inlineCode, { backgroundColor: t.sunken, color: t.ink }]}>
+        <Text key={k} style={[s.inlineCode, { backgroundColor: t.paperDim, color: t.ink }]}>
           {m[2].trim()}
         </Text>,
       );
@@ -52,14 +52,14 @@ function inline(text: string, t: Theme, key = ""): ReactNode[] {
     } else if (m[8] !== undefined) {
       const url = m[9]!;
       nodes.push(
-        <Text key={k} accessibilityRole="link" onPress={() => openLink(url)} style={[s.link, { color: t.ink, textDecorationColor: t.dim }]}>
+        <Text key={k} accessibilityRole="link" onPress={() => openLink(url)} style={[s.link, { color: t.ink, textDecorationColor: t.inkSoft }]}>
           {inline(m[8], t, `${k}.`)}
         </Text>,
       );
     } else {
       const url = m[10]!;
       nodes.push(
-        <Text key={k} accessibilityRole="link" onPress={() => openLink(url)} style={[s.link, { color: t.ink, textDecorationColor: t.dim }]}>
+        <Text key={k} accessibilityRole="link" onPress={() => openLink(url)} style={[s.link, { color: t.ink, textDecorationColor: t.inkSoft }]}>
           {url}
         </Text>,
       );
@@ -79,11 +79,11 @@ function Code({ text, lang }: { text: string; lang: string }) {
     setTimeout(() => setCopied(false), 1400);
   };
   return (
-    <View style={[s.codeBox, { backgroundColor: t.sunken, borderColor: t.line }]}>
+    <View style={[s.codeBox, { backgroundColor: t.paperDim }]}>
       <View style={s.codeBar}>
-        <Text style={[s.codeLang, { color: t.dimmer }]}>{lang}</Text>
+        <Text style={[s.codeLang, { color: t.inkFaint }]}>{lang}</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Copy code" hitSlop={10} onPress={() => void copy()}>
-          <Text style={[s.codeCopy, { color: t.dim }]}>{copied ? "Copied" : "Copy"}</Text>
+          <Text style={[s.codeCopy, { color: t.inkSoft }]}>{copied ? "Copied" : "Copy"}</Text>
         </Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.codeScroll}>
@@ -99,15 +99,15 @@ function Code({ text, lang }: { text: string; lang: string }) {
 function Table({ b, size }: { b: Extract<Block, { t: "table" }>; size: number }) {
   const t = useTheme();
   const fontSize = size - 1;
-  // The message's width, known once it is laid out: a table that only just overflows is drawn to fit it (less its own hairline border).
+  // The message's width, known once it is laid out: a table that only just overflows is drawn to fit it.
   const [room, setRoom] = useState(0);
-  const widths = useMemo(() => fitColumns(columnWidths(b.head, b.rows, fontSize, CELL_PAD), room - 2), [b, fontSize, room]);
-  const cell = { fontSize, lineHeight: Math.round(fontSize * 1.4), color: t.ink };
+  const widths = useMemo(() => fitColumns(columnWidths(b.head, b.rows, fontSize, CELL_PAD), room), [b, fontSize, room]);
+  const cell = { ...face(fontSize, "regular", Math.round(fontSize * 1.4)), color: t.ink };
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.tableScroll} onLayout={(e) => setRoom(Math.floor(e.nativeEvent.layout.width))}>
-      <View style={[s.table, { backgroundColor: t.sunken, borderColor: t.line }]}>
+      <View style={[s.table, { backgroundColor: t.paperDim }]}>
         {[b.head, ...b.rows].map((row, r) => (
-          <View key={r} style={[s.tableRow, r > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.line2 }]}>
+          <View key={r} style={[s.tableRow, r > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.hairline }]}>
             {row.map((text, c) => (
               <View key={c} style={[s.tableCell, { width: widths[c] }]}>
                 <Text selectable style={[cell, r === 0 && s.bold, { textAlign: b.align[c] }]}>
@@ -130,7 +130,7 @@ const HEADING = [22, 20, 18, 17, 16, 16];
 export const Markdown = memo(function Markdown({ text, size = 16, lineHeight = 23 }: { text: string; size?: number; lineHeight?: number }) {
   const t = useTheme();
   const blocks = useMemo(() => parse(text), [text]);
-  const base = { fontSize: size, lineHeight, color: t.ink };
+  const base = { ...face(size, "regular", lineHeight), color: t.ink };
   return (
     <View style={s.root}>
       {blocks.map((b, i) => {
@@ -153,14 +153,14 @@ export const Markdown = memo(function Markdown({ text, size = 16, lineHeight = 2
             return <Table key={i} b={b} size={size} />;
           case "quote":
             return (
-              <View key={i} style={[s.quote, { borderLeftColor: t.line2 }]}>
-                <Text selectable style={[base, { color: t.ink2 }]}>
+              <View key={i} style={[s.quote, { borderLeftColor: t.hairline }]}>
+                <Text selectable style={[base, { color: t.inkSoft }]}>
                   {inline(b.text, t)}
                 </Text>
               </View>
             );
           case "hr":
-            return <View key={i} style={[s.hr, { backgroundColor: t.line2 }]} />;
+            return <View key={i} style={[s.hr, { backgroundColor: t.hairline }]} />;
           case "list": {
             const floor = Math.min(...b.items.map((x) => x.indent));
             const counts: number[] = [];
@@ -172,7 +172,7 @@ export const Markdown = memo(function Markdown({ text, size = 16, lineHeight = 2
                   counts[depth] = x.ordered ? (counts[depth] ? counts[depth]! + 1 : x.n || 1) : 0;
                   return (
                     <View key={j} style={[s.item, { paddingLeft: Math.min(depth, 4) * 18 }]}>
-                      <Text style={[base, s.marker, { color: t.dim }]}>{x.ordered ? `${counts[depth]}.` : depth % 2 ? "◦" : "•"}</Text>
+                      <Text style={[base, s.marker, { color: t.inkSoft }]}>{x.ordered ? `${counts[depth]}.` : depth % 2 ? "◦" : "•"}</Text>
                       <Text selectable style={[base, s.itemText]}>
                         {inline(x.text, t)}
                       </Text>
@@ -190,26 +190,26 @@ export const Markdown = memo(function Markdown({ text, size = 16, lineHeight = 2
 
 const s = StyleSheet.create({
   root: { gap: 8, alignSelf: "stretch" },
-  bold: { fontWeight: "600" },
+  bold,
   italic: { fontStyle: "italic" },
   strike: { textDecorationLine: "line-through" },
   link: { textDecorationLine: "underline" },
-  inlineCode: { fontFamily: mono, fontSize: 14.5 },
-  list: { gap: 3 },
+  inlineCode: { fontFamily: mono, fontSize: 14 },
+  list: { gap: 4 },
   item: { flexDirection: "row", gap: 7 },
   marker: { minWidth: 18, textAlign: "right" },
   itemText: { flex: 1 },
   quote: { borderLeftWidth: 2.5, paddingLeft: 12 },
   hr: { height: StyleSheet.hairlineWidth, marginVertical: 4 },
-  codeBox: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  codeBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingTop: 7 },
-  codeLang: { fontSize: 11.5, fontFamily: mono },
-  codeCopy: { fontSize: 12.5, fontWeight: "500" },
+  // A shade off the page, and no line round it.
+  codeBox: { borderRadius: radius.chip + 4, borderCurve: "continuous", overflow: "hidden" },
+  codeBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 12, paddingTop: 8 },
+  codeLang: { fontFamily: mono, fontSize: 11 },
+  codeCopy: face(12, "medium"),
   codeScroll: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 11 },
   codeText: { fontFamily: mono, fontSize: 13, lineHeight: 19 },
   tableScroll: { alignSelf: "stretch", flexGrow: 0 },
-  table: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  table: { borderRadius: radius.chip + 4, borderCurve: "continuous", overflow: "hidden" },
   tableRow: { flexDirection: "row" },
-  tableCell: { paddingHorizontal: CELL_PAD, paddingVertical: 7 },
+  tableCell: { paddingHorizontal: CELL_PAD, paddingVertical: 8 },
 });
-

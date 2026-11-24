@@ -36,6 +36,16 @@
       "appleTeamId": "65UN46K6FA"
     },
     "plugins": [
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/SpaceGrotesk-Regular.ttf",
+            "./assets/fonts/SpaceGrotesk-Medium.ttf",
+            "./assets/fonts/SpaceGrotesk-Bold.ttf"
+          ]
+        }
+      ],
       "expo-secure-store",
       "expo-sharing",
       "expo-sqlite",

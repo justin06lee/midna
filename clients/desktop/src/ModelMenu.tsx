@@ -99,14 +99,14 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
     }
   };
 
-  const row = "group/item flex w-full items-center gap-1.5 rounded-[6px] pr-2.5 pl-1.5 text-left text-[13px] hover:bg-accent hover:text-white";
+  const row = "group/item flex w-full items-center gap-1.5 rounded-[9px] pr-2.5 pl-1.5 text-left text-[13px] hover:bg-active";
   const mark = (key: string, selected: boolean) => <span className="flex w-4 shrink-0 justify-center">{saving === key ? <Spinner className="size-3" /> : selected && <Icon name="check" className="size-3.5" />}</span>;
   // A model: its name as its brain gives it; in the tooltip, what the brain says of it and the model an alias stands for.
   const model = (c: ModelChoice) => (
     <button key={c.ref} type="button" role="menuitemradio" aria-checked={c.selected} title={c.detail} disabled={saving !== null} onClick={() => (c.selected ? setOpen(false) : void save(c.ref, { model: c.ref }))} className={`${row} h-7`}>
       {mark(c.ref, c.selected)}
       <span className="min-w-0 flex-1 truncate">{c.name}</span>
-      {c.note && <span className="shrink-0 text-[11.5px] text-dim group-hover/item:text-white/80">{c.note}</span>}
+      {c.note && <span className="shrink-0 text-[11.5px] text-dim">{c.note}</span>}
     </button>
   );
 
@@ -124,8 +124,8 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
         }}
         className={
           look === "button"
-            ? "flex h-7 max-w-[260px] items-center gap-1.5 rounded-[7px] bg-control pr-1.5 pl-2.5 text-[13px] hover:bg-control-hover"
-            : `flex h-7 max-w-[240px] items-center gap-1 rounded-[7px] pr-1 pl-2 text-[12.5px] text-dim hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : ""}`
+            ? "flex h-7 max-w-[260px] items-center gap-1.5 rounded-full bg-control pr-2 pl-3 text-[13px] hover:bg-control-hover"
+            : `flex h-7 max-w-[240px] items-center gap-1 rounded-full pr-1.5 pl-2.5 text-[12.5px] font-medium text-dim hover:bg-hover hover:text-ink ${open ? "bg-hover text-ink" : ""}`
         }
       >
         <span className="truncate">{now.name}</span>
@@ -134,7 +134,7 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
       </button>
 
       {open && (
-        <div role="menu" className={`material absolute right-0 z-50 max-h-[min(70vh,520px)] w-[272px] overflow-y-auto rounded-[12px] p-1.5 ${drop === "up" ? "bottom-full mb-1.5" : "top-full mt-1.5"}`}>
+        <div role="menu" className={`material absolute z-50 max-h-[min(70vh,520px)] w-[272px] overflow-y-auto rounded-[16px] p-1.5 ${look === "quiet" ? "left-0" : "right-0"} ${drop === "up" ? "bottom-full mb-2" : "top-full mt-1.5"}`}>
           {(now.standIn || error) && <p className="selectable px-2.5 pt-1 pb-1.5 text-[11.5px] leading-[1.4] text-ink-2">{error ?? `${now.standIn}. ${now.name} is thinking meanwhile.`}</p>}
           {groups.map((g) => (
             <div key={g.provider}>
@@ -174,7 +174,7 @@ export function ModelMenu({ client, status, onStatus, look = "quiet", drop = "up
                   {/* The name leads; who it is signed in as, or when its usage is back, sits under it, smaller and grey. */}
                   <span className="min-w-0 flex-1">
                     <span className="block">{a.name}</span>
-                    <span className="block truncate text-[11px] leading-[1.3] text-dim group-hover/item:text-white/75">{a.note}</span>
+                    <span className="block truncate text-[11px] leading-[1.3] text-dim">{a.note}</span>
                   </span>
                 </button>
               ))}

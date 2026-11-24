@@ -282,7 +282,7 @@ export function Chat({
                       <span className="font-semibold">{day(l.at)}</span> {time(l.at)}
                     </div>
                   )}
-                  <div className={gap ? "mt-4" : "mt-1.5"}>
+                  <div className={gap ? "mt-[18px]" : "mt-2"}>
                     <LineView
                       line={l}
                       onAnswer={(option) => void submit(option, l.outboxId)}
@@ -310,11 +310,11 @@ export function Chat({
         <div className="shrink-0 px-6 pt-1 pb-5">
           <div className="mx-auto w-full max-w-[720px]">
             {notice && (
-              <div role="status" className="rise material mb-2 flex items-center gap-2 rounded-[10px] py-1 pr-1 pl-3 text-[12.5px]">
+              <div role="status" className="rise material mb-2 flex items-center gap-2 rounded-[14px] py-1 pr-1 pl-3 text-[12.5px]">
                 <Icon name={notice.error ? "cross" : "check"} className="size-3.5 shrink-0 text-dim" />
                 <span className="selectable min-w-0 flex-1 truncate">{notice.text}</span>
                 {notice.path && (
-                  <button type="button" onClick={() => void showInFolder(notice.path!).catch((err) => setNotice({ text: why(err), error: true }))} className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-accent hover:bg-hover">
+                  <button type="button" onClick={() => void showInFolder(notice.path!).catch((err) => setNotice({ text: why(err), error: true }))} className="flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-ink-2 hover:bg-hover">
                     <Icon name="folder" className="size-3.5" />
                     {finder}
                   </button>
@@ -325,27 +325,41 @@ export function Chat({
               </div>
             )}
             {error && <p className="mb-2 px-3 text-[12px] text-ink-2">Couldn't send: {error}</p>}
-            {/* The composer, as Messages has it: one rounded field, what to attach on its left, Send on its right. */}
-            <div className="rounded-[20px] border border-line-2 bg-panel p-1 transition-colors focus-within:border-dimmer">
-              <div className="px-1">
-                <PendingFiles
-                  items={files.items}
-                  onRemove={(key) => {
-                    setError(null);
-                    files.remove(key);
-                  }}
-                  onRetry={files.retry}
-                />
-              </div>
-              <div className="flex items-end gap-1">
+            {/* The composer, as ruri has it: one rounded field raised off the page, the words above, and under them what to attach, the model that thinks, and Send. */}
+            <div className="rounded-[22px] bg-panel px-3 pt-2.5 pb-2 shadow-[var(--field-shadow)]">
+              <PendingFiles
+                items={files.items}
+                onRemove={(key) => {
+                  setError(null);
+                  files.remove(key);
+                }}
+                onRetry={files.retry}
+              />
+              <textarea
+                ref={input}
+                rows={1}
+                value={text}
+                autoFocus
+                readOnly={sending}
+                placeholder={canSend ? "Message midna…" : "Reconnecting…"}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void submit();
+                  }
+                }}
+                className="selectable block min-h-[22px] w-full resize-none bg-transparent px-1 py-0.5 text-[14px] leading-[1.5] outline-none placeholder:text-dimmer"
+              />
+              <div className="mt-1.5 flex items-center gap-1">
                 <button
                   type="button"
                   title="Attach files, or paste or drop them here"
                   disabled={sending}
                   onClick={() => picker.current?.click()}
-                  className="flex size-7 shrink-0 items-center justify-center rounded-full text-dim transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-control text-ink-2 transition-colors hover:bg-control-hover hover:text-ink disabled:opacity-40"
                 >
-                  <Icon name="plus" className="size-[18px]" />
+                  <Icon name="plus" className="size-4" />
                 </button>
                 <input
                   ref={picker}
@@ -357,23 +371,8 @@ export function Chat({
                     e.target.value = "";
                   }}
                 />
-                <textarea
-                  ref={input}
-                  rows={1}
-                  value={text}
-                  autoFocus
-                  readOnly={sending}
-                  placeholder={canSend ? "Message midna" : "Reconnecting…"}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      void submit();
-                    }
-                  }}
-                  className="selectable min-h-[20px] flex-1 resize-none bg-transparent px-1 py-1 text-[13.5px] leading-[1.45] outline-none placeholder:text-dimmer"
-                />
                 {controls}
+                <span className="flex-1" />
                 {stoppable ? (
                   <button type="button" title="Stop what midna is doing" disabled={!canSend} onClick={() => void submit("/stop")} className="flex size-7 shrink-0 items-center justify-center rounded-full bg-control text-ink transition-colors hover:bg-control-hover disabled:opacity-40">
                     <Icon name="stop" className="size-4" />
@@ -384,7 +383,7 @@ export function Chat({
                     title={files.items.some((f) => !f.done && !f.error) ? "Send once the files are up (Return)" : "Send (Return). Shift-Return starts a new line; begin with /queue and it waits its turn."}
                     disabled={!sendable || !canSend || sending}
                     onClick={() => void submit()}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-ink transition-[background-color,opacity] disabled:bg-control disabled:text-dimmer"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-primary-ink transition-[background-color,opacity] hover:opacity-85 disabled:bg-control disabled:text-dimmer disabled:opacity-100"
                   >
                     {sending ? <Spinner className="size-3.5" /> : <Icon name="send" className="size-4" />}
                   </button>
@@ -394,7 +393,7 @@ export function Chat({
           </div>
         </div>
         {dragging && (
-          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-[16px] border-2 border-dashed border-accent bg-bg/85 backdrop-blur-[2px]">
+          <div className="pointer-events-none absolute inset-3 z-40 flex items-center justify-center rounded-[22px] bg-sunken/95">
             <div className="flex flex-col items-center gap-2 text-center">
               <Icon name="paperclip" className="size-6 text-dim" />
               <p className="text-[14px] font-medium">Drop to attach</p>
@@ -442,7 +441,7 @@ function LineView({
           </div>
         )}
         {l.text && (
-          <div title={`${time(l.at)}${l.client && l.client !== "desktop" ? ` · sent from ${l.client}` : ""}`} className={`selectable max-w-[78%] rounded-[18px] bg-primary px-3 py-1.5 text-[13.5px] leading-[1.45] whitespace-pre-wrap text-primary-ink transition-opacity ${l.pending ? "opacity-60" : ""}`}>
+          <div title={`${time(l.at)}${l.client && l.client !== "desktop" ? ` · sent from ${l.client}` : ""}`} className={`selectable max-w-[78%] rounded-[18px] bg-bubble px-3.5 py-2 text-[14px] leading-[1.5] whitespace-pre-wrap text-ink transition-opacity ${l.pending ? "opacity-55" : ""}`}>
             {l.text}
           </div>
         )}
@@ -455,7 +454,7 @@ function LineView({
   return (
     <div className="max-w-[86%]" title={time(l.at)}>
       {l.text && (
-        <div className="text-[13.5px] leading-[1.5]">
+        <div className="text-[14px] leading-[1.55]">
           <Markdown text={l.text} />
         </div>
       )}
@@ -477,7 +476,7 @@ function LineView({
                     setAnswering(true);
                     void onApprove(approval, o.answer).finally(() => setAnswering(false));
                   }}
-                  className={`h-7 rounded-full px-3 text-[12.5px] transition-colors disabled:opacity-45 ${o.answer === "allow" ? "bg-primary font-medium text-primary-ink hover:brightness-110" : "bg-control hover:bg-control-hover"}`}
+                  className={`h-8 rounded-full px-3.5 text-[13px] font-medium transition-[background-color,opacity] disabled:opacity-45 ${o.answer === "allow" ? "bg-primary text-primary-ink hover:opacity-85" : o.answer === "deny" ? "bg-control text-[var(--bad)] hover:bg-control-hover" : "bg-control hover:bg-control-hover"}`}
                 >
                   {o.label}
                 </button>
@@ -495,7 +494,7 @@ function LineView({
               type="button"
               disabled={l.answered || !canSend}
               onClick={() => onAnswer(o)}
-              className="h-7 rounded-full bg-control px-3 text-[12.5px] text-accent transition-colors hover:bg-control-hover disabled:text-dim disabled:opacity-60"
+              className="h-8 rounded-full bg-control px-3.5 text-[13px] font-medium text-ink transition-colors hover:bg-control-hover disabled:text-dim disabled:opacity-60"
             >
               {o}
             </button>

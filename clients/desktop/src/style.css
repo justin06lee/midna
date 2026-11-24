@@ -1,95 +1,108 @@
 @import "tailwindcss";
 
-/* A Mac app's look: the system's own typeface, its greys and its one accent
-   colour; a toned sidebar beside a plain content pane; groups told apart by
-   tone rather than outlines; menus and overlays on a blurred material. It
-   follows the system's appearance unless Settings picks one (.light / .dark
-   on <html>, see appearance.ts); ?dark=1 or ?light=1 forces one in the
-   browser preview. The dark values are written twice (the media query and
-   .dark): keep them the same. */
+/* midna's look (docs/redesign.md): paper and ink, as ruri draws it, in
+   monet's warm dark. One typeface; a sidebar a shade off the page; groups
+   told apart by tone, never by an outline; ink leads (the primary button,
+   send), and the ochre accent marks only the one thing that is on. The
+   phone names these paper, ground, raised, inkSoft and so on
+   (clients/mobile/src/theme.ts): here bg is the page, sidebar the ground,
+   panel what is raised, sunken a shade off the page, dim and dimmer the
+   soft and faint inks. It follows the system's appearance unless Settings
+   picks one (.light / .dark on <html>, see appearance.ts); ?dark=1 or
+   ?light=1 forces one in the browser preview. The dark values are written
+   twice (the media query and .dark): keep them the same. */
 :root {
   --bg: #ffffff;
-  --sidebar: #f2f2f4;
+  --sidebar: #f1f0ee;
   --panel: #ffffff;
-  --sunken: #f5f5f7;
-  --fill: rgba(0, 0, 0, 0.035);
-  --control: rgba(0, 0, 0, 0.06);
-  --control-hover: rgba(0, 0, 0, 0.09);
+  --sunken: #f4f3f1;
+  --fill: rgba(29, 28, 26, 0.04);
+  --control: rgba(29, 28, 26, 0.07);
+  --control-hover: rgba(29, 28, 26, 0.1);
   --knob: #ffffff;
-  --hover: rgba(0, 0, 0, 0.045);
-  --active: rgba(0, 0, 0, 0.08);
-  --ink: #1d1d1f;
-  --ink-2: #424245;
-  --dim: #6e6e73;
-  --dimmer: #a1a1a6;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-2: rgba(0, 0, 0, 0.14);
-  --accent: #007aff;
-  --ok: #34c759;
-  --bad: #ff3b30;
-  --primary: var(--accent);
-  --primary-ink: #ffffff;
-  --focus: rgba(0, 122, 255, 0.32);
-  --selection: rgba(0, 122, 255, 0.22);
-  --material: #f6f6f8;
+  --hover: rgba(29, 28, 26, 0.05);
+  --active: rgba(29, 28, 26, 0.09);
+  --ink: #1d1c1a;
+  --ink-2: #45423d;
+  --dim: #66625c;
+  --dimmer: #a39d94;
+  --line: rgba(29, 28, 26, 0.08);
+  --line-2: rgba(29, 28, 26, 0.14);
+  --accent: #a8731d;
+  --ok: #3d8f4a;
+  --bad: #c8321f;
+  /* What leads a screen is solid ink, not the accent. */
+  --primary: var(--ink);
+  --primary-ink: var(--bg);
+  /* The user's own bubble: a grey, never the accent. */
+  --bubble: #ecebe8;
+  --focus: rgba(29, 28, 26, 0.18);
+  --selection: rgba(168, 115, 29, 0.22);
+  --material: #ffffff;
   --panel-shadow: none;
+  /* A field is raised off the page by a soft shadow rather than ruled round. */
+  --field-shadow: 0 0 0 0.5px rgba(29, 28, 26, 0.12), 0 2px 8px rgba(0, 0, 0, 0.05);
   --pop-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.18), 0 24px 60px -20px rgba(0, 0, 0, 0.2);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --bg: #1e1e1f;
-    --sidebar: #28282a;
-    --panel: #2c2c2e;
-    --sunken: #29292b;
-    --fill: rgba(255, 255, 255, 0.05);
-    --control: rgba(255, 255, 255, 0.1);
-    --control-hover: rgba(255, 255, 255, 0.14);
-    --knob: #636366;
-    --hover: rgba(255, 255, 255, 0.06);
-    --active: rgba(255, 255, 255, 0.1);
-    --ink: #f5f5f7;
-    --ink-2: #d1d1d6;
-    --dim: #98989d;
-    --dimmer: #636366;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-2: rgba(255, 255, 255, 0.15);
-    --accent: #0a84ff;
-    --ok: #30d158;
-    --bad: #ff453a;
-    --focus: rgba(10, 132, 255, 0.42);
-    --selection: rgba(10, 132, 255, 0.32);
-    --material: #2a2a2c;
-    --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
+    --bg: #141312;
+    --sidebar: #1b1a18;
+    --panel: #1d1c1a;
+    --sunken: #1d1c1a;
+    --fill: rgba(236, 232, 225, 0.05);
+    --control: rgba(236, 232, 225, 0.1);
+    --control-hover: rgba(236, 232, 225, 0.14);
+    --knob: #5a564f;
+    --hover: rgba(236, 232, 225, 0.06);
+    --active: rgba(236, 232, 225, 0.1);
+    --ink: #ece8e1;
+    --ink-2: #cfc9bf;
+    --dim: #a39c91;
+    --dimmer: #6f6a62;
+    --line: rgba(236, 232, 225, 0.08);
+    --line-2: rgba(236, 232, 225, 0.15);
+    --accent: #e2b26c;
+    --ok: #8fc48a;
+    --bad: #e0806b;
+    --bubble: #2c2a27;
+    --focus: rgba(236, 232, 225, 0.22);
+    --selection: rgba(226, 178, 108, 0.3);
+    --material: #262421;
+    --field-shadow: 0 0 0 0.5px rgba(236, 232, 225, 0.1), 0 2px 10px rgba(0, 0, 0, 0.3);
+    --pop-shadow: 0 0 0 0.5px rgba(236, 232, 225, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }
 
 :root.dark {
-  --bg: #1e1e1f;
-  --sidebar: #28282a;
-  --panel: #2c2c2e;
-  --sunken: #29292b;
-  --fill: rgba(255, 255, 255, 0.05);
-  --control: rgba(255, 255, 255, 0.1);
-  --control-hover: rgba(255, 255, 255, 0.14);
-  --knob: #636366;
-  --hover: rgba(255, 255, 255, 0.06);
-  --active: rgba(255, 255, 255, 0.1);
-  --ink: #f5f5f7;
-  --ink-2: #d1d1d6;
-  --dim: #98989d;
-  --dimmer: #636366;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.15);
-  --accent: #0a84ff;
-  --ok: #30d158;
-  --bad: #ff453a;
-  --focus: rgba(10, 132, 255, 0.42);
-  --selection: rgba(10, 132, 255, 0.32);
-  --material: #2a2a2c;
-  --pop-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.16), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
+  --bg: #141312;
+  --sidebar: #1b1a18;
+  --panel: #1d1c1a;
+  --sunken: #1d1c1a;
+  --fill: rgba(236, 232, 225, 0.05);
+  --control: rgba(236, 232, 225, 0.1);
+  --control-hover: rgba(236, 232, 225, 0.14);
+  --knob: #5a564f;
+  --hover: rgba(236, 232, 225, 0.06);
+  --active: rgba(236, 232, 225, 0.1);
+  --ink: #ece8e1;
+  --ink-2: #cfc9bf;
+  --dim: #a39c91;
+  --dimmer: #6f6a62;
+  --line: rgba(236, 232, 225, 0.08);
+  --line-2: rgba(236, 232, 225, 0.15);
+  --accent: #e2b26c;
+  --ok: #8fc48a;
+  --bad: #e0806b;
+  --bubble: #2c2a27;
+  --focus: rgba(236, 232, 225, 0.22);
+  --selection: rgba(226, 178, 108, 0.3);
+  --material: #262421;
+  --field-shadow: 0 0 0 0.5px rgba(236, 232, 225, 0.1), 0 2px 10px rgba(0, 0, 0, 0.3);
+  --pop-shadow: 0 0 0 0.5px rgba(236, 232, 225, 0.14), 0 10px 30px -6px rgba(0, 0, 0, 0.5), 0 24px 60px -20px rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
 
@@ -113,9 +126,10 @@
   --color-accent: var(--accent);
   --color-primary: var(--primary);
   --color-primary-ink: var(--primary-ink);
+  --color-bubble: var(--bubble);
 
-  /* The system's own faces: San Francisco on a Mac, whatever the desktop uses elsewhere. */
-  --font-sans: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
+  /* Space Grotesk, ruri's face, bundled (main.tsx); the system's own if it is ever missing. */
+  --font-sans: "Space Grotesk Variable", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -182,14 +196,13 @@ body {
 
 .field {
   background: var(--panel);
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
+  border-radius: 10px;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  box-shadow: var(--field-shadow);
+  transition: box-shadow 0.15s;
 }
 .field:focus, .field:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus);
+  box-shadow: var(--field-shadow), 0 0 0 3px var(--focus);
 }
 
 /* The keyboard's focus, as the system draws it. */
@@ -242,14 +255,15 @@ button:focus-visible, a:focus-visible, [role="menuitemradio"]:focus-visible {
 .prose-midna ol { list-style: decimal; }
 .prose-midna li { margin: 0.12em 0; }
 .prose-midna li::marker { color: var(--dimmer); }
-.prose-midna code { font-family: var(--font-mono); font-size: 0.92em; background: var(--sunken); border: 1px solid var(--line); border-radius: 4px; padding: 0 0.3em; }
-.prose-midna pre { font-family: var(--font-mono); font-size: 12px; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 0.6em 0.8em; overflow-x: auto; margin: 0.3em 0 0.6em; white-space: pre; }
+.prose-midna code { font-family: var(--font-mono); font-size: 0.9em; background: var(--sunken); border-radius: 5px; padding: 0.05em 0.35em; }
+.prose-midna pre { font-family: var(--font-mono); font-size: 12px; background: var(--sunken); border-radius: 12px; padding: 0.75em 0.95em; overflow-x: auto; margin: 0.4em 0 0.7em; white-space: pre; }
+.prose-midna pre code { background: none; padding: 0; font-size: inherit; }
 .prose-midna a { text-decoration: underline; text-decoration-color: var(--dimmer); text-underline-offset: 2px; cursor: pointer; }
-.prose-midna strong { font-weight: 600; }
-.prose-midna h3 { font-weight: 600; margin: 0.6em 0 0.25em; }
+.prose-midna strong { font-weight: 700; }
+.prose-midna h3 { font-weight: 700; margin: 0.7em 0 0.3em; }
 /* The box is as wide as its table, up to the message's width; past that the table scrolls inside it. */
-.prose-midna .md-table { width: fit-content; overflow-x: auto; margin: 0.3em 0 0.6em; background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; }
+.prose-midna .md-table { width: fit-content; overflow-x: auto; margin: 0.4em 0 0.7em; background: var(--sunken); border-radius: 12px; }
 .prose-midna table { border-collapse: collapse; font-size: 0.95em; }
-.prose-midna th, .prose-midna td { padding: 0.35em 0.75em; vertical-align: top; max-width: 22em; }
-.prose-midna th { font-weight: 600; white-space: nowrap; }
+.prose-midna th, .prose-midna td { padding: 0.45em 0.9em; vertical-align: top; max-width: 22em; }
+.prose-midna th { font-weight: 700; white-space: nowrap; }
 .prose-midna tbody td { border-top: 1px solid var(--line); }

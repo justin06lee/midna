@@ -56,7 +56,7 @@ export default defineConfig({
       { find: /^react-native-safe-area-context$/, replacement: stub("safe-area.tsx") },
       { find: /^expo\/fetch$/, replacement: stub("expo-fetch.ts") },
       { find: /^expo-sqlite\/kv-store$/, replacement: stub("kv-store.ts") },
-      { find: /^expo-(clipboard|network|sharing|file-system|image|document-picker|image-picker|secure-store)$/, replacement: `${HERE}/stubs/expo-$1.tsx` },
+      { find: /^expo-(clipboard|network|sharing|file-system|image|document-picker|image-picker|secure-store|symbols|glass-effect|linear-gradient)$/, replacement: `${HERE}/stubs/expo-$1.tsx` },
     ],
   },
   server: { port: 5191, strictPort: true, fs: { strict: false } },

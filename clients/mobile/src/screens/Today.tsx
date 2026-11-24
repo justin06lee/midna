@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ComponentRef } from "react";
 import { AppState, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MidnaError, type CalendarBlock } from "@midna/protocol";
-import { useTheme, type Theme } from "../theme";
+import { bold, radius, type as face, useTheme, type Theme } from "../theme";
 import { clock, clockParts, midnight, span, timetable, type Day, type Gap, type Row } from "../timetable";
 import { GroupNote, GroupTitle, Problem } from "../ui";
 import type { Midna } from "../useMidna";
@@ -76,7 +76,7 @@ function useMinute(): number {
 const weekday = (at: number) => new Date(at).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
 /** The day as a timetable: what's on now and next above, then every block in order; tomorrow under it once approved. */
-export function Today({ midna }: { midna: Midna }) {
+export function Today({ midna, foot }: { midna: Midna; foot: number }) {
   const t = useTheme();
   const now = useMinute();
   const { blocks, problem, loading, load } = useDay(midna);
@@ -93,8 +93,8 @@ export function Today({ midna }: { midna: Midna }) {
   }, []);
 
   return (
-    <ScrollView ref={scroller} testID="today" contentContainerStyle={s.body} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
-      <Text style={[s.date, { color: t.dim }]}>{weekday(now)}</Text>
+    <ScrollView ref={scroller} testID="today" contentContainerStyle={[s.body, { paddingBottom: foot + 24 }]} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
+      <Text style={[s.date, { color: t.inkSoft }]}>{weekday(now)}</Text>
       {table && (table.now || table.next) ? <NowNext table={table} now={now} t={t} /> : null}
       <Problem text={problem} />
       {table && table.today.rows.length + table.today.allDay.length > 0 ? (
@@ -121,19 +121,19 @@ function NowNext({ table, now, t }: { table: NonNullable<ReturnType<typeof timet
   const on = table.now;
   const next = table.next;
   return (
-    <View style={[s.now, { backgroundColor: on ? t.tint : t.panel }]}>
+    <View style={[s.now, { backgroundColor: on ? t.tint : t.raised }]}>
       {on ? (
         <>
-          <Text style={[s.label, { color: t.primary }]}>NOW</Text>
+          <Text style={[s.label, { color: t.accent }]}>Now</Text>
           <Text style={[s.nowTitle, { color: t.ink }]}>{on.title}</Text>
-          <Text style={[s.nowMeta, { color: t.dim }]}>{`until ${clock(on.end!)} · ${span(on.end! - now)} left${on.place ? ` · ${on.place}` : ""}`}</Text>
+          <Text style={[s.nowMeta, { color: t.inkSoft }]}>{`until ${clock(on.end!)} · ${span(on.end! - now)} left${on.place ? ` · ${on.place}` : ""}`}</Text>
         </>
       ) : (
-        <Text style={[s.nowMeta, { color: t.dim }]}>Nothing planned right now.</Text>
+        <Text style={[s.nowMeta, { color: t.inkSoft }]}>Nothing planned right now.</Text>
       )}
       {next ? (
-        <Text style={[s.nextLine, { color: t.ink2 }]}>
-          <Text style={{ color: t.dim }}>Next </Text>
+        <Text style={[s.nextLine, { color: t.ink }]}>
+          <Text style={{ color: t.inkSoft }}>Next </Text>
           {`${midnight(next.start) !== midnight(now) ? "tomorrow " : ""}${clock(next.start)}  ${next.title}`}
         </Text>
       ) : null}
@@ -153,10 +153,10 @@ function Table({ day, now, t, onFocusRow }: { day: Day; now: number; t: Theme; o
   };
   const focus = day.rows.find((r) => !("gap" in r) && (r.state === "now" || r.next));
   return (
-    <View style={[s.table, { backgroundColor: t.panel }]}>
+    <View style={[s.table, { backgroundColor: t.raised }]}>
       {day.allDay.map((r) => (
         <View key={`a${r.id}`} style={s.row}>
-          <Text style={[s.time, { color: t.dim }]}>all day</Text>
+          <Text style={[s.time, { color: t.inkSoft }]}>all day</Text>
           <View style={s.what}>
             <Text style={[s.title, { color: t.ink }]}>{r.title}</Text>
           </View>
@@ -185,19 +185,19 @@ function Block({ r, now, t, period, onLayoutY }: { r: Row; now: number; t: Theme
       accessibilityLabel={`${clock(r.start)}, ${r.title}${on ? ", now" : r.next ? ", next" : ""}`}
     >
       <View style={s.timeCol}>
-        <Text style={[s.time, { color: on ? t.primary : past ? t.dimmer : t.ink2 }, on && s.strong]}>
+        <Text style={[s.time, { color: on ? t.accent : past ? t.inkFaint : t.ink }, on && s.strong]}>
           {clockParts(r.start).time}
           {period ? <Text style={s.period}>{` ${period}`}</Text> : null}
         </Text>
-        {r.end !== null && midnight(r.end) === midnight(r.start) ? <Text style={[s.until, { color: past ? t.dimmer : t.dim }]}>{clockParts(r.end).time}</Text> : null}
+        {r.end !== null && midnight(r.end) === midnight(r.start) ? <Text style={[s.until, { color: past ? t.inkFaint : t.inkSoft }]}>{clockParts(r.end).time}</Text> : null}
       </View>
       <View style={s.what}>
-        <Text style={[s.title, { color: past ? t.dim : t.ink }, on && s.strong]} numberOfLines={2}>
+        <Text style={[s.title, { color: past ? t.inkSoft : t.ink }, on && s.strong]} numberOfLines={2}>
           {r.title}
         </Text>
-        {meta ? <Text style={[s.meta, { color: past ? t.dimmer : t.dim }]}>{meta}</Text> : null}
+        {meta ? <Text style={[s.meta, { color: past ? t.inkFaint : t.inkSoft }]}>{meta}</Text> : null}
       </View>
-      {on ? <Text style={[s.tag, { color: t.primary }]}>{r.end ? `${span(r.end - now)} left` : "Now"}</Text> : r.next ? <Text style={[s.tag, { color: t.dim }]}>Next</Text> : null}
+      {on ? <Text style={[s.tag, { color: t.accent }]}>{r.end ? `${span(r.end - now)} left` : "Now"}</Text> : r.next ? <Text style={[s.tag, { color: t.inkSoft }]}>Next</Text> : null}
     </View>
   );
 }
@@ -206,33 +206,33 @@ function Block({ r, now, t, period, onLayoutY }: { r: Row; now: number; t: Theme
 function Free({ gap, t }: { gap: Gap; t: Theme }) {
   return (
     <View style={[s.row, s.freeRow]}>
-      <Text style={[s.time, s.freeText, { color: t.dimmer }]}>{clockParts(gap.start).time}</Text>
-      <Text style={[s.freeText, { color: t.dimmer }]}>{`Free · ${span(gap.end - gap.start)}`}</Text>
+      <Text style={[s.time, s.freeText, { color: t.inkFaint }]}>{clockParts(gap.start).time}</Text>
+      <Text style={[s.freeText, { color: t.inkFaint }]}>{`Free · ${span(gap.end - gap.start)}`}</Text>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  body: { padding: 16, paddingBottom: 40, gap: 22 },
-  date: { fontSize: 15, marginHorizontal: 4, marginBottom: -10 },
-  section: { gap: 14 },
-  now: { borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, gap: 3 },
-  label: { fontSize: 12, fontWeight: "600", letterSpacing: 0.4 },
-  nowTitle: { fontSize: 22, fontWeight: "600", lineHeight: 28 },
-  nowMeta: { fontSize: 15 },
-  nextLine: { fontSize: 15, marginTop: 10 },
-  table: { borderRadius: 12, paddingVertical: 6, paddingHorizontal: 6 },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 10, paddingVertical: 9 },
-  onRow: { borderRadius: 10 },
+  body: { paddingHorizontal: 16, paddingTop: 8, gap: 24 },
+  date: { ...face(13, "medium"), marginHorizontal: 6, marginBottom: -16 },
+  section: { gap: 24 },
+  now: { borderRadius: radius.card, borderCurve: "continuous", paddingHorizontal: 16, paddingVertical: 15, gap: 3 },
+  label: face(12, "medium"),
+  nowTitle: face(21, "bold", 27),
+  nowMeta: face(14),
+  nextLine: { ...face(14), marginTop: 10 },
+  table: { borderRadius: radius.card, borderCurve: "continuous", paddingVertical: 6, paddingHorizontal: 6 },
+  row: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingHorizontal: 10, paddingVertical: 10 },
+  onRow: { borderRadius: 12, borderCurve: "continuous" },
   timeCol: { width: 64 },
-  time: { fontSize: 15, fontVariant: ["tabular-nums"], width: 64 },
-  period: { fontSize: 11, fontWeight: "500" },
-  until: { fontSize: 13, fontVariant: ["tabular-nums"], marginTop: 1 },
+  time: { ...face(14), fontVariant: ["tabular-nums"], width: 64 },
+  period: face(11, "medium"),
+  until: { ...face(12), fontVariant: ["tabular-nums"], marginTop: 1 },
   what: { flex: 1, gap: 2 },
-  title: { fontSize: 17, lineHeight: 22 },
-  strong: { fontWeight: "600" },
-  meta: { fontSize: 13 },
-  tag: { fontSize: 13, fontWeight: "500", marginTop: 2 },
+  title: face(16, "regular", 21),
+  strong: bold,
+  meta: face(13),
+  tag: { ...face(12, "medium"), marginTop: 2 },
   freeRow: { paddingVertical: 5 },
-  freeText: { fontSize: 13 },
+  freeText: face(13),
 });

@@ -42,7 +42,7 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
   if (none)
     return (
       <Page>
-        <div className="sheet rounded-[10px] px-5 py-8 text-center">
+        <div className="sheet rounded-[14px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">No vault on this midna</p>
           <p className="selectable mx-auto mt-1 max-w-[400px] text-[12.5px] text-dim">{none.replace(/^there's no vault here: /, "")}. ghostly keeps its vault on midna's host.</p>
         </div>
@@ -73,7 +73,7 @@ export function Vault({ client, draftKey }: { client: MidnaClient; draftKey: str
         </div>
       )}
       {items.length === 0 && open.value !== NEW ? (
-        <div className="sheet rounded-[10px] px-5 py-8 text-center">
+        <div className="sheet rounded-[14px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">Nothing in the vault yet</p>
           <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] text-dim">Add a login, and midna can find it by its title when you ask.</p>
         </div>
@@ -210,7 +210,7 @@ function Editor({ client, item, draftKey, onDone, onCancel, flat }: { client: Mi
   };
 
   return (
-    <form onSubmit={save} className={flat ? "px-3 py-3.5" : "sheet rounded-[10px] px-3 py-3.5"}>
+    <form onSubmit={save} className={flat ? "px-3 py-3.5" : "sheet rounded-[14px] px-3 py-3.5"}>
       <div className="grid grid-cols-[80px_1fr] items-center gap-x-3 gap-y-2">
         <label className="text-right text-[13px]">Title</label>
         <input autoFocus={!item} className="field h-7 px-2 text-[13px]" value={title.value} onChange={(e) => title.set(e.target.value)} placeholder="GitHub" spellCheck={false} />

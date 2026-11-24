@@ -51,7 +51,7 @@ make build install && midna setup
 
 ## Using it
 
-The app has five views (the iPhone app has Chat, Approvals, Vault and Settings):
+The app has five views (the iPhone app has Chat, Today and Vault as tabs, with Approvals and Settings a tap away in its top bar):
 
 - **Chat** — everything said on any device, with midna's questions as buttons.
 - **Today** — the calendar, what's due, open promises, and what midna will do on its own.
