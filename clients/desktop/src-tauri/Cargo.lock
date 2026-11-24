@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "midna-desktop"
-version = "0.13.8"
+version = "0.13.9"
 dependencies = [
  "base64 0.22.1",
  "block2",

@@ -28,7 +28,7 @@
     },
     "clients/desktop": {
       "name": "@midna/desktop",
-      "version": "0.13.8",
+      "version": "0.13.9",
       "dependencies": {
         "@fontsource-variable/space-grotesk": "^5.3.0",
         "@midna/protocol": "workspace:*",
