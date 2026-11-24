@@ -42,8 +42,8 @@ export function CircleButton({ icon, label, onPress, dot, testID }: { icon: Symb
 
 /**
  * A capsule button. "primary" is solid ink, the one thing to do on a screen;
- * the others are a wash of ink, their words in ink or, for what can't be
- * undone, in red.
+ * the others are glass (a wash of ink before iOS 26), their words in ink or,
+ * for what can't be undone, in red.
  */
 export function Button({
   label,
@@ -66,19 +66,36 @@ export function Button({
 }) {
   const t = useTheme();
   const off = disabled || busy;
-  const bg = kind === "primary" ? t.ink : t.fill;
   const fg = kind === "primary" ? t.paper : kind === "danger" ? t.destructive : t.ink;
+  const inside = busy ? <ActivityIndicator size="small" color={fg} /> : <Text style={[small ? s.smallLabel : s.label, { color: fg }]}>{label}</Text>;
   return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: !!off, busy: !!busy }}
-      disabled={off}
-      onPress={onPress}
-      style={({ pressed }) => [s.button, small && s.small, { backgroundColor: bg, opacity: off ? 0.4 : pressed ? 0.7 : 1 }, style]}
-    >
-      {busy ? <ActivityIndicator size="small" color={fg} /> : <Text style={[small ? s.smallLabel : s.label, { color: fg }]}>{label}</Text>}
+    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: !!off, busy: !!busy }} disabled={off} onPress={onPress} style={({ pressed }) => [{ opacity: off ? 0.4 : pressed ? 0.7 : 1 }, style]}>
+      {kind === "primary" ? (
+        // What leads is solid ink: a tint barely shows on glass.
+        <View style={[s.button, small && s.small, { backgroundColor: t.ink }]}>{inside}</View>
+      ) : (
+        <Glass interactive fallback={t.fill} style={[s.button, small && s.small]}>
+          {inside}
+        </Glass>
+      )}
+    </Pressable>
+  );
+}
+
+/** A choice to tap, in a row of them under a question: a glass capsule. */
+export function Chip({ label, onPress, disabled, tone, busy, testID }: { label: string; onPress: () => void; disabled?: boolean; tone?: "lead" | "danger"; busy?: boolean; testID?: string }) {
+  const t = useTheme();
+  const fg = tone === "lead" ? t.paper : tone === "danger" ? t.destructive : t.ink;
+  const inside = busy ? <ActivityIndicator size="small" color={fg} /> : <Text style={[s.smallLabel, { color: disabled ? (tone === "lead" ? fg : t.inkSoft) : fg }]}>{label}</Text>;
+  return (
+    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={({ pressed }) => ({ opacity: disabled ? 0.45 : pressed ? 0.6 : 1 })}>
+      {tone === "lead" ? (
+        <View style={[s.chip, { backgroundColor: t.ink }]}>{inside}</View>
+      ) : (
+        <Glass interactive fallback={t.fill} style={s.chip}>
+          {inside}
+        </Glass>
+      )}
     </Pressable>
   );
 }
@@ -235,8 +252,9 @@ const s = StyleSheet.create({
   rowLabel: face(16),
   rowNote: { ...face(13, "regular", 18), marginTop: 2 },
   rowValue: { ...face(16), flex: 1, minWidth: 0, textAlign: "right" },
-  button: { height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
+  button: { height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center", paddingHorizontal: 20, overflow: "hidden" },
   small: { height: 36, borderRadius: 18, paddingHorizontal: 15 },
+  chip: { minHeight: 38, borderRadius: 19, paddingHorizontal: 16, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   label: face(16, "medium"),
   smallLabel: face(14, "medium"),
   field: { gap: 24 },

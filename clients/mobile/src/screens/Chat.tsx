@@ -12,8 +12,9 @@ import { faceId } from "../faceid";
 import { Markdown } from "../markdown";
 import { approvalOutcome, asksApproval, size, type Line } from "../lines";
 import { radius, type as face, useTheme } from "../theme";
-import { Glass, Icon, Problem } from "../ui";
+import { Chip, Glass, Icon, Problem } from "../ui";
 import type { Midna } from "../useMidna";
+import { ModelMenu, type Models } from "./Models";
 
 /** A file on its way to the host, before it is an attachment. */
 interface Uploading {
@@ -73,10 +74,10 @@ function useKeyboardLift(ref: RefObject<Measurable | null>, rest: number) {
  * thinking (it opens the sheet that changes it) and send. What is typed,
  * and the files added to it (already on the host), are a draft until midna
  * has the message: they survive switching tabs, the app being killed, and
- * a send that failed. `foot` is what the tab capsule floating over the
- * screen needs left clear.
+ * a send that failed. `head` and `foot` are what the bar and the tab bar
+ * floating over the screen cover: the conversation runs under both.
  */
-export function Chat({ midna, connection, foot, model, onPickModel, onOpenApprovals }: { midna: Midna; connection: PhoneConnection; foot: number; model: string; onPickModel: () => void; onOpenApprovals: () => void }) {
+export function Chat({ midna, connection, head, foot, models, onOpenApprovals }: { midna: Midna; connection: PhoneConnection; head: number; foot: number; models: Models; onOpenApprovals: () => void }) {
   const t = useTheme();
   const key = draftKey(connection);
   const text = useDraft(key);
@@ -164,7 +165,8 @@ export function Chat({ midna, connection, foot, model, onPickModel, onOpenApprov
         inverted
         data={data}
         keyExtractor={(l) => l.key}
-        contentContainerStyle={s.lines}
+        // Inverted: the padding at the list's end is the room under the bar at the top.
+        contentContainerStyle={[s.lines, { paddingBottom: head + 8 }]}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         onEndReached={() => void midna.loadOlder().catch(() => {})}
@@ -237,13 +239,10 @@ export function Chat({ midna, connection, foot, model, onPickModel, onOpenApprov
             <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Add a photo or file" hitSlop={8} onPress={attach} style={({ pressed }) => [s.round, { backgroundColor: t.fill, opacity: pressed ? 0.6 : 1 }]}>
               <Icon name="plus" size={15} color={t.ink} weight="semibold" />
             </Pressable>
-            {/* The model that thinks, where ruri's field has it: a tap opens the sheet that changes it. */}
-            <Pressable testID="header-model" accessibilityRole="button" accessibilityLabel={`Model: ${model}. Change it`} hitSlop={8} onPress={onPickModel} style={({ pressed }) => [s.model, pressed && { opacity: 0.5 }]}>
-              <Text numberOfLines={1} style={[s.modelText, { color: t.inkSoft }]}>
-                {model}
-              </Text>
-              <Icon name="chevron.up.chevron.down" size={10} color={t.inkFaint} weight="semibold" />
-            </Pressable>
+            {/* The model that thinks, where ruri's field has it: the system's own menu under its name. */}
+            <View style={s.model}>
+              <ModelMenu midna={midna} models={models} />
+            </View>
             <Pressable testID="chat-send" accessibilityRole="button" accessibilityLabel="Send" hitSlop={5} onPress={() => void submit()} disabled={!ready} style={({ pressed }) => [s.round, { backgroundColor: ready ? t.ink : t.fill, opacity: pressed ? 0.7 : 1 }]}>
               <Icon name="arrow.up" size={15} color={ready ? t.paper : t.inkFaint} weight="bold" />
             </Pressable>
@@ -331,15 +330,7 @@ function LineBody({
       ) : l.kind === "question" && l.options && l.options.length > 0 ? (
         <View style={s.options}>
           {l.options.map((o) => (
-            <Pressable
-              key={o}
-              accessibilityRole="button"
-              disabled={l.answered || !canSend}
-              onPress={() => onAnswer(o)}
-              style={({ pressed }) => [s.option, { backgroundColor: t.fill, opacity: l.answered || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
-            >
-              <Text style={[s.optionText, { color: l.answered ? t.inkSoft : t.ink }]}>{plainText(o)}</Text>
-            </Pressable>
+            <Chip key={o} label={plainText(o)} disabled={l.answered || !canSend} onPress={() => onAnswer(o)} />
           ))}
         </View>
       ) : null}
@@ -370,20 +361,7 @@ export function ApprovalButtons({ approval, midna, canSend }: { approval: Approv
     <View style={s.approval}>
       <View style={s.options}>
         {APPROVAL_OPTIONS.map((o) => (
-          <Pressable
-            key={o.answer}
-            testID={`approve-${o.answer}`}
-            accessibilityRole="button"
-            disabled={!!busy || !canSend}
-            onPress={() => void answer(o.label, o.answer)}
-            style={({ pressed }) => [s.option, { backgroundColor: o.answer === "allow" ? t.ink : t.fill, opacity: busy || !canSend ? 0.45 : pressed ? 0.6 : 1 }]}
-          >
-            {busy === o.answer ? (
-              <ActivityIndicator size="small" color={o.answer === "allow" ? t.paper : t.inkSoft} />
-            ) : (
-              <Text style={[s.optionText, { color: o.answer === "allow" ? t.paper : o.answer === "deny" ? t.destructive : t.ink }]}>{o.label}</Text>
-            )}
-          </Pressable>
+          <Chip key={o.answer} testID={`approve-${o.answer}`} label={o.label} tone={o.answer === "allow" ? "lead" : o.answer === "deny" ? "danger" : undefined} busy={busy === o.answer} disabled={!!busy || !canSend} onPress={() => void answer(o.label, o.answer)} />
         ))}
       </View>
       <Problem text={problem} />
@@ -405,8 +383,6 @@ const s = StyleSheet.create({
   midna: { alignItems: "flex-start", gap: 8 },
   meta: { ...face(11), marginRight: 6 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  option: { minHeight: 38, borderRadius: 19, paddingHorizontal: 16, justifyContent: "center" },
-  optionText: face(14, "medium"),
   approval: { gap: 6 },
   outcome: face(13),
   composer: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
@@ -417,7 +393,6 @@ const s = StyleSheet.create({
   chipMeta: face(12),
   row: { flexDirection: "row", alignItems: "center", gap: 10 },
   round: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
-  model: { flex: 1, flexDirection: "row", alignItems: "center", gap: 5, height: 34 },
-  modelText: { ...face(13, "medium"), flexShrink: 1 },
+  model: { flex: 1, flexDirection: "row", alignItems: "center", minHeight: 34 },
   input: { ...face(16, "regular", 21), minHeight: 24, maxHeight: 140, paddingTop: 0, paddingBottom: 0, paddingRight: 6 },
 });

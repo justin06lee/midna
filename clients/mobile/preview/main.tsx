@@ -20,7 +20,8 @@ const tap = (id: string) => {
 };
 const open = q.get("open");
 setTimeout(() => {
-  if (open === "model") tap("header-model");
+  // The model's sheet opens from Settings; in the composer it is the system's menu, which a browser has none of.
+  if (open === "model") (tap("open-settings"), setTimeout(() => tap("settings-model"), 600));
   else if (open === "settings" || open === "approvals") tap(`open-${open}`);
   else if (open) tap(`tab-${open}`);
 }, 1500);
