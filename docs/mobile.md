@@ -2,6 +2,10 @@
 
 *v1 is built at `clients/mobile`: an Expo (SDK 58) + TypeScript app, iOS only. Since 2026-10-27 it is signed by the paid team (65UN46K6FA), ships through TestFlight to Justin alone, and gets push notifications (docs/push.md). Justin's answers of 2026-10-20 are below. The options weighed before them (makima on the phone, a relay, Telegram only) are in this file's history at 6150bfd.*
 
+**How it is laid out and drawn** (since 2026-11-24): [redesign.md](redesign.md). Chat, Today and Vault are tabs in a capsule that floats over the foot of the screen; Approvals and Settings open as sheets from the two round buttons in the bar; the model is switched from the field a message is written in. The typeface is Space Grotesk, embedded by the `expo-font` plugin (`app.json`, `assets/fonts/`); icons are SF Symbols (`expo-symbols`); on iOS 26 what floats is Liquid Glass (`expo-glass-effect`), and before it a raised shade.
+
+Add an Expo package with `bunx expo install <name>`, so it is the version this SDK expects. If the app then quits at launch with `dyld: Symbol not found … ExpoModulesCore`, the new module is built against a newer core than the app has: `bunx expo install --fix`, then build again with `--clean`.
+
 ## 1. Decisions (Justin, 2026-10-20)
 
 - **Reachability will be Tailscale, switched on later, when Justin is home.** The phone will run Tailscale and reach midna over the tailnet, at an address typed into the app: `http://midna:7717` (MagicDNS) or a 100.x IP.
