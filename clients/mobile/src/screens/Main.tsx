@@ -108,7 +108,7 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
       </View>
       {/* The bar: clear, so what scrolls shows through its glass; a fade behind it keeps the name readable. */}
       <View pointerEvents="box-none" style={[s.header, { paddingTop: insets.top + 2, opacity: offline ? 0.5 : 1 }]}>
-        <LinearGradient pointerEvents="none" colors={[bg, bg, clear(bg)]} locations={[0, 0.45, 1]} style={[StyleSheet.absoluteFill, s.fade]} />
+        <LinearGradient pointerEvents="none" colors={[bg, bg, clear(bg)]} locations={[0, 0.72, 1]} style={[StyleSheet.absoluteFill, s.fade]} />
         <CircleButton testID="open-approvals" icon="hand.raised" label={waiting > 0 ? `Approvals, ${waiting} waiting` : "Approvals"} dot={waiting > 0} onPress={() => setSheet("approvals")} />
         <View pointerEvents="none" style={s.title}>
           <Text numberOfLines={1} style={[tab === "chat" ? s.wordmark : s.name, { color: t.ink }]}>
@@ -140,8 +140,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
 const s = StyleSheet.create({
   root: { flex: 1 },
   header: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
-  // The fade runs a little past the bar, so nothing is cut at a line.
-  fade: { bottom: -14 },
+  // Solid behind the name, then fading out past the bar, so what scrolls is never cut at a line nor read through the name.
+  fade: { bottom: -22 },
   title: { flex: 1, alignItems: "center", justifyContent: "center", height: 44 },
   wordmark: { ...face(22, "bold"), letterSpacing: -0.4 },
   name: face(17, "bold"),

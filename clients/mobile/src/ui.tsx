@@ -16,11 +16,11 @@ const glass = isLiquidGlassAvailable();
  * message is written in): Liquid Glass where the iPhone has it (iOS 26),
  * and before it the theme's raised shade.
  */
-export function Glass({ children, style, interactive, fallback, lifted }: { children?: ReactNode; style?: StyleProp<ViewStyle>; interactive?: boolean; fallback?: string; /** Before glass: a soft shadow under it, so a white bar reads on a white page. */ lifted?: boolean }) {
+export function Glass({ children, style, interactive, fallback, lifted, tinted }: { children?: ReactNode; style?: StyleProp<ViewStyle>; interactive?: boolean; fallback?: string; /** Before glass: a soft shadow under it, so a white bar reads on a white page. */ lifted?: boolean; /** A wash of ink in the glass in light, where clear glass on a white page hardly shows: for a button that must read as one. */ tinted?: boolean }) {
   const t = useTheme();
   if (glass)
     return (
-      <GlassView glassEffectStyle="regular" isInteractive={interactive} style={style}>
+      <GlassView glassEffectStyle="regular" isInteractive={interactive} {...(tinted && !t.dark ? { tintColor: t.fill } : {})} style={style}>
         {children}
       </GlassView>
     );
@@ -74,7 +74,7 @@ export function Button({
         // What leads is solid ink: a tint barely shows on glass.
         <View style={[s.button, small && s.small, { backgroundColor: t.ink }]}>{inside}</View>
       ) : (
-        <Glass interactive fallback={t.fill} style={[s.button, small && s.small]}>
+        <Glass interactive tinted fallback={t.fill} style={[s.button, small && s.small]}>
           {inside}
         </Glass>
       )}
@@ -92,7 +92,7 @@ export function Chip({ label, onPress, disabled, tone, busy, testID }: { label: 
       {tone === "lead" ? (
         <View style={[s.chip, { backgroundColor: t.ink }]}>{inside}</View>
       ) : (
-        <Glass interactive fallback={t.fill} style={s.chip}>
+        <Glass interactive tinted fallback={t.fill} style={s.chip}>
           {inside}
         </Glass>
       )}
