@@ -11,6 +11,19 @@ copied iOS Settings: system greys, the system blue on the user's bubble, the
 tabs and every button, hairlines under the header and over the tab bar. It
 read as a stock form. This replaces it.
 
+## How it looks now
+
+The iPhone app in the simulator (chat in dark and light, Today, Settings),
+and the built Mac app's own window:
+
+![The iPhone app](redesign/phone.png)
+
+![The Mac app](redesign/mac.png)
+
+Take them again with `bun clients/mobile/scripts/sim-shot.ts --build --tab chat --dark out.png`
+(from the checkout that holds the simulator build) and
+`cd clients/desktop && bun scripts/built-shot.ts <dir> --build`.
+
 ## What both references share
 
 - **Paper and ink.** A page, and ink on it. A surface is told from the next
