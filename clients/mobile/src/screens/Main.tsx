@@ -96,7 +96,7 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
         {tab === "vault" && <Vault midna={midna} connection={connection} foot={foot} />}
       </View>
       <View pointerEvents="box-none" style={[s.dock, { bottom: barBottom(insets.bottom) }]}>
-        <Glass style={s.tabs}>
+        <Glass lifted style={s.tabs}>
           {(Object.keys(TABS) as Tab[]).map((k) => (
             <Pressable key={k} testID={`tab-${k}`} accessibilityRole="tab" accessibilityLabel={TABS[k].name} accessibilityState={{ selected: tab === k }} onPress={() => setTab(k)} style={[s.tab, tab === k && { backgroundColor: t.fill }]}>
               <Icon name={TABS[k].icon} size={21} color={tab === k ? t.accent : t.ink} />

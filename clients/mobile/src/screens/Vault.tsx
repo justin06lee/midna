@@ -50,7 +50,7 @@ export function Vault({ midna, connection, foot }: { midna: Midna; connection: P
     return (
       <View style={s.empty}>
         <Text style={[s.emptyTitle, { color: t.ink }]}>No vault on this midna</Text>
-        <Text style={[s.emptyText, { color: t.inkSoft }]}>{none}. ghostly keeps its vault on midna's host.</Text>
+        <Text style={[s.emptyText, { color: t.inkSoft }]}>{`${none.charAt(0).toUpperCase()}${none.slice(1).replace(/\.$/, "")}. ghostly keeps its vault on midna's host.`}</Text>
       </View>
     );
   if (!items)

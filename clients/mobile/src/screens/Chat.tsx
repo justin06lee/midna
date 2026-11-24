@@ -199,7 +199,7 @@ export function Chat({ midna, connection, foot, model, onPickModel, onOpenApprov
         {/* The conversation fades out under the field rather than stopping at a line. */}
         <LinearGradient pointerEvents="none" colors={[t.dark ? "rgba(20,19,18,0)" : "rgba(255,255,255,0)", t.paper]} locations={[0, 0.35]} style={StyleSheet.absoluteFill} />
         <Problem text={problem} />
-        <Glass fallback={t.raised} style={[s.field, !t.dark && s.fieldShadow]}>
+        <Glass fallback={t.raised} lifted={!t.dark} style={s.field}>
           {(files.length > 0 || uploading.length > 0) && (
             <View style={s.staged}>
               {files.map((a) => (
@@ -411,8 +411,6 @@ const s = StyleSheet.create({
   outcome: face(13),
   composer: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 8, gap: 8 },
   field: { borderRadius: radius.field, borderCurve: "continuous", paddingTop: 10, paddingLeft: 14, paddingRight: 8, paddingBottom: 8, gap: 6, overflow: "hidden" },
-  // Before glass, in light, the field is raised off the white page by a soft shadow, as ruri's is.
-  fieldShadow: { overflow: "visible", shadowColor: "#000", shadowOpacity: 0.07, shadowRadius: 10, shadowOffset: { width: 0, height: 2 } },
   staged: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 2 },
   chip: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 15, paddingHorizontal: 10, height: 30, maxWidth: 220 },
   chipText: { ...face(13), flexShrink: 1 },

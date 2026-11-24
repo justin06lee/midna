@@ -16,7 +16,7 @@ const glass = isLiquidGlassAvailable();
  * message is written in): Liquid Glass where the iPhone has it (iOS 26),
  * and before it the theme's raised shade.
  */
-export function Glass({ children, style, interactive, fallback }: { children?: ReactNode; style?: StyleProp<ViewStyle>; interactive?: boolean; fallback?: string }) {
+export function Glass({ children, style, interactive, fallback, lifted }: { children?: ReactNode; style?: StyleProp<ViewStyle>; interactive?: boolean; fallback?: string; /** Before glass: a soft shadow under it, so a white bar reads on a white page. */ lifted?: boolean }) {
   const t = useTheme();
   if (glass)
     return (
@@ -24,7 +24,7 @@ export function Glass({ children, style, interactive, fallback }: { children?: R
         {children}
       </GlassView>
     );
-  return <View style={[{ backgroundColor: fallback ?? t.raisedHigh }, style]}>{children}</View>;
+  return <View style={[{ backgroundColor: fallback ?? t.raisedHigh }, style, lifted && s.lifted]}>{children}</View>;
 }
 
 /** A round button in a bar, 44 across: an icon on glass. `dot` marks that something behind it waits for you. */
@@ -220,6 +220,7 @@ export function time(at: number): string {
 }
 
 const s = StyleSheet.create({
+  lifted: { overflow: "visible", shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 3 } },
   circle: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   dot: { position: "absolute", top: 1, right: 1, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
   groupTitle: { ...face(13, "medium"), marginHorizontal: 6, marginBottom: -16 },
