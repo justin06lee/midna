@@ -31,7 +31,7 @@ export function Objectives({ overview, onDiscuss }: { overview: Overview; onDisc
       </header>
 
       {goals.length === 0 ? (
-        <div className="sheet rounded-[10px] px-5 py-8 text-center">
+        <div className="sheet rounded-[14px] px-5 py-8 text-center">
           <p className="text-[14px] font-medium">No objectives yet.</p>
           <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] text-dim">midna works best when it knows what you're aiming for — for your life, this year, this quarter. It'll interview you and draft them with you.</p>
         </div>
@@ -62,7 +62,7 @@ function GoalCard({ goal: g, depth, childrenOf, tasksFor }: { goal: Goal; depth:
   const kids = childrenOf(g.id);
   const tasks = tasksFor(g.id);
   return (
-    <div className={depth === 0 ? "sheet rounded-[10px] px-3.5 py-3" : "mt-3 border-l border-line-2 pl-3.5"}>
+    <div className={depth === 0 ? "sheet rounded-[14px] px-3.5 py-3" : "mt-3 border-l border-line-2 pl-3.5"}>
       <div className="flex items-baseline gap-2">
         <span className="shrink-0 text-[11.5px] text-dim">{HORIZON[g.horizon]}</span>
         {g.status === "paused" && <span className="text-[11.5px] text-dim">· Paused</span>}

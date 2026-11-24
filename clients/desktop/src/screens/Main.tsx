@@ -119,11 +119,12 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
 
   return (
     <div className="flex h-full">
-      {/* The sidebar is told from the content by its tone, as a Mac's is. */}
-      <aside className="flex w-[200px] shrink-0 flex-col bg-sidebar">
-        {/* The title bar: midna's mark beside the traffic lights; which machine it's on, in its tooltip. */}
-        <div data-tauri-drag-region="deep" title={`${m.status?.name ?? connection.name} on ${host}`} className={`flex h-11 shrink-0 items-center pr-3 ${macTitleBar ? "pl-[92px]" : "pl-4"}`}>
+      {/* The sidebar is a shade off the page: no rule between them. */}
+      <aside className="flex w-[208px] shrink-0 flex-col bg-sidebar">
+        {/* The title bar: midna's mark and name beside the traffic lights; which machine it's on, in its tooltip. */}
+        <div data-tauri-drag-region="deep" title={`${m.status?.name ?? connection.name} on ${host}`} className={`flex h-11 shrink-0 items-center pr-3 ${macTitleBar ? "pl-[92px]" : "pl-[18px]"}`}>
           <Mark className="size-[18px] text-ink" />
+          <span className="ml-2 text-[15px] font-bold tracking-[-0.01em]">midna</span>
         </div>
         <nav className="space-y-px px-2.5 pt-1">
           {NAV.map((n) => (
@@ -132,9 +133,10 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
               type="button"
               aria-current={view === n.id ? "page" : undefined}
               onClick={() => setView(n.id)}
-              className={`flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-[13px] text-ink transition-colors ${view === n.id ? "bg-active" : "hover:bg-hover"}`}
+              className={`flex h-8 w-full items-center gap-2.5 rounded-[9px] px-2.5 text-[13px] transition-colors ${view === n.id ? "bg-active font-medium text-ink" : "text-ink-2 hover:bg-hover"}`}
             >
-              <Icon name={n.icon} className="size-4 text-accent" />
+              {/* The one you are on is a wash of ink, never the accent. */}
+              <Icon name={n.icon} className={`size-4 ${view === n.id ? "text-ink" : "text-dim"}`} />
               {n.label}
             </button>
           ))}

@@ -261,7 +261,7 @@ export function WebImage({ src, alt }: { src: string; alt: string }) {
       draggable={false}
       onError={() => setFailed(true)}
       onClick={() => media?.view({ kind: "image", src, name: alt || src, url: src })}
-      className="my-1.5 block max-h-[320px] max-w-[min(100%,440px)] cursor-zoom-in rounded-[10px] border border-line"
+      className="my-1.5 block max-h-[320px] max-w-[min(100%,440px)] cursor-zoom-in rounded-[12px]"
     />
   );
 }

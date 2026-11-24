@@ -27,16 +27,16 @@ export function Button({
   className?: string;
   type?: "button" | "submit";
 }) {
-  // A Mac's push buttons: the one to press in the accent colour, the others on a quiet grey.
+  // Capsules: the one to press in solid ink, the others on a wash of it.
   const variants = {
-    primary: "bg-primary text-primary-ink hover:brightness-110 active:brightness-95",
+    primary: "bg-primary text-primary-ink hover:opacity-85 active:opacity-75",
     default: "bg-control text-ink hover:bg-control-hover active:bg-active",
-    ghost: "bg-transparent text-accent hover:bg-hover active:bg-active",
+    ghost: "bg-transparent text-ink-2 hover:bg-hover active:bg-active",
   }[variant];
   const sizes = {
-    sm: "h-6 px-2.5 text-[12px] gap-1 rounded-[6px]",
-    md: "h-7 px-3 text-[13px] gap-1.5 rounded-[7px]",
-    lg: "h-9 px-4 text-[14px] gap-2 rounded-[9px]",
+    sm: "h-6 px-3 text-[12px] gap-1 rounded-full",
+    md: "h-7 px-3.5 text-[13px] gap-1.5 rounded-full",
+    lg: "h-9 px-5 text-[14px] gap-2 rounded-full",
   }[size];
   return (
     <button
@@ -88,7 +88,7 @@ export function StateMark({ state }: { state: "running" | "online" | "offline" |
 
 export function Segmented<T extends string>({ value, options, onChange, disabled }: { value: T; options: Array<{ value: T; label: string }>; onChange: (v: T) => void; disabled?: boolean }) {
   return (
-    <div role="radiogroup" className={`inline-flex rounded-[7px] bg-control p-0.5 ${disabled ? "opacity-50" : ""}`}>
+    <div role="radiogroup" className={`inline-flex rounded-full bg-control p-0.5 ${disabled ? "opacity-50" : ""}`}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -97,7 +97,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
           aria-checked={o.value === value}
           disabled={disabled}
           onClick={() => onChange(o.value)}
-          className={`h-6 rounded-[5px] px-3 text-[12.5px] transition-[background-color,box-shadow] duration-150 ${o.value === value ? "bg-knob font-medium text-ink shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.14)]" : "text-ink-2"}`}
+          className={`h-6 rounded-full px-3 text-[12.5px] transition-[background-color,box-shadow] duration-150 ${o.value === value ? "bg-knob font-medium text-ink shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.14)]" : "text-ink-2"}`}
         >
           {o.label}
         </button>
@@ -127,8 +127,8 @@ export function Section({ title, aside, footer, children, className = "" }: { ti
   return (
     <section className={className}>
       {(title || aside) && (
-        <div className="mb-2 flex items-baseline justify-between gap-3 px-1">
-          {title && <h2 className="text-[13px] font-semibold">{title}</h2>}
+        <div className="mb-2 flex items-baseline justify-between gap-3 px-1.5">
+          {title && <h2 className="text-[12px] font-medium text-dim">{title}</h2>}
           {aside}
         </div>
       )}
@@ -138,15 +138,15 @@ export function Section({ title, aside, footer, children, className = "" }: { ti
   );
 }
 
-/** A group of rows on one toned surface, a hairline between them: how System Settings lays out a form. */
+/** A group of rows on one toned surface, a hairline between them and no line round it. */
 export function Group({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`sheet divide-y divide-line overflow-hidden rounded-[10px] ${className}`}>{children}</div>;
+  return <div className={`sheet divide-y divide-line overflow-hidden rounded-[14px] ${className}`}>{children}</div>;
 }
 
 /** One row of a Group: what it is on the left (with a line under it, if it needs one), its control on the right. */
 export function Row({ label, note, children, top }: { label: ReactNode; note?: ReactNode; children?: ReactNode; top?: boolean }) {
   return (
-    <div className={`flex min-h-[40px] gap-3 px-3 py-2 ${top ? "items-start" : "items-center"}`}>
+    <div className={`flex min-h-[44px] gap-3 px-3.5 py-2.5 ${top ? "items-start" : "items-center"}`}>
       <div className="min-w-0 flex-1">
         <div className="text-[13px]">{label}</div>
         {note && <div className="mt-0.5 text-[11.5px] leading-[1.4] text-dim">{note}</div>}
@@ -159,7 +159,7 @@ export function Row({ label, note, children, top }: { label: ReactNode; note?: R
 /** A line across the top of a screen that says something is up, with what to do about it. */
 export function Banner({ children, actions, busy }: { children: ReactNode; actions?: ReactNode; busy?: boolean }) {
   return (
-    <div role="status" className="rise mx-6 mb-2 flex items-center gap-3 rounded-[10px] bg-fill px-3.5 py-2 text-[12.5px]">
+    <div role="status" className="rise mx-6 mb-2 flex items-center gap-3 rounded-[14px] bg-fill py-2 pr-2 pl-3.5 text-[12.5px]">
       {busy && <Spinner className="shrink-0 text-dim" />}
       <span className="min-w-0 flex-1">{children}</span>
       {actions}
