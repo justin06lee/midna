@@ -13,8 +13,8 @@ read as a stock form. This replaces it.
 
 ## How it looks now
 
-The iPhone app in the simulator (chat in dark and light, Today, Settings),
-and the built Mac app's own window:
+The iPhone app in the simulator (chat in light, Today in dark), and the
+built Mac app's own window:
 
 ![The iPhone app](redesign/phone.png)
 
@@ -40,9 +40,12 @@ Take them again with `bun clients/mobile/scripts/sim-shot.ts --build --tab chat 
 - **Soft, large shapes.** Cards at 18, fields at 24, bubbles at 20, all
   continuous corners; buttons and chips are capsules; controls in a bar are
   circles 44 across.
-- **Things float.** The tab bar is a capsule standing off the bottom edge
-  (monet); the composer is one rounded field with its buttons inside it
-  (ruri); on iOS 26 both are Liquid Glass, before it a raised shade.
+- **Things float, on the system's own glass.** Monet's glass is not drawn:
+  it is the system's tab bar, toolbar buttons and menus, which iOS 26 makes
+  of Liquid Glass. So the phone uses the system's pieces wherever one
+  exists (the tab bar, the model's menu) and `GlassView` for the rest (the
+  bar's buttons, the composer, quiet buttons), and lets content run under
+  them, since glass with nothing behind it is only grey.
 - **Room.** 16 at the page's edge, 20 to 28 between groups, rows 50 tall.
 - **Motion only for a change of state**, about 0.2 s, easing out.
 
@@ -77,16 +80,23 @@ bold; SF Mono for code. Sizes are ruri's: 32 large title, 21 title, 16 body,
 
 ## The iPhone
 
-- **Bar:** `midna` in bold at the centre (monet's wordmark place). Left, a
-  circle that opens Approvals, with an accent dot when something waits.
-  Right, a circle that opens Settings. Both open as sheets with a **Done**.
-- **Tabs:** Chat, Today and Vault in a floating capsule (monet's). Approvals
-  and Settings left the tab bar: one is a thing that happens now and then,
-  the other is visited rarely.
+- **Bar:** clear, over the screen: `midna` in bold at the centre (monet's
+  wordmark place) on a fade of the page, so what scrolls under is never read
+  through the name. Left, a glass circle that opens Approvals, with an
+  accent dot when something waits. Right, one that opens Settings. Both
+  open as sheets with a **Done**.
+- **Tabs:** Chat, Today and Vault in the system's tab bar
+  (`react-native-bottom-tabs`: UITabBar, so iOS 26 gives it its glass, its
+  lens and its haptics). Approvals and Settings are not tabs: one is a thing
+  that happens now and then, the other is visited rarely. Each screen is
+  told `head` and `foot`, what the two bars cover, and pads its content by
+  them.
 - **Chat:** ruri's. Grey bubble right, replies as the page, 8 between lines
-  of one speaker and 18 when the speaker changes. The composer is one field:
-  the words, and under them **+**, the model's name (it opens the model
-  sheet, as ruri's does) and the ink send circle.
+  of one speaker and 18 when the speaker changes. The composer is one glass
+  field: the words, and under them **+**, the model's name on a glass
+  capsule (the system's menu of models and accounts opens from it, through
+  `@expo/ui`, as ruri's does) and the ink send circle. The choices under a
+  question are glass capsules.
 - **Rows:** `Group` is ruri's `RowGroup` (raised, 18, hairlines inset);
   the label over it is a small medium-weight line in `inkSoft`, never
   capitals.

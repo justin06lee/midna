@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { Modal, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, Modal, ScrollView, StyleSheet, View } from "react-native";
+import { Button as NativeButton, HStack, Host, Image as NativeImage, Menu, Section, Text as NativeText } from "@expo/ui/swift-ui";
+import { font, foregroundStyle, glassEffect, padding } from "@expo/ui/swift-ui/modifiers";
 import Storage from "expo-sqlite/kv-store";
 import { accountChoices, modelGroups, providersInUse, thinkingWith, type Account, type BrainInfo, type BrainModel, type ModelChoice } from "@midna/protocol";
 import { useTheme } from "../theme";
@@ -63,6 +65,54 @@ export function useModels(midna: Midna, wanted: boolean): Models {
 /** What is thinking now, for the header and for Settings: "Opus 5.5". */
 export function modelNow(midna: Midna, models: Models): string {
   return midna.status ? thinkingWith(midna.status, models.brains, models.catalogues).name : "—";
+}
+
+/**
+ * The model that thinks, in the field a message is written in, as ruri has
+ * it: its name on a glass capsule, and under a tap the system's own menu of
+ * each brain's models (the rest behind "N more") and the Claude accounts,
+ * the set one ticked. A pick is the host's setting and holds from midna's
+ * next turn.
+ */
+export function ModelMenu({ midna, models }: { midna: Midna; models: Models }) {
+  const t = useTheme();
+  const status = midna.status;
+  const save = async (patch: { model?: string; account?: Account }) => {
+    try {
+      midna.setStatus(await midna.client.updateSettings(patch));
+    } catch (err) {
+      Alert.alert("Couldn't switch", (err as Error).message);
+    }
+  };
+  const item = (c: ModelChoice) => <NativeButton key={c.ref} label={c.note ? `${c.name} · ${c.note}` : c.name} {...(c.selected ? { systemImage: "checkmark" as const } : {})} onPress={() => void (c.selected || save({ model: c.ref }))} />;
+  return (
+    <Host matchContents testID="composer-model">
+      <Menu
+        label={
+          <HStack spacing={5} modifiers={[padding({ horizontal: 12, vertical: 8 }), glassEffect({ glass: { variant: "regular", interactive: true }, shape: "capsule" })]}>
+            <NativeText modifiers={[font({ family: "SpaceGrotesk-Medium", size: 13 }), foregroundStyle(t.inkSoft)]}>{modelNow(midna, models)}</NativeText>
+            <NativeImage systemName="chevron.up.chevron.down" size={10} color={t.inkFaint} />
+          </HStack>
+        }
+      >
+        {status
+          ? modelGroups(status, models.brains, models.catalogues).map((g) => (
+              <Section key={g.provider} title={g.label}>
+                {g.choices.map(item)}
+                {g.more.length > 0 ? <Menu label={`${g.more.length} more`}>{g.more.map(item)}</Menu> : null}
+              </Section>
+            ))
+          : null}
+        {status && accountChoices(status).length > 0 ? (
+          <Section title="Claude account">
+            {accountChoices(status).map((a) => (
+              <NativeButton key={a.account} label={a.name} {...(a.selected ? { systemImage: "checkmark" as const } : {})} onPress={() => void (a.selected || save({ account: a.account }))} />
+            ))}
+          </Section>
+        ) : null}
+      </Menu>
+    </Host>
+  );
 }
 
 /**

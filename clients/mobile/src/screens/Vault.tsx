@@ -19,7 +19,7 @@ const CLEAR_MS = 30_000;
  * by its title, and asks before it uses a password. What is typed stays
  * until it is saved — a password being typed in memory only.
  */
-export function Vault({ midna, connection, foot }: { midna: Midna; connection: PhoneConnection; foot: number }) {
+export function Vault({ midna, connection, head, foot }: { midna: Midna; connection: PhoneConnection; head: number; foot: number }) {
   const t = useTheme();
   const key = draftKey(connection);
   const [items, setItems] = useState<VaultItem[] | null>(null);
@@ -48,14 +48,14 @@ export function Vault({ midna, connection, foot }: { midna: Midna; connection: P
 
   if (none)
     return (
-      <View style={s.empty}>
+      <View style={[s.empty, { paddingTop: head + 60 }]}>
         <Text style={[s.emptyTitle, { color: t.ink }]}>No vault on this midna</Text>
         <Text style={[s.emptyText, { color: t.inkSoft }]}>{`${none.charAt(0).toUpperCase()}${none.slice(1).replace(/\.$/, "")}. ghostly keeps its vault on midna's host.`}</Text>
       </View>
     );
   if (!items)
     return (
-      <View style={s.empty}>
+      <View style={[s.empty, { paddingTop: head + 60 }]}>
         {error ? (
           <>
             <Text style={[s.emptyText, { color: t.inkSoft }]}>{error}</Text>
@@ -69,11 +69,11 @@ export function Vault({ midna, connection, foot }: { midna: Midna; connection: P
 
   const editing = open.value === NEW ? null : items.find((i) => i.id === open.value);
   if (open.value && (open.value === NEW || editing))
-    return <Editor midna={midna} item={editing ?? null} draft={key} foot={foot} onDone={() => (open.set(""), reload())} onBack={() => open.set("")} />;
+    return <Editor midna={midna} item={editing ?? null} draft={key} head={head} foot={foot} onDone={() => (open.set(""), reload())} onBack={() => open.set("")} />;
 
   const shown = vaultMatches(items, query.value);
   return (
-    <ScrollView testID="vault" contentContainerStyle={[s.body, { paddingBottom: foot + 24 }]} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+    <ScrollView testID="vault" contentContainerStyle={[s.body, { paddingTop: head + 8, paddingBottom: foot + 24 }]} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       <View style={s.top}>
         {items.length > 0 ? (
           <TextInput
@@ -120,7 +120,7 @@ export function Vault({ midna, connection, foot }: { midna: Midna; connection: P
 }
 
 /** One login, open to change — or a new one. Saving sends only what changed. */
-function Editor({ midna, item, draft, foot, onDone, onBack }: { midna: Midna; item: VaultItem | null; draft: string; foot: number; onDone: () => void; onBack: () => void }) {
+function Editor({ midna, item, draft, head, foot, onDone, onBack }: { midna: Midna; item: VaultItem | null; draft: string; head: number; foot: number; onDone: () => void; onBack: () => void }) {
   const t = useTheme();
   const key = `${draft}:vault:${item?.id ?? NEW}`;
   const title = useDraft(`${key}:title`, item?.title ?? "");
@@ -228,7 +228,7 @@ function Editor({ midna, item, draft, foot, onDone, onBack }: { midna: Midna; it
   };
 
   return (
-    <ScrollView testID="vault-editor" contentContainerStyle={[s.body, { paddingBottom: foot + 24 }]} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+    <ScrollView testID="vault-editor" contentContainerStyle={[s.body, { paddingTop: head + 8, paddingBottom: foot + 24 }]} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       <View style={s.top}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to the vault" onPress={onBack} hitSlop={12} style={s.back}>
           <Icon name="chevron.left" size={13} color={t.inkSoft} weight="semibold" />

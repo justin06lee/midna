@@ -76,7 +76,7 @@ function useMinute(): number {
 const weekday = (at: number) => new Date(at).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
 /** The day as a timetable: what's on now and next above, then every block in order; tomorrow under it once approved. */
-export function Today({ midna, foot }: { midna: Midna; foot: number }) {
+export function Today({ midna, head, foot }: { midna: Midna; head: number; foot: number }) {
   const t = useTheme();
   const now = useMinute();
   const { blocks, problem, loading, load } = useDay(midna);
@@ -93,7 +93,7 @@ export function Today({ midna, foot }: { midna: Midna; foot: number }) {
   }, []);
 
   return (
-    <ScrollView ref={scroller} testID="today" contentContainerStyle={[s.body, { paddingBottom: foot + 24 }]} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
+    <ScrollView ref={scroller} testID="today" contentContainerStyle={[s.body, { paddingTop: head + 8, paddingBottom: foot + 24 }]} refreshControl={<RefreshControl refreshing={loading && blocks !== null} onRefresh={() => void load()} />}>
       <Text style={[s.date, { color: t.inkSoft }]}>{weekday(now)}</Text>
       {table && (table.now || table.next) ? <NowNext table={table} now={now} t={t} /> : null}
       <Problem text={problem} />

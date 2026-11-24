@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import { Modal, Platform, Pressable, Settings as RNSettings, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Settings as RNSettings, StyleSheet, Text, View } from "react-native";
+import TabView from "react-native-bottom-tabs";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { SymbolViewProps } from "expo-symbols";
 import type { PhoneConnection } from "../connection";
 import { onFocusTap } from "../focus";
 import { type as face, useTheme } from "../theme";
-import { Button, CircleButton, Glass, Icon, SheetBar } from "../ui";
+import { Button, CircleButton, SheetBar } from "../ui";
 import { useMidna } from "../useMidna";
 import { Approvals } from "./Approvals";
 import { Chat } from "./Chat";
-import { ModelSheet, modelNow, useModels } from "./Models";
+import { useModels } from "./Models";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
 import { preview } from "../preview";
@@ -23,20 +25,26 @@ const asked = ((t) => (preview && typeof t === "string" ? t : ""))(Platform.OS =
 const firstTab: Tab = asked === "today" || asked === "vault" ? asked : "chat";
 const firstSheet: Sheet = asked === "approvals" || asked === "settings" ? asked : null;
 
-const TABS: Record<Tab, { name: string; icon: SymbolViewProps["name"] }> = {
+const TABS: Record<Tab, { name: string; icon: Extract<SymbolViewProps["name"], string> }> = {
   chat: { name: "Chat", icon: "bubble.left.fill" },
   today: { name: "Today", icon: "calendar" },
   vault: { name: "Vault", icon: "key.fill" },
 };
+const ROUTES = (Object.keys(TABS) as Tab[]).map((key) => ({ key, title: TABS[key].name, focusedIcon: { sfSymbol: TABS[key].icon }, testID: `tab-${key}` }));
 
-/** The tab capsule's height, and how far it stands off the bottom of the screen. */
-const BAR = 60;
-const barBottom = (inset: number) => Math.max(inset - 12, 10);
+/** What the system's tab bar covers at the foot of a screen: its own height, and how far it floats off the bottom edge. */
+const BAR = 62;
+const barBottom = (inset: number) => Math.max(inset - 13, 8);
+
+/** A colour of the theme with no opacity, for a fade to nothing that doesn't pass through grey. */
+const clear = (hex: string) => `rgba(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)}, 0)`;
 
 /**
- * Paired. A bar with midna's name between two round buttons (what waits for
- * a yes, and Settings: both open as sheets), the screen, and Chat, Today and
- * Vault in a capsule that floats over its foot.
+ * Paired. The system's own tab bar (Chat, Today, Vault: Liquid Glass on
+ * iOS 26, floating over the foot of the screen), and over the top a clear
+ * bar with midna's name between two glass buttons (what waits for a yes,
+ * and Settings: both open as sheets). Each screen runs under both, so the
+ * glass has something to bend.
  */
 export function Main({ connection, onPairAgain, onUnpaired }: { connection: PhoneConnection; onPairAgain: () => void; onUnpaired: () => void }) {
   const t = useTheme();
@@ -44,8 +52,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
   const midna = useMidna(connection);
   const [tab, setTab] = useState<Tab>(firstTab);
   const [sheet, setSheet] = useState<Sheet>(firstSheet);
-  const [picking, setPicking] = useState(false);
-  const models = useModels(midna, picking || sheet === "settings");
+  // Every brain's list is asked for at once: the model's menu is the system's, and opens without telling us.
+  const models = useModels(midna, true);
   // A shield's "Ask midna" opens Screen Time's lift, which asks why.
   const [focusAsk, setFocusAsk] = useState(0);
   useEffect(() => {
@@ -57,7 +65,6 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
   }, []);
   const waiting = [...midna.approvals.values()].filter((a) => a.state === "pending").length;
   const offline = midna.link === "lost";
-  const model = modelNow(midna, models);
 
   if (midna.link === "unpaired") {
     return (
@@ -69,16 +76,41 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
     );
   }
 
-  // What the screen under the floating capsule must leave clear at its foot.
+  // What a screen must leave clear: under the bar at its top, and over the tab bar at its foot.
+  const head = insets.top + 54;
   const foot = barBottom(insets.bottom) + BAR + 8;
   // How the bar says midna stands, when that is worth saying.
   const standing = offline ? "Offline" : midna.link === "connecting" ? "Connecting…" : midna.thinking ? "Thinking…" : null;
   const bg = tab === "chat" ? t.paper : t.ground;
   return (
     <View style={[s.root, { backgroundColor: bg }]}>
-      <View style={[s.header, { paddingTop: insets.top + 2 }]}>
+      <View style={[s.root, { opacity: offline ? 0.5 : 1 }]}>
+        <TabView
+          navigationState={{ index: ROUTES.findIndex((r) => r.key === tab), routes: ROUTES }}
+          onIndexChange={(i) => setTab(ROUTES[i]!.key)}
+          getLazy={() => false}
+          translucent
+          hapticFeedbackEnabled
+          tabBarActiveTintColor={t.accent}
+          tabBarInactiveTintColor={t.ink}
+          tabLabelStyle={{ fontFamily: "SpaceGrotesk-Medium", fontSize: 11 }}
+          getSceneStyle={({ route }) => ({ backgroundColor: route.key === "chat" ? t.paper : t.ground })}
+          renderScene={({ route }) =>
+            route.key === "chat" ? (
+              <Chat midna={midna} connection={connection} head={head} foot={foot} models={models} onOpenApprovals={() => setSheet("approvals")} />
+            ) : route.key === "today" ? (
+              <Today midna={midna} head={head} foot={foot} />
+            ) : (
+              <Vault midna={midna} connection={connection} head={head} foot={foot} />
+            )
+          }
+        />
+      </View>
+      {/* The bar: clear, so what scrolls shows through its glass; a fade behind it keeps the name readable. */}
+      <View pointerEvents="box-none" style={[s.header, { paddingTop: insets.top + 2, opacity: offline ? 0.5 : 1 }]}>
+        <LinearGradient pointerEvents="none" colors={[bg, bg, clear(bg)]} locations={[0, 0.72, 1]} style={[StyleSheet.absoluteFill, s.fade]} />
         <CircleButton testID="open-approvals" icon="hand.raised" label={waiting > 0 ? `Approvals, ${waiting} waiting` : "Approvals"} dot={waiting > 0} onPress={() => setSheet("approvals")} />
-        <View style={s.title}>
+        <View pointerEvents="none" style={s.title}>
           <Text numberOfLines={1} style={[tab === "chat" ? s.wordmark : s.name, { color: t.ink }]}>
             {tab === "chat" ? "midna" : TABS[tab].name}
           </Text>
@@ -90,22 +122,6 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
         </View>
         <CircleButton testID="open-settings" icon="gearshape" label="Settings" onPress={() => setSheet("settings")} />
       </View>
-      <View style={[s.body, { opacity: offline ? 0.5 : 1 }]}>
-        {tab === "chat" && <Chat midna={midna} connection={connection} foot={foot} model={model} onPickModel={() => setPicking(true)} onOpenApprovals={() => setSheet("approvals")} />}
-        {tab === "today" && <Today midna={midna} foot={foot} />}
-        {tab === "vault" && <Vault midna={midna} connection={connection} foot={foot} />}
-      </View>
-      <View pointerEvents="box-none" style={[s.dock, { bottom: barBottom(insets.bottom) }]}>
-        <Glass lifted style={s.tabs}>
-          {(Object.keys(TABS) as Tab[]).map((k) => (
-            <Pressable key={k} testID={`tab-${k}`} accessibilityRole="tab" accessibilityLabel={TABS[k].name} accessibilityState={{ selected: tab === k }} onPress={() => setTab(k)} style={[s.tab, tab === k && { backgroundColor: t.fill }]}>
-              <Icon name={TABS[k].icon} size={21} color={tab === k ? t.accent : t.ink} />
-              <Text style={[s.tabText, { color: tab === k ? t.accent : t.ink }]}>{TABS[k].name}</Text>
-            </Pressable>
-          ))}
-        </Glass>
-      </View>
-      <ModelSheet midna={midna} models={models} open={picking} onClose={() => setPicking(false)} />
       <Modal visible={sheet === "approvals"} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setSheet(null)}>
         <View style={[s.root, { backgroundColor: t.ground }]}>
           <SheetBar title="Approvals" testID="approvals-done" onDone={() => setSheet(null)} />
@@ -123,16 +139,13 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
 
 const s = StyleSheet.create({
   root: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
+  header: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
+  // Solid behind the name, then fading out past the bar, so what scrolls is never cut at a line nor read through the name.
+  fade: { bottom: -22 },
   title: { flex: 1, alignItems: "center", justifyContent: "center", height: 44 },
   wordmark: { ...face(22, "bold"), letterSpacing: -0.4 },
   name: face(17, "bold"),
   standing: { ...face(11), marginTop: -1 },
-  body: { flex: 1 },
-  dock: { position: "absolute", left: 0, right: 0, alignItems: "center" },
-  tabs: { flexDirection: "row", height: BAR, borderRadius: BAR / 2, padding: 4, gap: 2, overflow: "hidden" },
-  tab: { width: 86, height: BAR - 8, borderRadius: (BAR - 8) / 2, alignItems: "center", justifyContent: "center", gap: 3 },
-  tabText: face(11, "medium"),
   gone: { paddingHorizontal: 24, gap: 16 },
   goneTitle: face(28, "bold", 34),
   goneText: face(16, "regular", 22),
