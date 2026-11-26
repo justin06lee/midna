@@ -3,7 +3,7 @@ import { hostname, homedir, platform, release } from "node:os";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Store } from "@midna/core";
-import { Assistant, type Brain } from "@midna/agent";
+import { Assistant, kogCommand, ledgerWatch, type Brain } from "@midna/agent";
 import { MAX_ATTACHMENT_BYTES, OPS, UNSENT_ATTACHMENT_TTL_MS, type BridgeSetupResult, type Op } from "@midna/protocol";
 import { Bridges } from "./bridges.ts";
 import { PermissionDesk } from "./permissions.ts";
@@ -51,6 +51,11 @@ export interface DaemonOptions {
    * name: the program hosting it says what a bridge is and how to launch it.
    */
   bridgeSetups?: Record<string, BridgeSetup>;
+  /**
+   * The user's ledger's CLI (King of Greed's `kog`), for tests (null: none); otherwise ~/.local/bin/kog, used
+   * once `kog status` says it is set up. Not looked for when a brain is injected.
+   */
+  ledger?: string | null;
   /** The vault's settings, for tests (null: no vault); otherwise ghostly's install on this host, as config.json's "vault" adjusts it. */
   vault?: VaultSettings | null;
   /** The HTTPS address /healthz advertises, for tests (null: none); otherwise whatever `tailscale serve` proxies to this port. */
@@ -148,11 +153,14 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     onEnded: () => tickSoon(),
   });
 
+  // The user's ledger: looked for on a real host, and wherever a test names one.
+  const ledger = ledgerWatch(opts.ledger !== undefined ? opts.ledger : opts.brain ? null : kogCommand(homedir()));
   const assistant = new Assistant({
     store,
     hands,
     env: { hostName: hostname(), platform: `${platform()} ${release()}`, workspace: p.workspace, home: homedir() },
     mcp: { url: (episode) => `${base}/mcp/${episode}`, token: mcpToken },
+    ledger: { command: ledger, url: `${base}/mcp-kog` },
     ...(opts.brain ? { brain: opts.brain } : {}),
     ...(opts.coalesceMs !== undefined ? { coalesceMs: opts.coalesceMs } : {}),
     approve: (req, ctx) => hermesApproval(hands, hostDevice, req, ctx),
@@ -174,6 +182,7 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
     jobs,
     workspace: p.workspace,
     mcpToken,
+    ledger,
     https: opts.https !== undefined ? async () => opts.https ?? null : tailnetHttps(port),
     vault: vault ?? ("missing" in found ? found.missing : "there's no vault here"),
     reloadBridges: () => bridges.sync(loadConfig(home).bridges),
@@ -276,6 +285,8 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<RunningDaem
   console.log(`  home      ${home}`);
   console.log(`  brain     ${s.model} (${s.mode})`);
   console.log(`  timezone  ${s.timezone}`);
+  // Asked now, so the first turn doesn't wait on it, and said once it is found.
+  void ledger().then((kog) => kog && console.log(`[midna] ledger: King of Greed, through ${kog}`));
   if (recovered.resumed) console.log(`  recovered ${recovered.resumed} interrupted wakeup(s)`);
   if (recovered.gaveUp.length)
     console.error(`[midna] gave up on wakeup(s) ${recovered.gaveUp.map((id) => `#${id}`).join(", ")}: restarts cut their turn short too often`);

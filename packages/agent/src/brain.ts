@@ -33,6 +33,11 @@ export interface BrainRun {
   resume?: string;
   cwd: string;
   mcp: { url: string; token: string };
+  /**
+   * The user's ledger (kog), when it is set up here: a second MCP server beside midna's. Claude Code starts
+   * `<command> mcp` itself over stdio; the other harnesses take only HTTP servers and get the daemon's bridge at `url`.
+   */
+  ledger?: { command: string; url: string };
   /** "autonomous" lets every tool run; "ask" lets only read-only and midna's own tools run. */
   mode: "autonomous" | "ask";
   /** A tool call starting, with a few words on what it is for ("Bash", "npm run build"). */
@@ -285,7 +290,8 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
   // midna's own tools pass in ask mode: they touch midna's state, or — the device_* tools —
   // are gated by the daemon itself, which knows each device's toggles and what counts as acting.
   const askPolicy: PermissionHandler = async (req) =>
-    ASK_MODE_SAFE.has(req.toolName) || req.toolName.startsWith("mcp__midna__")
+    // The ledger's tools pass too: it is the user's own book, kept at their word.
+    ASK_MODE_SAFE.has(req.toolName) || req.toolName.startsWith("mcp__midna__") || req.toolName.startsWith("mcp__kog__")
       ? { behavior: "allow" }
       : { behavior: "deny", message: ASK_MODE_DENIAL };
   const session = new AgentSession({
@@ -298,7 +304,11 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
       systemPrompt: run.systemPrompt,
       ...(run.resume ? { resume: run.resume } : {}),
       // alwaysLoad: midna's tools are its core abilities — never defer them behind tool search.
-      mcpServers: { midna: { type: "http", url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, alwaysLoad: true } as never },
+      mcpServers: {
+        midna: { type: "http", url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, alwaysLoad: true },
+        // The user's ledger: Claude Code starts `kog mcp` itself, and stops it with the turn.
+        ...(run.ledger ? { kog: { type: "stdio", command: run.ledger.command, args: ["mcp"] } } : {}),
+      } as never,
       // The account: CLAUDE_CONFIG_DIR set for personal, unset (whatever midna was started with) for work.
       env: { MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT), ...claudeEnv(account) },
       ...(run.mode === "autonomous" ? { permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true } : {}),
@@ -358,7 +368,7 @@ async function runClaude(run: BrainRun, model: string | undefined): Promise<Brai
         for (const block of msg.message.content) {
           if (block.type === "tool_use") {
             toolCalls++;
-            run.onActivity?.(block.name.replace(/^mcp__midna__/, ""), toolDetail(block.input));
+            run.onActivity?.(block.name.replace(/^mcp__midna__/, "").replace(/^mcp__kog__/, "kog "), toolDetail(block.input));
           }
         }
       }
@@ -425,7 +435,7 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
     decide: async (req) => {
       if (run.mode === "autonomous") return "allow";
       // As for Claude: the daemon gates midna's device tools itself.
-      if (req.server === "midna" || req.kind === "read" || req.kind === "search" || req.kind === "fetch") return "allow";
+      if (req.server === "midna" || req.server === "kog" || req.kind === "read" || req.kind === "search" || req.kind === "fetch") return "allow";
       return "deny";
     },
   };
@@ -438,7 +448,10 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
     appName: "midna",
     permissions,
     // device_* and job tools can outlast Codex's 60 s default per tool call
-    mcpServers: { midna: { url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, toolTimeoutSec: TOOL_TIMEOUT_SEC } },
+    mcpServers: {
+      midna: { url: run.mcp.url, headers: { authorization: `Bearer ${run.mcp.token}` }, toolTimeoutSec: TOOL_TIMEOUT_SEC },
+      ...(run.ledger ? { kog: { url: run.ledger.url, headers: { authorization: `Bearer ${run.mcp.token}` }, toolTimeoutSec: TOOL_TIMEOUT_SEC } } : {}),
+    },
     ...(providerId === "codex" && run.mode === "autonomous"
       ? { native: { sandbox: "danger-full-access", approvalPolicy: "never" } }
       : {}),
@@ -454,7 +467,7 @@ async function runHarness(run: BrainRun, providerId: string, model: string | und
       if (ev.type === "text" && !ev.thread) reply += ev.text;
       else if (ev.type === "tool_call" && !ev.thread && ev.status === "started") {
         toolCalls++;
-        run.onActivity?.(ev.name.replace(/^(mcp__midna__|midna[.:/])/, ""), ev.title ?? toolDetail(ev.input));
+        run.onActivity?.(ev.name.replace(/^(mcp__midna__|midna[.:/])/, "").replace(/^(mcp__kog__|kog[.:/])/, "kog "), ev.title ?? toolDetail(ev.input));
         reply = ""; // the reply is what comes after the last tool call
       } else if (ev.type === "done") {
         sessionCostUsd = ev.costUsd;

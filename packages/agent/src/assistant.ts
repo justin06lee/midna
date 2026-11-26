@@ -16,6 +16,11 @@ export interface AssistantOptions {
   env: Environment;
   /** The MCP endpoint for an episode, and the token that opens it. */
   mcp: { url: (episodeId: number) => string; token: string };
+  /**
+   * The user's ledger (kog), asked before each turn: its CLI when it is set up here (ledgerWatch), and the
+   * daemon's HTTP bridge to it for the brains that can't start a stdio server. Left out, there is no ledger.
+   */
+  ledger?: { command: () => Promise<string | null>; url: string };
   brain?: Brain;
   /** How many model sessions may run at once (subscriptions have rate limits). */
   concurrency?: number;
@@ -500,10 +505,12 @@ export class Assistant {
       // Hermes keeps its own memory, state and persona: it gets the turn itself, and a word on where it comes from.
       const hermes = isHermes(e.model);
       const approve = opts.approve;
+      // The ledger's tools go to the brains that take a second MCP server; Hermes keeps its own.
+      const kog = hermes ? null : ((await opts.ledger?.command().catch(() => null)) ?? null);
       try {
         const result = await this.brain({
           prompt: hermes ? e.prompt : `${e.prompt}\n\n${stateNote(renderNow(store, now), state, e.resume ? this.stateSeen.get(e.resume) : undefined)}`,
-          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0, vault: hasGhostly(opts.env.home), midTurn: midTurnBrain(e.model) }),
+          systemPrompt: hermes ? hermesInstructions(e.kind) : systemPrompt(settings, opts.env, { pinned: pinnedFacts(store), hands: devices.length > 0, vault: hasGhostly(opts.env.home), ledger: kog !== null, midTurn: midTurnBrain(e.model) }),
           ...(e.files?.length ? { files: e.files } : {}),
           ...(approve ? { onApproval: (req: { summary: string; tool?: string }) => approve(req, { episodeId, signal: abort.signal }) } : {}),
           model: e.model,
@@ -511,6 +518,7 @@ export class Assistant {
           resume: e.resume,
           cwd: opts.env.workspace,
           mcp: { url: opts.mcp.url(episodeId), token: opts.mcp.token },
+          ...(kog && opts.ledger ? { ledger: { command: kog, url: opts.ledger.url } } : {}),
           mode: settings.mode,
           signal: abort.signal,
           ...(e.turn?.inbox ? { inbox: e.turn.inbox } : {}),

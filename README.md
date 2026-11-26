@@ -61,6 +61,8 @@ The app has five views (the iPhone app has Chat, Today and Vault as tabs, with A
 
 **Where you are:** turn on Location in the iPhone app's Settings, and your phone sends midna its precise location as you move (iOS pauses the GPS while you sit still), when you arrive at or leave a saved place (home, the office, …), and whenever midna asks. The points go only to your midna, which keeps every one. midna's tools answer where you are (asking the phone for a fresh fix if need be), how old that fix is, where you've been, and manage the places. See [docs/location.md](docs/location.md).
 
+**Money:** where [King of Greed](https://github.com/justin06lee/king-of-greed)'s `kog` is installed and set up on midna's host, midna keeps your ledger with you: say "5,600원 starbucks" and it is logged, ask what you spent on coffee and it reads the ledger, and it watches budgets, riba, purification and zakat ([docs/ledger.md](docs/ledger.md)). Without `kog`, nothing of this shows.
+
 **Alarms:** ask midna to wake you, and it sets an alarm on your iPhone that rings like the Clock app's, through silent mode and a Focus (iOS 26). midna holds the list, the phone carries it out and tells midna what iOS holds, so midna knows the alarm will really ring. See [docs/alarms.md](docs/alarms.md).
 
 **Screen Time:** on your iPhone you pick the apps that eat your day; midna holds the rules for them (a shield now, or in daily windows, and what the shield offers instead), the phone carries them out, and a lift needs your stated reason. Coarse daily minutes come back to midna for the morning brief and evening review. It needs Apple's Family Controls entitlement for TestFlight, so it stays out of builds until `MIDNA_FOCUS=1`. See [docs/screen-time.md](docs/screen-time.md).
