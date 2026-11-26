@@ -33,7 +33,8 @@ A "Money" section, only when the ledger is on: log spending the user mentions wi
 
 Where the ledger is on, the iPhone app has a **Money** tab and the Mac app a **Money** item in its sidebar (⌘6). On a host without a ledger neither shows: `GET /v1/status` says `ledger: true` or `false`.
 
-![The Money tab on the iPhone](ledger/phone-dark.png)
+![The Money tab in the iPhone simulator, dark and light](ledger/phone-simulator.png)
+![The whole Money tab, scrolled, in the browser preview](ledger/phone-dark.png)
 ![The Money view on the Mac](ledger/mac-dark.png)
 
 What it shows, top to bottom: net worth with what was spent and earned this month; each budget with what is left and a bar (the accent once it has run over); accounts and their balances; who owes whom; where the month's spending went, by category; interest still to give away and where zakat stands ("the ledger works these out; the ruling is yours"); then the latest entries by day. A ledger with no account and no entry says so, and what to tell midna ([picture](ledger/empty.png)).
