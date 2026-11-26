@@ -1,8 +1,9 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleLedgerMcp, kogCommand, ledgerWatch } from "../src/ledger.ts";
+import { handleLedgerMcp, kogCommand, LedgerError, ledgerReader, ledgerWatch, readLedger } from "../src/ledger.ts";
+import { fakeLedger } from "./fake-ledger.ts";
 
 const FAKE = join(import.meta.dir, "fake-kog.ts");
 const root = mkdtempSync(join(tmpdir(), "midna-ledger-"));
@@ -94,5 +95,93 @@ describe("the ledger over HTTP, for the brains that can't start `kog mcp` themse
     writeFileSync(broken, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     const res = await handleLedgerMcp(new Request("http://midna/mcp-kog", { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) }), broken);
     expect(((await res.json()) as { error?: unknown }).error).toBeDefined();
+  });
+});
+
+describe("reading the ledger for the apps", () => {
+  const seeded = () => {
+    const file = join(tmpdir(), `midna-fake-ledger-${process.pid}-${Math.random().toString(36).slice(2)}.json`);
+    writeFileSync(file, JSON.stringify(fakeLedger()));
+    return file;
+  };
+  const env = (vars: Record<string, string | undefined>) => {
+    for (const [k, v] of Object.entries(vars)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  };
+  afterEach(() => env({ FAKE_KOG_LEDGER: undefined, FAKE_KOG_FAIL: undefined, FAKE_KOG_STATUS: undefined }));
+
+  test("balances, this month, budgets, interest, zakat and the latest entries, from kog's own commands", async () => {
+    const file = seeded();
+    env({ FAKE_KOG_LEDGER: file });
+    try {
+      const ledger = await readLedger(FAKE, undefined, () => 1234);
+      expect(ledger.name).toBe("midna");
+      expect(ledger.worth).toEqual({ total: 7_646_550, currency: "KRW", missingRates: [] });
+      // kog's own extras (ids, the value in the primary currency) stay behind.
+      expect(ledger.accounts[0]).toEqual({ name: "Toss", kind: "asset", currency: "KRW", balance: 1_842_300 });
+      expect(ledger.accounts.find((a) => a.kind === "owed")).toEqual({ name: "Minjun", kind: "owed", currency: "KRW", balance: 35_000, person: "Minjun" });
+      expect(ledger.owed).toEqual([{ person: "Minjun", amount: 35_000, currency: "KRW" }]);
+      expect(ledger.month).toMatchObject({ month: "2026-11", count: 41, spent: { KRW: 612_400, USD: 20 }, earned: { KRW: 2_400_000 } });
+      expect(ledger.month.categories[0]).toEqual({ name: "Food", currency: "KRW", amount: 248_600 });
+      expect(ledger.budgets.find((b) => b.name === "Coffee")).toEqual({ name: "Coffee", limit: 60_000, spent: 61_600, left: -1_600, currency: "KRW" });
+      expect(ledger.riba.toPurify).toEqual({ KRW: 1_240 });
+      expect(ledger.zakat).toEqual({ wealth: 7_646_550, currency: "KRW", nisab: 1_194_102, aboveNisab: true, dueOn: "2027-06-06", daysLeft: 192 });
+      expect(ledger.recent).toHaveLength(12);
+      expect(ledger.recent[0]).toEqual({ id: "41", date: "2026-11-26T13:12:00+09:00", kind: "spend", amount: 5_600, currency: "KRW", description: "Starbucks", account: "Toss", other: "Starbucks", category: "Coffee", via: "midna" });
+      expect(ledger.recent.map((e) => e.date)).toEqual([...ledger.recent.map((e) => e.date)].sort().reverse());
+      expect(ledger.at).toBe(1234);
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  test("a ledger with nothing in it reads as empty, not as a failure", async () => {
+    const ledger = await readLedger(FAKE);
+    expect(ledger).toMatchObject({ accounts: [], owed: [], budgets: [], recent: [], worth: { total: 0, currency: "KRW" } });
+    expect(ledger.zakat).toEqual({ wealth: 0, currency: "KRW" });
+  });
+
+  test("a part that fails comes empty; without `kog status` there is no view, and the failure says what kog said", async () => {
+    const file = seeded();
+    env({ FAKE_KOG_LEDGER: file, FAKE_KOG_FAIL: "zakat,budget,list" });
+    try {
+      const ledger = await readLedger(FAKE);
+      expect(ledger).toMatchObject({ zakat: null, budgets: [], recent: [] });
+      expect(ledger.accounts).toHaveLength(4);
+      env({ FAKE_KOG_FAIL: "status" });
+      const failed = await readLedger(FAKE).catch((e) => e);
+      expect(failed).toBeInstanceOf(LedgerError);
+      expect((failed as Error).message).toBe("kog: status could not reach the ledger's server");
+      expect(await readLedger(join(tmpdir(), "no-kog-here")).catch((e) => e)).toBeInstanceOf(LedgerError);
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+
+  test("what kog prints is read leniently: a row it garbles is dropped, a field it drops is left out", async () => {
+    const raw = fakeLedger();
+    const ask = async (_: string, args: string[]) =>
+      args[0] === "status"
+        ? { ...raw.status, accounts: [...raw.status.accounts, { name: 7 }], owed: "none" }
+        : args[0] === "list"
+          ? [{ ...raw.list[0], kind: "barter" }, { ...raw.list[1], category: 5 }, null]
+          : (raw as Record<string, unknown>)[args[0]!];
+    const ledger = await readLedger("kog", ask);
+    expect(ledger.accounts).toHaveLength(4);
+    expect(ledger.owed).toEqual([]);
+    expect(ledger.recent.map((e) => [e.id, e.category])).toEqual([["40", undefined]]);
+    await expect(readLedger("kog", async () => ({ nothing: "kog would print" }))).rejects.toBeInstanceOf(LedgerError);
+  });
+
+  test("the apps' reads are remembered a few seconds, one read at a time, and `fresh` reads again", async () => {
+    let reads = 0;
+    let clock = 0;
+    const read = ledgerReader(async () => ({ ...(await readLedger("kog", async (_, args) => (fakeLedger() as Record<string, unknown>)[args[0]!])), at: ++reads }), 10_000, () => clock);
+    const [a, b] = await Promise.all([read("kog"), read("kog")]);
+    expect([a.at, b.at, reads]).toEqual([1, 1, 1]);
+    clock = 9_000;
+    expect((await read("kog")).at).toBe(1);
+    expect((await read("kog", true)).at).toBe(2);
+    clock = 30_000;
+    expect((await read("kog")).at).toBe(3);
   });
 });

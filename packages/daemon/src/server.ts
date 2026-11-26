@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, accountEmails, brainModels, checkModel, handleLedgerMcp, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
+import { QUEUE_PREFIX, accountEmails, brainModels, checkModel, handleLedgerMcp, handleMcp, LedgerError, ledgerReader, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
   Account,
   AlarmReport,
@@ -42,6 +42,7 @@ import {
   SERVICE_KIND,
   type AlarmsState,
   type FocusRules,
+  type Ledger,
   type LocationReceipt,
   type LocationToken,
   type MessageReceipt,
@@ -195,7 +196,14 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     await next();
   });
 
+  // Whether the host keeps a ledger, as last found: asked again behind each status, never waited for
+  // (a first `kog status` can take seconds).
+  let ledgerHere = false;
+  const lookForLedger = () => void deps.ledger?.().then((kog) => (ledgerHere = kog !== null), () => {});
+  lookForLedger();
+
   const status = (): Status => {
+    lookForLedger();
     const s = store.settings();
     return {
       version: VERSION,
@@ -222,6 +230,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
       accounts: accountEmails(),
       alerts: s.alerts,
       push: { configured: deps.push?.configured ?? false, phones: deps.push?.phones() ?? 0 },
+      ledger: ledgerHere,
     };
   };
 
@@ -764,6 +773,20 @@ export function createApp(deps: ServerDeps): Hono<Env> {
         source: e.source, status: e.status === "tentative" ? "tentative" : "confirmed", updated_at: e.updated_at,
       })),
     );
+  });
+
+  // ── the user's money: what King of Greed holds, for the apps' Money view. Reading only: an entry is made by
+  // telling midna, whose brain has kog's own tools. For the user's own devices, like the vault. ──
+  const readLedger = ledgerReader();
+  app.get("/v1/ledger", async (c) => {
+    if (!["desktop", "mobile", "cli"].includes(c.get("device").kind)) return c.json({ error: "the ledger opens on your own devices only" }, 403);
+    const kog = await deps.ledger?.();
+    if (!kog) return c.json({ error: "there's no ledger here: King of Greed (kog) isn't set up on midna's host" }, 503);
+    try {
+      return c.json<Ledger>(await readLedger(kog, c.req.query("fresh") === "1"));
+    } catch (err) {
+      return c.json({ error: `the ledger didn't answer: ${err instanceof LedgerError ? err.message : (err as Error).message}` }, 502);
+    }
   });
 
   app.get("/v1/events", (c) => {

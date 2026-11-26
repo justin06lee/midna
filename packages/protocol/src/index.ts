@@ -13,6 +13,8 @@ export * from "./permissions.ts";
 export * from "./alarms.ts";
 export * from "./focus.ts";
 export * from "./models.ts";
+export * from "./ledger.ts";
+import { LEDGER_TIMEOUT_MS, type Ledger } from "./ledger.ts";
 import type { FocusLiftAsk, FocusReport, FocusRules, FocusRulesPatch, FocusState } from "./focus.ts";
 import type { Alarm, AlarmReport, AlarmSet, AlarmsState } from "./alarms.ts";
 import type { AskedPermission, PermissionAsk } from "./permissions.ts";
@@ -457,6 +459,8 @@ export interface Status {
   alerts?: AlertChannel;
   /** Push notifications: whether the host has an APNs key, and how many phones are registered. From 0.13. */
   push?: { configured: boolean; phones: number };
+  /** Whether the host keeps the user's ledger (King of Greed), which GET /v1/ledger reads. After 0.13.10. */
+  ledger?: boolean;
 }
 
 /** What started a turn: a chat, or a wakeup — midna's own follow-up, an event from another program, a job's end, a ritual. */
@@ -714,6 +718,14 @@ export class MidnaClient {
   /** Calendar blocks overlapping [from, to) (epoch ms, at most 31 days), in order. After 0.13.7: an older host answers 404. */
   calendar(from: number, to: number, signal?: AbortSignal): Promise<CalendarBlock[]> {
     return this.call("GET", `/v1/calendar?from=${Math.floor(from)}&to=${Math.floor(to)}`, undefined, signal);
+  }
+  /**
+   * The user's money, as King of Greed on midna's host holds it: balances, this month, budgets, zakat and the
+   * latest entries. 503 where the host keeps no ledger; `fresh` reads past the host's short memory of the last
+   * answer. After 0.13.10: an older host answers 404.
+   */
+  ledger(fresh = false, signal?: AbortSignal): Promise<Ledger> {
+    return this.call("GET", `/v1/ledger${fresh ? "?fresh=1" : ""}`, undefined, signal, undefined, LEDGER_TIMEOUT_MS);
   }
   devices(): Promise<DeviceInfo[]> {
     return this.call("GET", "/v1/devices");

@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Brain, BrainRun } from "@midna/agent";
 import { startDaemon } from "@midna/daemon";
 import { MidnaClient, type Connection } from "@midna/protocol";
+import { emptyLedger, fakeLedger } from "../packages/agent/test/fake-ledger.ts";
 
 /**
  * A throwaway midna to look at the interface against: its own home in a
@@ -14,6 +15,10 @@ import { MidnaClient, type Connection } from "@midna/protocol";
  * opens the dev server's preview (`bun run dev`) connected to it:
  *
  *   bun run preview                   # then open the link it prints
+ *
+ * Its ledger is a stand-in for King of Greed (packages/agent/test/fake-kog.ts)
+ * with a month of entries in it; PREVIEW_LEDGER=empty has nothing in it yet,
+ * PREVIEW_LEDGER=none is a host without one.
  *
  * Nothing here touches the real midna. Ctrl-C stops it and removes its home.
  */
@@ -117,7 +122,11 @@ function seedDay(store: Awaited<ReturnType<typeof startDaemon>>["store"]) {
 }
 
 const home = mkdtempSync(join(tmpdir(), "midna-preview-"));
-const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null });
+// The stand-in kog reads its answers from this file, named in the environment it is started with.
+const ledger = process.env.PREVIEW_LEDGER === "none" ? null : join(import.meta.dir, "../packages/agent/test/fake-kog.ts");
+process.env.FAKE_KOG_LEDGER = join(home, "ledger.json");
+writeFileSync(process.env.FAKE_KOG_LEDGER, JSON.stringify(process.env.PREVIEW_LEDGER === "empty" ? emptyLedger() : fakeLedger(new Date())));
+const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null, ledger });
 daemon.store.updateSettings({ quietHours: null });
 seedDay(daemon.store);
 const host = new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim());
