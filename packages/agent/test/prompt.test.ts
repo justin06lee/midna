@@ -46,6 +46,21 @@ describe("systemPrompt", () => {
     expect(bare).not.toContain("# The user's computers");
   });
 
+  test("says how to keep the user's money only where their ledger is set up", () => {
+    const withLedger = systemPrompt(settings, env, { ledger: true });
+    expect(withLedger).toContain("# Money");
+    expect(withLedger).toContain("King of Greed");
+    expect(withLedger).toContain('"5,600원 starbucks"');
+    expect(withLedger).toContain("Never invent an entry");
+    expect(withLedger).toContain("riba");
+    expect(withLedger).toContain("In the morning brief and the evening review, add one line on the month's spending so far against the budgets, and only when there is something worth saying");
+    // Byte for byte the same whenever it is there, so the prompt cache keeps it.
+    expect(systemPrompt(settings, env, { ledger: true })).toBe(withLedger);
+    const without = systemPrompt(settings, env);
+    expect(without).not.toContain("King of Greed");
+    expect(without).not.toContain("kog");
+  });
+
   test("tells how to get at passwords only where ghostly is installed", () => {
     const withVault = systemPrompt(settings, env, { vault: true });
     expect(withVault).toContain("# Passwords and secrets\n");

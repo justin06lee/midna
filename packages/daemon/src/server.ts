@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
 import { arch, hostname, platform } from "node:os";
 import { HOUR, MAIN, DAY, fmt, type Device, type Store } from "@midna/core";
-import { QUEUE_PREFIX, accountEmails, brainModels, checkModel, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
+import { QUEUE_PREFIX, accountEmails, brainModels, checkModel, handleLedgerMcp, handleMcp, handleVaultMcp, installedBrains, type Assistant, type JobsHandle } from "@midna/agent";
 import {
   Account,
   AlarmReport,
@@ -59,6 +59,8 @@ import { VERSION } from "./version.ts";
 export interface ServerDeps {
   store: Store;
   assistant: Assistant;
+  /** The user's ledger's CLI (kog) when it is set up on this host, else null; left out where there is none to look for. */
+  ledger?: () => Promise<string | null>;
   /** Per-run secret that opens /mcp — only midna's own brain sessions hold it. */
   mcpToken: string;
   /** Re-read config and restart bridges. */
@@ -160,6 +162,14 @@ export function createApp(deps: ServerDeps): Hono<Env> {
     if (paired.replaced) deps.hands.disconnect(paired.replaced);
     console.log(`[midna] paired ${req.data.kind} "${req.data.deviceName}" (${paired.device.id})${paired.replaced ? `, retiring ${paired.replaced}` : ""}`);
     return c.json<PairResponse>({ deviceId: paired.device.id, token: paired.token, name: store.settings().name, daemonKey: deps.hands.publicKey, replaced: paired.replaced });
+  });
+
+  // ── the user's ledger (kog), for the brains that take only HTTP MCP servers: behind the same per-run token ──
+  app.all("/mcp-kog", async (c) => {
+    if (!safeEqual(bearer(c), deps.mcpToken)) return c.json({ error: "unauthorized" }, 401);
+    const command = await deps.ledger?.();
+    if (!command) return c.json({ error: "there's no ledger here: kog isn't installed and set up on this host" }, 503);
+    return handleLedgerMcp(c.req.raw, command);
   });
 
   // ── midna's own tools, for its brain sessions only ───────────────────

@@ -3,6 +3,7 @@ export { ACCOUNTS, accountEmails, capKey, claudeConfigDir, otherAccount, usableA
 export { yagamiBrain, resolveModel, checkModel, installedBrains, BrainError, type Brain, type BrainRun, type BrainResult, type TurnUsage } from "./brain.ts";
 export { brainModels } from "./models.ts";
 export { handleMcp } from "./mcp.ts";
+export { handleLedgerMcp, kogCommand, ledgerWatch } from "./ledger.ts";
 export { handleVaultMcp, createVaultServer, type VaultLookup } from "./vaultTools.ts";
 export { createToolServer, type ToolContext } from "./tools.ts";
 export type { HandsHandle, HandsRequest, HandsOutcome } from "./hands.ts";
