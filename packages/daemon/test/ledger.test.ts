@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -7,7 +7,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { BrainRun } from "@midna/agent";
 import { MidnaClient, type MidnaError } from "@midna/protocol";
 import { startDaemon, type RunningDaemon } from "../src/index.ts";
-import { fakeLedger } from "../../agent/test/fake-ledger.ts";
 
 /**
  * The user's ledger (King of Greed), against a stand-in for its CLI
@@ -104,21 +103,18 @@ describe("a midna whose host has no ledger", () => {
 });
 
 describe("the ledger, for the apps' Money view", () => {
-  const seed = join(tmpdir(), `midna-ledger-seed-${process.pid}.json`);
   const paired = async (daemon: RunningDaemon, home: string, kind: "desktop" | "mobile" | "bridge") => {
     const host = new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim());
     const { token } = await new MidnaClient(daemon.url).pair({ code: (await host.pairingCode()).code, deviceName: kind, kind });
     return { host, client: new MidnaClient(daemon.url, token) };
   };
   afterAll(() => {
-    rmSync(seed, { force: true });
     delete process.env.FAKE_KOG_LEDGER;
     delete process.env.FAKE_KOG_FAIL;
   });
 
   test("the user's own devices read it; a bridge and the host's own token don't; status says it is there", async () => {
-    writeFileSync(seed, JSON.stringify(fakeLedger()));
-    process.env.FAKE_KOG_LEDGER = seed;
+    process.env.FAKE_KOG_LEDGER = "sample";
     const m = await midnaWith(FAKE);
     try {
       const { host, client: phone } = await paired(m.daemon, m.home, "mobile");

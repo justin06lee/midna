@@ -6,7 +6,6 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Brain, BrainRun } from "@midna/agent";
 import { startDaemon } from "@midna/daemon";
 import { MidnaClient, type Connection } from "@midna/protocol";
-import { emptyLedger, fakeLedger } from "../packages/agent/test/fake-ledger.ts";
 
 /**
  * A throwaway midna to look at the interface against: its own home in a
@@ -122,10 +121,10 @@ function seedDay(store: Awaited<ReturnType<typeof startDaemon>>["store"]) {
 }
 
 const home = mkdtempSync(join(tmpdir(), "midna-preview-"));
-// The stand-in kog reads its answers from this file, named in the environment it is started with.
+// The stand-in kog answers with the ledger its environment names: a month ending today, or nothing yet.
 const ledger = process.env.PREVIEW_LEDGER === "none" ? null : join(import.meta.dir, "../packages/agent/test/fake-kog.ts");
-process.env.FAKE_KOG_LEDGER = join(home, "ledger.json");
-writeFileSync(process.env.FAKE_KOG_LEDGER, JSON.stringify(process.env.PREVIEW_LEDGER === "empty" ? emptyLedger() : fakeLedger(new Date())));
+if (process.env.PREVIEW_LEDGER === "empty") delete process.env.FAKE_KOG_LEDGER;
+else process.env.FAKE_KOG_LEDGER = "sample-today";
 const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null, ledger });
 daemon.store.updateSettings({ quietHours: null });
 seedDay(daemon.store);
