@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Connection, Overview } from "@midna/protocol";
 import { draftKey } from "../drafts";
 import { enableNotifications, inApp, macTitleBar, onNotificationOpen, openTerminal, setHandsPaused } from "../host";
@@ -8,25 +8,28 @@ import { ModelMenu } from "../ModelMenu";
 import { Banner, Button, Icon, Loading, Mark } from "../ui";
 import { useMidna } from "../useMidna";
 import { Chat } from "./Chat";
+import { Money } from "./Money";
 import { Computer } from "./Computer";
 import { Objectives } from "./Objectives";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
 import { Vault } from "./Vault";
 
-type View = "chat" | "today" | "goals" | "vault" | "computer" | "settings";
+type View = "chat" | "today" | "goals" | "vault" | "money" | "computer" | "settings";
 
-const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "key" | "computer" | "settings"; key: string }> = [
+const NAV: Array<{ id: View; label: string; icon: "chat" | "today" | "goals" | "key" | "money" | "computer" | "settings"; key: string }> = [
   { id: "chat", label: "Chat", icon: "chat", key: "1" },
   { id: "today", label: "Today", icon: "today", key: "2" },
   { id: "goals", label: "Objectives", icon: "goals", key: "3" },
   // What midna may do on this computer: only the app can offer that.
   ...(inApp ? [{ id: "computer" as const, label: "This computer", icon: "computer" as const, key: "4" }] : []),
   { id: "vault", label: "Vault", icon: "key", key: "5" },
+  // Shown only where midna's host keeps a ledger.
+  { id: "money", label: "Money", icon: "money", key: "6" },
   { id: "settings", label: "Settings", icon: "settings", key: "," },
 ];
 
-/** Connected: the conversation, the day, the objectives, the vault, the settings. */
+/** Connected: the conversation, the day, the objectives, the vault, the money, the settings. */
 export function Main({ connection, onDisconnect, onUnpaired }: { connection: Connection; onDisconnect: () => void; onUnpaired: () => void }) {
   const m = useMidna(connection);
   const [view, setView] = useState<View>("chat");
@@ -77,11 +80,15 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
     };
   }, [view, m.client, m.changed, overviewTry, connection.host]);
 
+  // Money is in the sidebar only where the host keeps a ledger (King of Greed).
+  const hasLedger = m.status?.ledger === true;
+  const nav = useMemo(() => NAV.filter((n) => n.id !== "money" || hasLedger), [hasLedger]);
+
   // ⌘/Ctrl + 1, 2, 3, comma.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      const hit = NAV.find((n) => n.key === e.key);
+      const hit = nav.find((n) => n.key === e.key);
       if (hit) {
         e.preventDefault();
         setView(hit.id);
@@ -89,7 +96,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [nav]);
 
   const signIn = useCallback(() => {
     const login = (m.status?.brain.loginCommand ?? "claude").split(" ")[0]!;
@@ -127,7 +134,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           <span className="ml-2 text-[15px] font-bold tracking-[-0.01em]">midna</span>
         </div>
         <nav className="space-y-px px-2.5 pt-1">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <button
               key={n.id}
               type="button"
@@ -228,6 +235,7 @@ export function Main({ connection, onDisconnect, onUnpaired }: { connection: Con
           {view === "goals" && overview && <Objectives overview={overview} onDiscuss={discuss} />}
           {view === "computer" && <Computer />}
           {view === "vault" && <Vault client={m.client} draftKey={draftKey(connection)} />}
+          {view === "money" && <Money client={m.client} changed={m.changed} />}
           {view === "settings" && (
             <Settings client={m.client} status={m.status} connection={connection} onStatus={(s) => m.setStatus(s)} onCheckBrain={checkBrain} onSignIn={signIn} onDisconnect={onDisconnect} />
           )}

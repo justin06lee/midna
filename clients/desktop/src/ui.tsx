@@ -191,7 +191,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="px-3 py-2.5 text-[12.5px] text-dim">{children}</p>;
 }
 
-export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause" | "key" | "plus" | "chevron" | "updown" | "stop"; className?: string }) {
+export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | "goals" | "settings" | "send" | "back" | "refresh" | "copy" | "external" | "terminal" | "check" | "cross" | "file" | "image" | "paperclip" | "download" | "folder" | "computer" | "pause" | "key" | "money" | "plus" | "chevron" | "updown" | "stop"; className?: string }) {
   const paths: Record<typeof name, ReactNode> = {
     chat: <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h7A2.5 2.5 0 0 1 16 5.5v5a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" />,
     today: (
@@ -226,6 +226,13 @@ export function Icon({ name, className = "size-4" }: { name: "chat" | "today" | 
       <>
         <circle cx="7" cy="12.5" r="3.25" />
         <path d="m9.4 10.2 6.1-6.1M13.5 6.1l1.9 1.9M11.6 8l1.4 1.4" />
+      </>
+    ),
+    money: (
+      <>
+        <rect x="2.75" y="5.5" width="14.5" height="9" rx="2" />
+        <circle cx="10" cy="10" r="2" />
+        <path d="M5.5 10h.01M14.5 10h.01" />
       </>
     ),
     plus: <path d="M10 4.5v11M4.5 10h11" />,

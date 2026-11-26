@@ -15,6 +15,10 @@ import { MidnaClient, type Connection } from "@midna/protocol";
  *
  *   bun run preview                   # then open the link it prints
  *
+ * Its ledger is a stand-in for King of Greed (packages/agent/test/fake-kog.ts)
+ * with a month of entries in it; PREVIEW_LEDGER=empty has nothing in it yet,
+ * PREVIEW_LEDGER=none is a host without one.
+ *
  * Nothing here touches the real midna. Ctrl-C stops it and removes its home.
  */
 
@@ -117,7 +121,11 @@ function seedDay(store: Awaited<ReturnType<typeof startDaemon>>["store"]) {
 }
 
 const home = mkdtempSync(join(tmpdir(), "midna-preview-"));
-const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null });
+// The stand-in kog answers with the ledger its environment names: a month ending today, or nothing yet.
+const ledger = process.env.PREVIEW_LEDGER === "none" ? null : join(import.meta.dir, "../packages/agent/test/fake-kog.ts");
+if (process.env.PREVIEW_LEDGER === "empty") delete process.env.FAKE_KOG_LEDGER;
+else process.env.FAKE_KOG_LEDGER = "sample-today";
+const daemon = await startDaemon({ home, port: PORT, brain, tickMs: 200, introDelayMs: 50, coalesceMs: 100, https: null, vault: null, ledger });
 daemon.store.updateSettings({ quietHours: null });
 seedDay(daemon.store);
 const host = new MidnaClient(daemon.url, readFileSync(join(home, "host.token"), "utf8").trim());

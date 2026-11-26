@@ -2,7 +2,7 @@
  * A screenshot of the iPhone app in the simulator, against a throwaway midna
  * with a day planned in it (scripts/preview.ts at the repo's root):
  *
- *   bun scripts/sim-shot.ts [--build [--clean]] [--tab today] [--tomorrow approved] [--dark] [out.png]
+ *   bun scripts/sim-shot.ts [--build [--clean]] [--tab today|money|vault] [--tomorrow approved] [--dark] [out.png]
  *
  * --build makes a Release build for the simulator first (prebuild, pods,
  * xcodebuild; Screen Time left out as in TestFlight builds), into
@@ -14,7 +14,7 @@
  *
  * Needs Xcode (DEVELOPER_DIR, the T7's by default) with the iOS platform installed.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 const mobile = join(import.meta.dir, "..");
@@ -66,6 +66,9 @@ if (flag("build")) {
       say("[build 1/2] prebuild and pods");
       run(["bunx", "expo", "prebuild", "-p", "ios", "--clean"], { env: { CI: "1" }, log: join(mobile, "build", "sim-prebuild.log") });
     }
+    // Prebuild writes the node it found by its full path (Homebrew's is versioned), and an upgrade since then leaves it pointing at nothing.
+    const node = Bun.which("node");
+    if (node) writeFileSync(join(mobile, "ios", ".xcode.env.local"), `export NODE_BINARY=${node}\n`);
     say("[build 2/2] xcodebuild, Release for the simulator (several minutes)");
     run(
       ["xcodebuild", "-workspace", "ios/midna.xcworkspace", "-scheme", "midna", "-configuration", "Release", "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator", "-derivedDataPath", "build/DerivedData-sim", "CODE_SIGNING_ALLOWED=NO", "build"],
