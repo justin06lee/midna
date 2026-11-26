@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Settings as RNSettings, StyleSheet, Text, View } from "react-native";
 import TabView from "react-native-bottom-tabs";
 import { LinearGradient } from "expo-linear-gradient";
@@ -12,22 +12,24 @@ import { useMidna } from "../useMidna";
 import { Approvals } from "./Approvals";
 import { Chat } from "./Chat";
 import { useModels } from "./Models";
+import { Money } from "./Money";
 import { Settings } from "./Settings";
 import { Today } from "./Today";
 import { preview } from "../preview";
 import { Vault } from "./Vault";
 
-type Tab = "chat" | "today" | "vault";
+type Tab = "chat" | "today" | "money" | "vault";
 type Sheet = "approvals" | "settings" | null;
 
 /** What a preview launch asks to see (-midnaTab today; preview.ts): a tab, or one of the two sheets. */
 const asked = ((t) => (preview && typeof t === "string" ? t : ""))(Platform.OS === "ios" ? (RNSettings.get("midnaTab") as unknown) : null);
-const firstTab: Tab = asked === "today" || asked === "vault" ? asked : "chat";
+const firstTab: Tab = asked === "today" || asked === "money" || asked === "vault" ? asked : "chat";
 const firstSheet: Sheet = asked === "approvals" || asked === "settings" ? asked : null;
 
 const TABS: Record<Tab, { name: string; icon: Extract<SymbolViewProps["name"], string> }> = {
   chat: { name: "Chat", icon: "bubble.left.fill" },
   today: { name: "Today", icon: "calendar" },
+  money: { name: "Money", icon: "banknote.fill" },
   vault: { name: "Vault", icon: "key.fill" },
 };
 const ROUTES = (Object.keys(TABS) as Tab[]).map((key) => ({ key, title: TABS[key].name, focusedIcon: { sfSymbol: TABS[key].icon }, testID: `tab-${key}` }));
@@ -40,8 +42,9 @@ const barBottom = (inset: number) => Math.max(inset - 13, 8);
 const clear = (hex: string) => `rgba(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)}, 0)`;
 
 /**
- * Paired. The system's own tab bar (Chat, Today, Vault: Liquid Glass on
- * iOS 26, floating over the foot of the screen), and over the top a clear
+ * Paired. The system's own tab bar (Chat, Today, Money, Vault: Liquid Glass
+ * on iOS 26, floating over the foot of the screen; Money only where midna's
+ * host keeps a ledger), and over the top a clear
  * bar with midna's name between two glass buttons (what waits for a yes,
  * and Settings: both open as sheets). Each screen runs under both, so the
  * glass has something to bend.
@@ -63,6 +66,9 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
     });
     return () => sub.remove();
   }, []);
+  // Money is a tab only where the host keeps a ledger; a preview launch that asks for it sees it at once.
+  const hasLedger = midna.status?.ledger === true || firstTab === "money";
+  const routes = useMemo(() => ROUTES.filter((r) => r.key !== "money" || hasLedger), [hasLedger]);
   const waiting = [...midna.approvals.values()].filter((a) => a.state === "pending").length;
   const offline = midna.link === "lost";
 
@@ -86,8 +92,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
     <View style={[s.root, { backgroundColor: bg }]}>
       <View style={[s.root, { opacity: offline ? 0.5 : 1 }]}>
         <TabView
-          navigationState={{ index: ROUTES.findIndex((r) => r.key === tab), routes: ROUTES }}
-          onIndexChange={(i) => setTab(ROUTES[i]!.key)}
+          navigationState={{ index: Math.max(0, routes.findIndex((r) => r.key === tab)), routes }}
+          onIndexChange={(i) => setTab(routes[i]!.key)}
           getLazy={() => false}
           translucent
           hapticFeedbackEnabled
@@ -100,6 +106,8 @@ export function Main({ connection, onPairAgain, onUnpaired }: { connection: Phon
               <Chat midna={midna} connection={connection} head={head} foot={foot} models={models} onOpenApprovals={() => setSheet("approvals")} />
             ) : route.key === "today" ? (
               <Today midna={midna} head={head} foot={foot} />
+            ) : route.key === "money" ? (
+              <Money midna={midna} head={head} foot={foot} />
             ) : (
               <Vault midna={midna} connection={connection} head={head} foot={foot} />
             )
