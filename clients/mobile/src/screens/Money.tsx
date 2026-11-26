@@ -169,7 +169,7 @@ export function Money({ midna, head, foot }: { midna: Midna; head: number; foot:
         </>
       ) : null}
 
-      {ledger.zakat || hadInterest ? (
+      {!ledgerEmpty(ledger) && (ledger.zakat || hadInterest) ? (
         <>
           <GroupTitle>Halal</GroupTitle>
           <Group>

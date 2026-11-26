@@ -51,17 +51,18 @@ make build install && midna setup
 
 ## Using it
 
-The app has five views (the iPhone app has Chat, Today and Vault as tabs, with Approvals and Settings a tap away in its top bar):
+The app has five views, and a sixth where there is a ledger (the iPhone app has Chat, Today, Money and Vault as tabs, with Approvals and Settings a tap away in its top bar):
 
 - **Chat** — everything said on any device, with midna's questions as buttons.
 - **Today** — the calendar, what's due, open promises, and what midna will do on its own.
 - **Objectives** — the goal tree everything hangs from. It is read-only: goals change by talking them through, and each change keeps its reason.
 - **Vault** — your logins in [ghostly](https://github.com/justin06lee/ghostly), by title: add one, change it, show or copy its password (behind Face ID on the phone). With `midna model hermes`, Hermes finds a login by its title and asks you before it uses a password. See [docs/vault.md](docs/vault.md).
+- **Money** — only where midna's host keeps your ledger (below): net worth, the month against its budgets, accounts, who owes what, zakat and interest, and the latest entries. Read-only: an entry is made by telling midna.
 - **Settings** — the brain, the mode, quiet hours, your phone, paired devices, and this computer's appearance (light, dark, or the system's).
 
 **Where you are:** turn on Location in the iPhone app's Settings, and your phone sends midna its precise location as you move (iOS pauses the GPS while you sit still), when you arrive at or leave a saved place (home, the office, …), and whenever midna asks. The points go only to your midna, which keeps every one. midna's tools answer where you are (asking the phone for a fresh fix if need be), how old that fix is, where you've been, and manage the places. See [docs/location.md](docs/location.md).
 
-**Money:** where [King of Greed](https://github.com/justin06lee/king-of-greed)'s `kog` is installed and set up on midna's host, midna keeps your ledger with you: say "5,600원 starbucks" and it is logged, ask what you spent on coffee and it reads the ledger, and it watches budgets, riba, purification and zakat ([docs/ledger.md](docs/ledger.md)). Without `kog`, nothing of this shows.
+**Money:** where [King of Greed](https://github.com/justin06lee/king-of-greed)'s `kog` is installed and set up on midna's host, midna keeps your ledger with you: say "5,600원 starbucks" and it is logged, ask what you spent on coffee and it reads the ledger, and it watches budgets, riba, purification and zakat. Both apps show the ledger in a Money view ([docs/ledger.md](docs/ledger.md)). Without `kog`, nothing of this shows.
 
 **Alarms:** ask midna to wake you, and it sets an alarm on your iPhone that rings like the Clock app's, through silent mode and a Focus (iOS 26). midna holds the list, the phone carries it out and tells midna what iOS holds, so midna knows the alarm will really ring. See [docs/alarms.md](docs/alarms.md).
 

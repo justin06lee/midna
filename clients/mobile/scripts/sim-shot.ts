@@ -2,7 +2,7 @@
  * A screenshot of the iPhone app in the simulator, against a throwaway midna
  * with a day planned in it (scripts/preview.ts at the repo's root):
  *
- *   bun scripts/sim-shot.ts [--build [--clean]] [--tab today] [--tomorrow approved] [--dark] [out.png]
+ *   bun scripts/sim-shot.ts [--build [--clean]] [--tab today|money|vault] [--tomorrow approved] [--dark] [out.png]
  *
  * --build makes a Release build for the simulator first (prebuild, pods,
  * xcodebuild; Screen Time left out as in TestFlight builds), into
